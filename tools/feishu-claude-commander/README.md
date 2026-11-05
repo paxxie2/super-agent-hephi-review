@@ -101,19 +101,31 @@ kill -TERM <pid>
 
 ## 网页操作与成功判定
 
-`bridge.py` 用参数数组调用（不拼 shell）：
+`bridge.py` 用官方 `codex app-server --stdio` 替换旧的 `codex exec`，参数数组调用（不拼 shell）：
 
 ```text
-codex --no-daemon --ask-for-approval never --sandbox read-only exec
-      --skip-git-repo-check --json --model gpt-6-astra
-      -c model_reasoning_effort="low"
+codex app-server --stdio --startup-client-info <自有 clientInfo>
       --disable shell_tool --disable unified_exec
-      --output-schema operator-schema.json -
 ```
 
-不传 `--ignore-user-config`，以便现有插件正常加载。子进程环境只继承非秘密变量，并显式去掉
-`BROWSER_USE_ACCESS_*`、`CODEX_THREAD_ID`、`CODEX_SESSION_ID`。
+每条消息启动一个独立 app-server 进程；子进程使用 `operator_env` 最小环境白名单，显式排除
+`CODEX_*`、`BROWSER_USE_ACCESS_*` 等继承身份。流程是 JSON-RPC
+`initialize`/`initialized` → `thread/start` → `turn/start`，并使用自有的
+`claude-feishu-commander` originator/threadSource，不冒充桌面端。`thread/start` 必须返回
+`approvalPolicy=on-request`、`sandbox=read-only`、自有 originator/threadSource；核对通过后才发送
+`turn/start`，并在 rollout `turn_context` 再核对本 turn 的 `approval_policy=on-request` 与
+`read-only`。`turn/start` 的 `outputSchema` 直接使用 `operator-schema.json` 对象。
 
+只接受自己发出的请求 ID；任何带 id 的未知 server request（审批、elicitation、attestation、
+permissions、未知方法）都记录原请求并立即停止，**不自动答复、不自动批准**。`turn/completed`
+必须属于本 thread/turn，状态必须为 `completed` 且无错误；中断/失败、无工具轨迹、模型自述、
+超时、进程退出都按失败处理。app-server stdout 的原始协议保存为 `.protocol.jsonl`，转换后的
+Codex-style 轨迹保存为 `.jsonl`，同时保留 `.prompt` 和 `.stderr`。
+
+所有非 `cua_repl/js` 的执行型 item 都保留并交给原白名单验证拒绝：`commandExecution`、
+`webSearch`、`fileChange`、`dynamicToolCall`、`collabAgentToolCall`、`imageGeneration`、
+`imageView`、`subAgentActivity`、`functionCallOutput` 等；如果这些动作在 `item/started` 就出现，
+也会立即失败，不能因缺少 completed 而被静默抹掉。只忽略显式纯状态/用户消息/推理类 item。
 操作员流程只允许 `cua_repl` 的 `js` 工具：在目标页面取**输入前完整快照**、一次性 `setValue`
 原文并取输入后完整快照、点击一次发送并取提交后完整快照、用完整快照轮询到
 `Claude finished the response` 再取完成后完整快照。完整快照使用
@@ -195,9 +207,11 @@ python3 -m py_compile tools/feishu-claude-commander/bridge.py \
 重启不重发、目标页面基线与 `/new` 新会话、快速完成、长正文中段、完整快照/diff 拒绝、多行代码
 缩进/下划线/链接/标题无正文、操作员拒绝自答/旧回复/跨主机/跨话题/流式未完/工具错误/非 cua 工具/
 伪造 Computer Use 元数据、分段文本与幂等键、CLI 结构化错误、回读 sender/关系/时间/完整正文、
-单进程文件锁。历史 AX 轨迹解析回归使用 `independent-cua-roundtrip.jsonl` 的结构片段（URL 已脱敏），
-只验证真实节点/正文格式，不是 E2E 或验收证据。所有外部传输和网页轨迹均为假数据或历史轨迹解析
-回归，不能替代真实验收。
+单进程文件锁；以及 **假 app-server 传输** 的正常协议、on-request/read-only 校验、identity、
+预期/未知请求 ID、审批请求、进程退出、超时、失败/中断 turn、缺失/错误完成事件、工具错误映射、
+禁止的 completed/started 执行 item、完整证据映射。历史 AX 轨迹解析回归使用
+`independent-cua-roundtrip.jsonl` 的结构片段（URL 已脱敏），只验证真实节点/正文格式，不是 E2E
+或验收证据。所有外部传输和网页轨迹均为假数据或历史轨迹解析回归，不能替代真实验收。
 
 ## 已知边界
 
@@ -210,3 +224,9 @@ python3 -m py_compile tools/feishu-claude-commander/bridge.py \
   截图的独立验收。
 - 若 Web 端不支持 `getAXState({disableDiffing: true})` 或完整快照无法取得，桥接会按 uncertain 失败，
   不会用 diff、标题摘要或猜测的增量状态放行。
+- app-server `thread/start`/`turn/start` 属本版本实验性接口；升级 Codex 后必须复核协议与字段。
+- `on-request` 只保证已测试的只读 `cua.getApp`；后续输入/点击/发送若产生 approval server request，
+  桥接会记录请求并停止为 uncertain，不自动批准；此时无人值守要求不成立。
+- 真实 launchd 环境只读前置已由主助手验证，但产品完整收发链仍需部署后从新飞书消息独立验收。
+- `.protocol.jsonl`、转换后的 `.jsonl` 和 `.prompt` 含用户正文与页面轨迹，只留在私有状态目录；
+  不要把 app-server 原始协议或 AX 内容提交到仓库。

@@ -19,6 +19,7 @@ import hashlib
 import json
 import logging
 import os
+import queue
 import re
 import shutil
 import signal
@@ -43,6 +44,28 @@ READY_MARKER = "[event] ready event_key=im.message.receive_v1"
 DEFAULT_REPLY_BYTES = 20000
 MAX_MESSAGE_CHARS = 20000
 OPERATOR_TIMEOUT = 900
+APP_SERVER_CLIENT_NAME = "claude-feishu-commander"
+APP_SERVER_CLIENT_TITLE = "Claude Feishu bridge"
+APP_SERVER_CLIENT_VERSION = "0.1"
+APP_SERVER_CLIENT_INFO = {
+    "name": APP_SERVER_CLIENT_NAME,
+    "title": APP_SERVER_CLIENT_TITLE,
+    "version": APP_SERVER_CLIENT_VERSION,
+}
+APP_SERVER_INIT_TIMEOUT = 60
+APP_SERVER_THREAD_TIMEOUT = 90
+APP_SERVER_TURN_TIMEOUT = 800
+APP_SERVER_FORBIDDEN_ITEM_TYPES = {
+    "commandExecution": "command_execution",
+    "fileChange": "file_change",
+    "webSearch": "web_search",
+    "dynamicToolCall": "dynamic_tool_call",
+    "collabAgentToolCall": "collab_agent_tool_call",
+    "imageGeneration": "image_generation",
+    "imageView": "image_view",
+    "subAgentActivity": "sub_agent_activity",
+    "functionCallOutput": "function_call_output",
+}
 
 REQUIRED_SETTINGS = ("app_id", "bot_id", "owner_id", "chat_id", "config_dir", "state_dir")
 
@@ -1097,6 +1120,12 @@ def parse_trace(stdout: str) -> Trace:
             "web_search",
             "file_change",
             "computer_use_call",
+            "dynamic_tool_call",
+            "collab_agent_tool_call",
+            "image_generation",
+            "image_view",
+            "sub_agent_activity",
+            "function_call_output",
         ):
             untrusted.append(str(item_type))
     return Trace(calls, agent_messages, untrusted, completed, thread_id, fatal)
@@ -1387,78 +1416,590 @@ def assess_operator_output(
     }
 
 
-class Operator:
-    """Run one Codex Computer Use operation for one Feishu message."""
+class StdioChannel:
+    """Line-delimited JSON app-server channel over a child process."""
 
-    def __init__(self, settings: Settings, execute: Optional[Any] = None):
+    def __init__(self, settings: Settings):
         self.settings = settings
-        self.schema_path = Path(__file__).with_name("operator-schema.json")
-        self._execute_override = execute
-        self._proc_lock = threading.Lock()
-        self._proc: Optional[subprocess.Popen[str]] = None
-        self.timeout = OPERATOR_TIMEOUT
+        self.proc: Optional[subprocess.Popen[str]] = None
+        self.queue: "queue.Queue[Any]" = queue.Queue()
+        self.stderr_lines: List[str] = []
+        self._threads: List[threading.Thread] = []
+        self._closed = False
 
-    def terminate(self) -> None:
-        with self._proc_lock:
-            proc = self._proc
-        if proc is not None and proc.poll() is None:
-            proc.terminate()
-
-    def _args(self) -> List[str]:
-        args = [
-            self.settings.codex,
-            "--no-daemon",
-            "--ask-for-approval",
-            "never",
-            "--sandbox",
-            "read-only",
-            "exec",
-            "--skip-git-repo-check",
-            "--json",
-            "--model",
-            "gpt-6-astra",
-            "-c",
-            'model_reasoning_effort="low"',
-            "--disable",
-            "shell_tool",
-            "--disable",
-            "unified_exec",
-            "--output-schema",
-            str(self.schema_path),
-            "-",
-        ]
-        return args
-
-    def _execute(self, args: List[str], prompt: str) -> Tuple[str, str, int]:
-        proc = subprocess.Popen(
-            args,
+    def start(self) -> None:
+        if self.proc is not None:
+            raise OperatorError("app-server channel already started")
+        ensure_private_dir(self.settings.state_dir / "work")
+        self.proc = subprocess.Popen(
+            app_server_args(self.settings),
             cwd=str(self.settings.state_dir / "work"),
             env=operator_env(self.settings),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            bufsize=1,
         )
-        with self._proc_lock:
-            self._proc = proc
+        self._threads = [
+            threading.Thread(target=self._pump_stdout, name="app-server-stdout", daemon=True),
+            threading.Thread(target=self._pump_stderr, name="app-server-stderr", daemon=True),
+        ]
+        for thread in self._threads:
+            thread.start()
+
+    def _pump_stdout(self) -> None:
+        assert self.proc is not None and self.proc.stdout is not None
         try:
-            stdout, stderr = proc.communicate(prompt, timeout=self.timeout)
-            return stdout, stderr, proc.returncode
-        except subprocess.TimeoutExpired:
-            proc.terminate()
-            try:
-                stdout, stderr = proc.communicate(timeout=15)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                stdout, stderr = proc.communicate()
-            raise OperatorError(
-                f"operator timed out after {self.timeout}s; page state unknown",
-                stdout=stdout or "",
-                stderr=stderr or "",
-            ) from None
+            for line in self.proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    message = json.loads(line)
+                except ValueError:
+                    self.queue.put({"__invalid__": line})
+                    continue
+                self.queue.put(message)
         finally:
-            with self._proc_lock:
-                self._proc = None
+            self.queue.put(None)
+
+    def _pump_stderr(self) -> None:
+        assert self.proc is not None and self.proc.stderr is not None
+        for line in self.proc.stderr:
+            self.stderr_lines.append(line.rstrip())
+
+    def send(self, message: Mapping[str, Any]) -> None:
+        proc = self.proc
+        if proc is None or proc.poll() is not None or proc.stdin is None:
+            raise EOFError("app-server process is not running")
+        try:
+            proc.stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
+            proc.stdin.flush()
+        except (BrokenPipeError, OSError) as error:
+            raise EOFError(f"app-server stdin closed: {error}") from None
+
+    def receive(self, timeout: float) -> Dict[str, Any]:
+        try:
+            message = self.queue.get(timeout=max(0.05, timeout))
+        except queue.Empty:
+            raise TimeoutError("app-server did not emit a message in time") from None
+        if message is None:
+            raise EOFError("app-server stdout closed")
+        if not isinstance(message, dict):
+            raise OperatorError("app-server emitted a non-object JSON message")
+        return message
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        proc = self.proc
+        if proc is not None:
+            try:
+                if proc.stdin is not None:
+                    proc.stdin.close()
+            except OSError:
+                pass
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        pass
+        for thread in self._threads:
+            thread.join(timeout=5)
+
+    @property
+    def stderr(self) -> str:
+        return "\n".join(self.stderr_lines)
+
+
+def app_server_args(settings: Settings) -> List[str]:
+    return [
+        settings.codex,
+        "app-server",
+        "--stdio",
+        "--startup-client-info",
+        json.dumps(APP_SERVER_CLIENT_INFO, ensure_ascii=False),
+        "--disable",
+        "shell_tool",
+        "--disable",
+        "unified_exec",
+    ]
+
+
+@dataclass
+class AppServerTurnResult:
+    returncode: int
+    error: Optional[str]
+    raw_protocol: str
+    transformed_trace: str
+    stderr: str
+    thread_id: Optional[str] = None
+    turn_id: Optional[str] = None
+    thread_path: Optional[str] = None
+
+
+class AppServerClient:
+    """Official app-server stdio client with strict on-request/read-only checks."""
+
+    def __init__(
+        self,
+        settings: Settings,
+        channel: Optional[Any] = None,
+        timeout: int = OPERATOR_TIMEOUT,
+    ):
+        self.settings = settings
+        self.channel = channel if channel is not None else StdioChannel(settings)
+        self.timeout = timeout
+        self.raw_events: List[Dict[str, Any]] = []
+        self.server_requests: List[Dict[str, Any]] = []
+        self.error: Optional[str] = None
+        self.thread_id: Optional[str] = None
+        self.turn_id: Optional[str] = None
+        self.thread_path: Optional[str] = None
+        self.thread_approval: Optional[str] = None
+        self.thread_sandbox: Optional[str] = None
+        self.tool_items: List[Dict[str, Any]] = []
+        self.agent_items: List[Dict[str, Any]] = []
+        self.action_items: List[Dict[str, Any]] = []
+        self._seen_item_ids: set = set()
+        self._item_counter = 0
+        self._closed = False
+
+    # -- channel plumbing --------------------------------------------------
+
+    def _record(self, direction: str, message: Mapping[str, Any]) -> None:
+        self.raw_events.append({"direction": direction, **dict(message)})
+
+    def _send(self, message: Mapping[str, Any]) -> None:
+        self._record("client->server", message)
+        self.channel.send(message)
+
+    def _receive_until(self, deadline: float) -> Dict[str, Any]:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("app-server operation timed out")
+        message = self.channel.receive(remaining)
+        if "__invalid__" in message:
+            raise OperatorError("app-server emitted non-JSON stdout")
+        self._record("server->client", message)
+        return message
+
+    @staticmethod
+    def _request_id_ok(message: Mapping[str, Any], expected_id: int) -> bool:
+        return message.get("id") == expected_id
+
+    def _wait_response(self, expected_id: int, timeout: float, label: str) -> Optional[Any]:
+        deadline = time.monotonic() + timeout
+        try:
+            while True:
+                message = self._receive_until(deadline)
+                if "id" in message and "method" in message:
+                    self.server_requests.append(message)
+                    self.error = f"unexpected server request during {label}: {message.get('method')}"
+                    return None
+                if "id" in message and ("result" in message or "error" in message):
+                    if not self._request_id_ok(message, expected_id):
+                        self.error = (
+                            f"unexpected response id during {label}: {message.get('id')}"
+                        )
+                        return None
+                    if "error" in message:
+                        self.error = f"{label} failed: {json.dumps(message['error'], ensure_ascii=False)[:800]}"
+                        return None
+                    return message.get("result")
+                if "method" in message:
+                    if message.get("method") == "error":
+                        self.error = f"app-server error notification during {label}: {json.dumps(message.get('params'), ensure_ascii=False)[:800]}"
+                        return None
+                    continue
+        except TimeoutError:
+            self.error = f"app-server {label} timed out"
+            return None
+        except EOFError:
+            self.error = f"app-server exited during {label}"
+            return None
+        except OperatorError as error:
+            self.error = str(error)
+            return None
+
+    def _request(
+        self,
+        request_id: int,
+        method: str,
+        params: Mapping[str, Any],
+        timeout: float,
+    ) -> Optional[Any]:
+        self._send({"id": request_id, "method": method, "params": dict(params)})
+        return self._wait_response(request_id, timeout, method)
+
+    # -- params ------------------------------------------------------------
+
+    def thread_start_params(self) -> Dict[str, Any]:
+        return {
+            "model": "gpt-6-astra",
+            "cwd": str(self.settings.state_dir / "work"),
+            "approvalPolicy": "on-request",
+            "sandbox": "read-only",
+            "threadSource": APP_SERVER_CLIENT_NAME,
+            "sessionStartSource": "startup",
+        }
+
+    def turn_start_params(self, prompt: str, schema: Any) -> Dict[str, Any]:
+        return {
+            "threadId": self.thread_id,
+            "input": [
+                {"type": "text", "text": prompt, "text_elements": []}
+            ],
+            "approvalPolicy": "on-request",
+            "sandboxPolicy": {"type": "readOnly", "networkAccess": False},
+            "model": "gpt-6-astra",
+            "effort": "low",
+            "outputSchema": schema,
+        }
+
+    # -- protocol flow -----------------------------------------------------
+
+    def _initialize(self) -> bool:
+        result = self._request(
+            1,
+            "initialize",
+            {
+                "clientInfo": APP_SERVER_CLIENT_INFO,
+                "capabilities": {
+                    "experimentalApi": False,
+                    "requestAttestation": False,
+                    "mcpServerOpenaiFormElicitation": False,
+                    "extensions": None,
+                    "optOutNotificationMethods": None,
+                },
+            },
+            APP_SERVER_INIT_TIMEOUT,
+        )
+        if self.error is not None:
+            return False
+        if not isinstance(result, dict):
+            self.error = "initialize returned no object"
+            return False
+        self._send({"method": "initialized"})
+        return True
+
+    def _verify_thread(self, result: Any) -> None:
+        if not isinstance(result, dict):
+            self.error = "thread/start returned no object"
+            return
+        thread = result.get("thread") if isinstance(result.get("thread"), dict) else {}
+        self.thread_id = thread.get("id") if isinstance(thread.get("id"), str) else None
+        self.thread_path = thread.get("path") if isinstance(thread.get("path"), str) else None
+        self.thread_approval = result.get("approvalPolicy")
+        sandbox = result.get("sandbox") if isinstance(result.get("sandbox"), dict) else {}
+        self.thread_sandbox = sandbox.get("type") if isinstance(sandbox.get("type"), str) else None
+        if not self.thread_id:
+            self.error = "thread/start returned no thread id"
+            return
+        if self.thread_approval != "on-request":
+            self.error = f"thread/start approvalPolicy is {self.thread_approval!r}, expected on-request"
+            return
+        if self.thread_sandbox not in ("readOnly", "read-only"):
+            self.error = f"thread/start sandbox is {self.thread_sandbox!r}, expected read-only"
+            return
+        if thread.get("originator") != APP_SERVER_CLIENT_NAME:
+            self.error = (
+                "thread/start originator is not the independent client identity: "
+                + repr(thread.get("originator"))
+            )
+            return
+        if thread.get("threadSource") != APP_SERVER_CLIENT_NAME:
+            self.error = (
+                "thread/start threadSource is not the independent client identity: "
+                + repr(thread.get("threadSource"))
+            )
+            return
+        if not self.thread_path:
+            self.error = "thread/start returned no rollout path"
+            return
+
+    def _start_thread(self) -> bool:
+        result = self._request(
+            2,
+            "thread/start",
+            self.thread_start_params(),
+            APP_SERVER_THREAD_TIMEOUT,
+        )
+        if self.error is not None:
+            return False
+        self._verify_thread(result)
+        return self.error is None
+
+    def _start_turn(self, prompt: str, schema: Any) -> bool:
+        if self.thread_id is None:
+            self.error = "cannot start turn without a thread id"
+            return False
+        result = self._request(
+            3,
+            "turn/start",
+            self.turn_start_params(prompt, schema),
+            APP_SERVER_THREAD_TIMEOUT,
+        )
+        if self.error is not None:
+            return False
+        turn = result.get("turn") if isinstance(result, dict) and isinstance(result.get("turn"), dict) else {}
+        self.turn_id = turn.get("id") if isinstance(turn.get("id"), str) else None
+        if not self.turn_id:
+            self.error = "turn/start returned no turn id"
+            return False
+        return True
+
+    def _add_item(self, item: Any) -> None:
+        if not isinstance(item, dict):
+            return
+        item_id = item.get("id")
+        if isinstance(item_id, str):
+            if item_id in self._seen_item_ids:
+                return
+            self._seen_item_ids.add(item_id)
+        else:
+            self._item_counter += 1
+            item_id = f"item_{self._item_counter}"
+        item_type = item.get("type")
+        if item_type in APP_SERVER_FORBIDDEN_ITEM_TYPES:
+            self.action_items.append(
+                {
+                    "id": item_id,
+                    "type": APP_SERVER_FORBIDDEN_ITEM_TYPES[item_type],
+                }
+            )
+            return
+        if item_type == "mcpToolCall":
+            result = item.get("result") if isinstance(item.get("result"), dict) else None
+            raw_error = item.get("error")
+            if isinstance(raw_error, dict) and isinstance(raw_error.get("message"), str):
+                error = raw_error["message"]
+            elif isinstance(raw_error, str):
+                error = raw_error
+            else:
+                error = None
+            self.tool_items.append(
+                {
+                    "id": item_id,
+                    "type": "mcp_tool_call",
+                    "server": item.get("server") if isinstance(item.get("server"), str) else "",
+                    "tool": item.get("tool") if isinstance(item.get("tool"), str) else "",
+                    "status": item.get("status") if isinstance(item.get("status"), str) else "",
+                    "arguments": item.get("arguments") if isinstance(item.get("arguments"), dict) else {},
+                    "result": result,
+                    "error": error,
+                }
+            )
+        elif item_type == "agentMessage":
+            text = item.get("text")
+            if isinstance(text, str):
+                self.agent_items.append(
+                    {"id": item_id, "type": "agent_message", "text": text}
+                )
+
+    def _wait_turn(self) -> None:
+        deadline = time.monotonic() + APP_SERVER_TURN_TIMEOUT
+        try:
+            while True:
+                message = self._receive_until(deadline)
+                if "id" in message and "method" in message:
+                    self.server_requests.append(message)
+                    self.error = f"unexpected server request during turn: {message.get('method')}"
+                    return
+                if "id" in message and ("result" in message or "error" in message):
+                    self.error = f"unexpected response id during turn: {message.get('id')}"
+                    return
+                method = message.get("method")
+                params = message.get("params") if isinstance(message.get("params"), dict) else {}
+                if method == "turn/completed":
+                    turn = params.get("turn") if isinstance(params.get("turn"), dict) else {}
+                    if params.get("threadId") != self.thread_id or turn.get("id") != self.turn_id:
+                        continue
+                    if turn.get("status") != "completed" or turn.get("error") is not None:
+                        self.error = (
+                            "turn did not complete successfully: "
+                            f"status={turn.get('status')!r} error={turn.get('error')!r}"
+                        )
+                        return
+                    for item in turn.get("items") or []:
+                        self._add_item(item)
+                    return
+                if method == "item/completed":
+                    if params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id:
+                        self._add_item(params.get("item"))
+                    continue
+                if method == "item/started":
+                    if params.get("threadId") == self.thread_id and params.get("turnId") == self.turn_id:
+                        item = params.get("item") if isinstance(params.get("item"), dict) else {}
+                        item_type = item.get("type")
+                        if item_type in APP_SERVER_FORBIDDEN_ITEM_TYPES:
+                            self.error = f"forbidden {item_type} item started"
+                            return
+                        if item_type == "mcpToolCall" and (
+                            item.get("server") != "cua_repl" or item.get("tool") != "js"
+                        ):
+                            self.error = (
+                                "forbidden MCP tool started: "
+                                f"{item.get('server')!r}/{item.get('tool')!r}"
+                            )
+                            return
+                    continue
+                if method == "error":
+                    self.error = "app-server error notification during turn: " + json.dumps(
+                        params, ensure_ascii=False
+                    )[:800]
+                    return
+                # Other notifications are recorded and ignored; only the
+                # matching turn/completed can finish the operation.
+        except TimeoutError:
+            self.error = "app-server turn timed out"
+        except EOFError:
+            self.error = "app-server exited before turn completion"
+        except OperatorError as error:
+            self.error = str(error)
+
+    def _verify_rollout(self) -> None:
+        if not self.thread_path or not self.turn_id:
+            self.error = "cannot verify rollout without thread path and turn id"
+            return
+        path = Path(self.thread_path)
+        for _ in range(20):
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                time.sleep(0.2)
+                continue
+            for line in lines:
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                if event.get("type") != "turn_context":
+                    continue
+                payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+                if payload.get("turn_id") != self.turn_id:
+                    continue
+                approval = payload.get("approval_policy")
+                sandbox = payload.get("sandbox_policy")
+                sandbox_type = sandbox.get("type") if isinstance(sandbox, dict) else None
+                if approval != "on-request":
+                    self.error = f"rollout turn_context approval_policy is {approval!r}"
+                    return
+                if sandbox_type not in ("read-only", "readOnly"):
+                    self.error = f"rollout turn_context sandbox_policy is {sandbox_type!r}"
+                    return
+                return
+            time.sleep(0.2)
+        self.error = "rollout turn_context for this turn was not found"
+
+    def run_turn(self, prompt: str, schema: Any) -> AppServerTurnResult:
+        self.raw_events = []
+        self.server_requests = []
+        self.tool_items = []
+        self.agent_items = []
+        self.action_items = []
+        self._seen_item_ids = set()
+        self._item_counter = 0
+        self.error = None
+        self.thread_id = None
+        self.turn_id = None
+        self.thread_path = None
+        try:
+            self.channel.start()
+            if self._initialize() and self._start_thread() and self._start_turn(prompt, schema):
+                self._wait_turn()
+                if self.error is None:
+                    self._verify_rollout()
+        except OperatorError as error:
+            self.error = str(error)
+        except Exception as error:  # noqa: BLE001 - reported as a failed operator
+            self.error = f"app-server operator failed: {error}"
+        finally:
+            try:
+                self.channel.close()
+            except Exception:
+                pass
+        raw_protocol = "\n".join(
+            json.dumps(event, ensure_ascii=False) for event in self.raw_events
+        )
+        transformed: List[Dict[str, Any]] = []
+        if self.thread_id:
+            transformed.append({"type": "thread.started", "thread_id": self.thread_id})
+        for item in self.action_items:
+            transformed.append({"type": "item.completed", "item": item})
+        for item in self.tool_items:
+            transformed.append({"type": "item.completed", "item": item})
+        for item in self.agent_items:
+            transformed.append({"type": "item.completed", "item": item})
+        if self.error is None:
+            transformed.append({"type": "turn.completed", "usage": {}})
+        else:
+            transformed.append({"type": "turn.failed", "error": self.error})
+        return AppServerTurnResult(
+            returncode=0 if self.error is None else 1,
+            error=self.error,
+            raw_protocol=raw_protocol,
+            transformed_trace="\n".join(
+                json.dumps(event, ensure_ascii=False) for event in transformed
+            ),
+            stderr=self.channel.stderr,
+            thread_id=self.thread_id,
+            turn_id=self.turn_id,
+            thread_path=self.thread_path,
+        )
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self.channel.close()
+        except Exception:
+            pass
+
+
+class Operator:
+    """Run one Codex app-server Computer Use operation for one message."""
+
+    def __init__(self, settings: Settings, client_factory: Optional[Any] = None):
+        self.settings = settings
+        self.schema_path = Path(__file__).with_name("operator-schema.json")
+        self._client_factory = client_factory
+        self._client_lock = threading.Lock()
+        self._client: Optional[AppServerClient] = None
+        self.timeout = OPERATOR_TIMEOUT
+
+    def terminate(self) -> None:
+        with self._client_lock:
+            client = self._client
+        if client is not None:
+            terminate = getattr(client, "terminate", None)
+            if callable(terminate):
+                terminate()
+            else:
+                close = getattr(client, "close", None)
+                if callable(close):
+                    close()
+
+    def _load_schema(self) -> Any:
+        try:
+            return json.loads(self.schema_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise OperatorError(f"cannot load operator schema: {error}") from None
+
+    def _app_server_args(self) -> List[str]:
+        return app_server_args(self.settings)
+
+    @staticmethod
+    def _client_info() -> Dict[str, Any]:
+        return dict(APP_SERVER_CLIENT_INFO)
 
     def operate(
         self,
@@ -1468,37 +2009,48 @@ class Operator:
     ) -> Dict[str, Any]:
         content = message["content"]
         prompt = build_operator_prompt(content, saved_url)
+        schema = self._load_schema()
         requests_dir = self.settings.state_dir / "requests"
         ensure_private_dir(requests_dir)
         ensure_private_dir(self.settings.state_dir / "work")
         stem = hashlib.sha256(str(message["id"]).encode("utf-8")).hexdigest()[:24]
         trace = requests_dir / (stem + "-operate")
-        stdout = stderr = ""
-        returncode = -1
         LOG.info(
-            "operator_start message=%s bound=%s model=gpt-6-astra",
+            "operator_start message=%s bound=%s model=gpt-6-astra transport=app-server",
             message["id"],
             saved_url or "NEW",
         )
+        client = self._client_factory() if self._client_factory is not None else AppServerClient(self.settings)
+        with self._client_lock:
+            self._client = client
         try:
-            if self._execute_override is not None:
-                stdout, stderr, returncode = self._execute_override(prompt)
-            else:
-                stdout, stderr, returncode = self._execute(self._args(), prompt)
-        except OperatorError as error:
-            stdout = error.stdout
-            stderr = error.stderr
-            self._write_trace(trace, prompt, stdout, stderr)
-            LOG.warning("operator_end message=%s status=error error=%s", message["id"], error)
-            raise
-        except OSError as error:
-            raise OperatorError(f"cannot start Codex operator: {error}") from None
-        self._write_trace(trace, prompt, stdout, stderr)
+            result = client.run_turn(prompt, schema)
+        except Exception as error:  # noqa: BLE001 - a failed operator is uncertain
+            result = AppServerTurnResult(
+                returncode=1,
+                error=f"app-server operator failed: {error}",
+                raw_protocol=getattr(client, "raw_protocol", ""),
+                transformed_trace=getattr(client, "transformed_trace", ""),
+                stderr=getattr(client, "stderr", ""),
+            )
+        finally:
+            with self._client_lock:
+                self._client = None
+            close = getattr(client, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+        self._write_trace(trace, prompt, result.raw_protocol, result.transformed_trace, result.stderr)
+        if result.error:
+            LOG.warning("operator_end message=%s status=error error=%s", message["id"], result.error)
+            raise OperatorError(result.error, stderr=result.stderr)
         try:
-            result = assess_operator_output(
-                stdout,
-                stderr,
-                returncode,
+            assessed = assess_operator_output(
+                result.transformed_trace,
+                result.stderr,
+                result.returncode,
                 content,
                 saved_url=saved_url,
                 used_urls=used_urls,
@@ -1507,19 +2059,27 @@ class Operator:
             LOG.warning("operator_end message=%s status=rejected error=%s", message["id"], error)
             raise
         LOG.info(
-            "operator_end message=%s status=%s thread=%s url=%s trace=%s",
+            "operator_end message=%s status=%s thread=%s turn=%s url=%s trace=%s",
             message["id"],
-            result["status"],
-            result.get("thread_id"),
-            result.get("chat_url"),
+            assessed["status"],
+            result.thread_id,
+            result.turn_id,
+            assessed.get("chat_url"),
             trace.with_suffix(".jsonl"),
         )
-        return result
+        return assessed
 
     @staticmethod
-    def _write_trace(trace: Path, prompt: str, stdout: str, stderr: str) -> None:
+    def _write_trace(
+        trace: Path,
+        prompt: str,
+        raw_protocol: str,
+        transformed_trace: str,
+        stderr: str,
+    ) -> None:
         trace.with_suffix(".prompt").write_text(prompt, encoding="utf-8")
-        trace.with_suffix(".jsonl").write_text(stdout, encoding="utf-8")
+        trace.with_suffix(".protocol.jsonl").write_text(raw_protocol, encoding="utf-8")
+        trace.with_suffix(".jsonl").write_text(transformed_trace, encoding="utf-8")
         trace.with_suffix(".stderr").write_text(stderr, encoding="utf-8")
 
 
