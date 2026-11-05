@@ -7,7 +7,7 @@
 - [`ROADMAP-95.md`](ROADMAP-95.md)：评分提升路线（修订版）：统一评分表和一票否决条件（按新表初评约 26 分）、已核实的缺陷，以及能力可靠性、效果评估、能力增强三条工作线。
 - [`ROADMAP-95-PREREQUISITES.md`](ROADMAP-95-PREREQUISITES.md)：实施上述路线之前必须具备的前置条件、两个关口和分组的出口清单。
 - [`hephi/`](hephi/)：改造后的插件。第一个相关提交是快照 `8e68ec2` 的原样导入，之后的提交就是全部改动。
-- [`eval/ab-metrics.mjs`](eval/ab-metrics.mjs)：开、关赫菲对照实验的指标计算脚本。其中的“无关重构”仍按格式化和重命名估算，待按 `ROADMAP-95.md` 的 B6 改为只提取机械指标，无关改动改由盲评判定。
+- [`eval/ab-metrics.mjs`](eval/ab-metrics.mjs)：开、关赫菲对照实验的**描述性**测量与汇总脚本。它只从 Git 提取机械指标并计算各分组均值，不判断插件是否有效，也不把格式化、重命名等同于无关重构。
 - [`probes/`](probes/)：改造前用于证明缺口的探针测试，需放进原始快照中运行（见 `REPORT.md` 第 8 节）。
 
 ## 运行
@@ -27,6 +27,20 @@ node eval/ab-metrics.mjs runs.json
 ```
 
 `runs.json` 的格式写在脚本开头的注释里。
+
+- `expectedFiles` 必须来自按需求审定的合法范围，不能用参考修复的文件列表代替。
+- `hiddenPass` / `hiddenPassRate` 只表示配置的隐藏测试命令是否运行成功，不代表功能完整实现、真实交付或非劣效成立。
+- `humanDriftScore` 是输入提供的人工值，脚本不自行推导。
+
+输出与兼容影响：脚本输出 `{ rows, arms }`。本轮删除了行级 `formatOnlyFiles`、`renames`，组汇总 `unrelatedRefactor`，以及整个结论段 `verdict`（含 `outsideLinesDrop`、`unrelatedRefactorDrop`、`completionHeld`、`effective`）。仍读取这些旧字段的消费者需要同步调整；本仓库内没有其他代码引用该脚本的输出。`PLAN.md` 第 6 节中的“无关重构”和“判定结果”属于历史方案描述，本轮已从脚本移除，以本 README 和脚本为准。
+
+回归测试：
+
+```bash
+node --test eval/ab-metrics.test.mjs
+```
+
+本轮只实施了 `ROADMAP-95.md` 中 B6 方向的最小部分：删除按格式化和重命名估算的伪语义指标，并停止自动输出效果判定。完整的 B6 统计方案（配对比较、置信区间、非劣效检验、盲评无关改动判定等）尚未实现；夹具测试只验证程序行为，不证明赫菲插件效果，也不构成真实业务端到端验收。
 
 ## main 分支审查入口与版本边界
 
