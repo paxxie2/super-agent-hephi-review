@@ -8,8 +8,6 @@ export type CheckRunRecord = {
   checkId: string; sessionId: string; callId: string; innerCallId: string;
   /** Native background Job id, persisted before waiting for its terminal state. */
   jobId?: string;
-  /** Acceptance proof: HEAD run uses innerCallId/exitCode, base run these fields. */
-  acceptanceId?: string; baseInnerCallId?: string; baseExitCode?: number | null; proofFiles?: string[];
   argv: string[]; cwd: string; startedAt: string; finishedAt?: string;
   status: 'running' | 'passed' | 'blocked' | 'unknown'; exitCode: number | null;
   before: RepositoryFingerprint; after?: RepositoryFingerprint;

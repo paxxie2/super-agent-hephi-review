@@ -1,4 +1,4 @@
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool, type PreToolDecision, type ToolExecution } from '@deepseek-ai/dsh-tools'
 import { runCheck, type CheckTools, type NativeJobs } from './check-runner.js'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Context } from '@deepseek-ai/cordis'
@@ -7,6 +7,7 @@ import { loadKnowledgeBases } from '../kb/index.js'
 import { activationIntentPath, activationIntentPresentSync, activationPath, defaultStateDir, executionModeOf, loadActivation, loadActivationSync, migrateActivationIntentSync, type ActivationContract, type ExecutionMode } from './activation.js'
 import { createReadyGate, type ReadyVerifier } from './ready-gate.js'
 import { inScope } from './discipline.js'
+import { checkoutRelative, resolveWorkspace } from './workspace.js'
 import { DELEGATION_TOOLS, MODIFYING_TOOLS } from './stage-control.js'
 import { installStageControl, type StageAgents, type StageJobs, type StageSessionQuery, type StageSubagents } from './stage-mount.js'
 
@@ -28,10 +29,10 @@ export function hephiTaskPrompt(contract: ActivationContract | undefined): strin
   if (!task) return ''
   const lines = [
     `HEPHI task goal (frozen; do not reinterpret or extend): ${task.goal}`,
-    ...task.acceptance.map(a => `- ${a.id}: ${a.text} | may change: ${a.paths.join(', ')} | prove with hephi_check("${a.id}")`),
+    ...task.acceptance.map(a => `- ${a.id}: ${a.text} | may change: ${a.paths.join(', ')} | prove with hephi_check("${a.check}")`),
     ...(task.outOfScope.length ? [`Explicitly out of scope: ${task.outOfScope.join('; ')}`] : []),
-    `Change budget: at most ${task.budget.maxFiles} files and ${task.budget.maxChangedLines} changed lines.${task.allowRenames ? '' : ' No renames or moves.'}${task.allowFormatOnly ? '' : ' No formatting-only edits.'} Do not delete existing tests.`,
-    'Change only what an acceptance item needs. If an item cannot be met within these paths and budget, report blocked with the reason instead of widening the change.',
+    ...(task.budget ? [`Change budget requested by the Issue: ${[task.budget.maxFiles && `at most ${task.budget.maxFiles} files`, task.budget.maxChangedLines && `at most ${task.budget.maxChangedLines} changed lines`].filter(Boolean).join(', ')}.`] : []),
+    'Do not delete existing tests. Change only what an acceptance item needs; if an item cannot be met within these paths, report blocked with the reason instead of widening the change.',
   ]
   return lines.join('\n')
 }
@@ -156,20 +157,8 @@ export function mountWorkerGate(
     if (checking && (MODIFYING_TOOLS.has(e.name) || DELEGATION_TOOLS.has(e.name) || e.name === 'hephi_check'
       || (e.name === 'orchestrator_report' && (e.arguments as { state?: string })?.state === 'ready'))) return 'HEPHI synchronous check is running'
   })
-  // Early feedback for direct file edits; shell writes are caught by the check and ready gates.
-  const removeScopeGuard = agent.ctx.tools.guard(e => {
-    if (!mountedContract || (e.name !== 'write' && e.name !== 'edit')) return undefined
-    const path = editedPath(e.arguments)
-    if (!path) return undefined
-    const root = mountedContract.workspace.replace(/\/+$/, '')
-    const nested = path.startsWith('/') ? path.startsWith(`${root}/`) ? path.slice(root.length + 1) : undefined : path
-    if (nested === undefined) return undefined
-    const candidates = [nested, nested.split('/').slice(1).join('/')].filter(Boolean)
-    if (candidates.some(candidate => inScope(mountedContract!, candidate))) return undefined
-    return `HEPHI task scope does not include ${nested}; change only files an acceptance item needs, or report blocked`
-  })
   const removeCheck = agent.ctx.tools.register(defineTool({
-    name: 'hephi_check', description: 'Run a frozen check by checkId, or prove an acceptance item by its id (passes on HEAD, fails on base), before ready.',
+    name: 'hephi_check', description: 'Run a frozen required check by checkId before ready.',
     parameters: { checkId: { type: 'string', required: true } },
     output: { schema: { type: 'json' as const }, render: (_a, value) => [{ type: 'text' as const, text: JSON.stringify(value) }] },
     execute: async (args, execution) => {
@@ -189,7 +178,27 @@ export function mountWorkerGate(
       ? stages.verify(() => options.verify!(contract, execution), execution.signal, execution.token)
       : options.verify!(contract, execution) : undefined,
   })
-  const removePreExecute = agent.ctx.on('tools/pre-execute', gate.preExecute, { prepend: true })
+  // Early feedback for direct file edits; shell writes and unreadable tool paths are caught by the check and ready gates.
+  const scopeProblem = async (execution: ToolExecution): Promise<string | undefined> => {
+    if (!mountedContract || (execution.name !== 'write' && execution.name !== 'edit')) return undefined
+    const path = editedPath(execution.arguments)
+    if (!path) return undefined
+    let file: string | undefined
+    try {
+      const sessionCwd = agent.session.header.cwd
+      const checkout = await resolveWorkspace(mountedContract.workspace, sessionCwd)
+      file = await checkoutRelative(checkout, sessionCwd ?? checkout, path)
+    } catch (error) {
+      return `HEPHI cannot resolve the Worker checkout: ${error instanceof Error ? error.message : String(error)}`
+    }
+    if (file === undefined) return `HEPHI denies ${path}: it is outside the Worker checkout`
+    if (!inScope(mountedContract, file)) return `HEPHI task scope does not include ${file}; change only files an acceptance item needs, or report blocked`
+    return undefined
+  }
+  const removePreExecute = agent.ctx.on('tools/pre-execute', async (execution: ToolExecution, next: () => Promise<PreToolDecision>) => {
+    const problem = await scopeProblem(execution)
+    return problem ? { kind: 'deny' as const, reason: problem } : gate.preExecute(execution, next)
+  }, { prepend: true })
   const removeGuard = agent.ctx.tools.guard(gate.guard)
   // A contract or mode change must not leave an admitted native/staged window.
   const removeBinding = agent.ctx.tools.guard(execution => {
@@ -214,7 +223,6 @@ export function mountWorkerGate(
       removePrompt()
       removeCheck()
       removeCheckGuard()
-      removeScopeGuard()
       gate.dispose()
       stages?.dispose()
     },

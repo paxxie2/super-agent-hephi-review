@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { readdir, realpath } from 'node:fs/promises'
 import { promisify } from 'node:util'
-import { join } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 const exec = promisify(execFile)
 
@@ -46,4 +46,28 @@ export async function resolveWorkspace(directory: string, sessionCwd?: string): 
     }
   }
   return checkout
+}
+
+/**
+ * Map a tool path onto the actual checkout. Relative paths resolve against the
+ * Session cwd (or the contract workspace); symlinks are resolved through the
+ * nearest existing ancestor. Returns undefined for anything outside the checkout.
+ */
+export async function checkoutRelative(checkout: string, base: string, path: string): Promise<string | undefined> {
+  let target = resolve(base, path)
+  const missing: string[] = []
+  for (;;) {
+    try {
+      target = await realpath(target)
+      break
+    } catch {
+      const parent = dirname(target)
+      if (parent === target) return undefined
+      missing.unshift(basename(target))
+      target = parent
+    }
+  }
+  const rel = relative(await realpath(checkout), join(target, ...missing))
+  if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return undefined
+  return rel.split(sep).join('/')
 }

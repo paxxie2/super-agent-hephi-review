@@ -151,25 +151,19 @@ export function activationIntentPath(stateDir: string, ticketId: string): string
   return join(stateDir, 'hephi', safeTicketId(ticketId), 'activation.intent')
 }
 
-/** Frozen acceptance tests live beside the contract, outside the Worker checkout. */
-export function frozenTestDir(stateDir: string, ticketId: string): string {
-  return join(stateDir, 'hephi', safeTicketId(ticketId), 'frozen')
-}
-
-function taskOf(env: NodeJS.ProcessEnv, verification: VerificationConfig): { card?: TaskCard; files?: Map<string, { content: string }> } {
+function taskOf(env: NodeJS.ProcessEnv, verification: VerificationConfig): TaskCard | undefined {
   const body = env.HEPHI_ISSUE_BODY
-  const issueTask = body === undefined ? undefined : parseIssueTask(body)
-  if (!issueTask) {
+  const card = body === undefined ? undefined : parseIssueTask(body)
+  if (!card) {
     if (boolean(env.HEPHI_REQUIRE_TASK, false)) throw new Error('Issue body must contain a hephi-task block when HEPHI_REQUIRE_TASK=1')
-    return {}
+    return undefined
   }
-  const checks = new Set(verification.checks.map(check => check.id))
-  const requireFrozen = boolean(env.HEPHI_REQUIRE_FROZEN_TEST, false)
-  for (const item of issueTask.card.acceptance) {
-    if (!checks.has(item.check)) throw new Error(`acceptance ${item.id} refers to unknown check ${item.check}`)
-    if (requireFrozen && !item.frozen.length) throw new Error(`acceptance ${item.id} needs a hephi-test block when HEPHI_REQUIRE_FROZEN_TEST=1`)
+  for (const item of card.acceptance) {
+    const check = verification.checks.find(c => c.id === item.check)
+    if (!check) throw new Error(`acceptance ${item.id} refers to unknown check ${item.check}`)
+    if (check.kind !== 'test') throw new Error(`acceptance ${item.id} must name a behaviour test check, not ${check.kind} check ${check.id}`)
   }
-  return { card: issueTask.card, files: issueTask.frozenFiles }
+  return card
 }
 
 /**
@@ -220,13 +214,6 @@ export async function prepareActivation(env: NodeJS.ProcessEnv = process.env): P
   }
   const verification = await loadVerificationFromEnv(env)
   const task = taskOf(env, verification)
-  if (task.files) {
-    const root = frozenTestDir(stateDir, ticketId)
-    for (const [path, file] of task.files) {
-      await mkdir(dirname(join(root, path)), { recursive: true })
-      await writeFile(join(root, path), file.content)
-    }
-  }
   const base: Omit<ActivationContract, 'contractHash'> = {
     enabled: true,
     ticketId,
@@ -239,7 +226,7 @@ export async function prepareActivation(env: NodeJS.ProcessEnv = process.env): P
     requirePullRequest: boolean(env.HEPHI_REQUIRE_PULL_REQUEST, false),
     executionMode,
     verification,
-    ...(task.card ? { task: task.card } : {}),
+    ...(task ? { task } : {}),
   }
   const contract: ActivationContract = { ...base, contractHash: contractHash(base) }
   const filePath = activationPath(stateDir, ticketId)

@@ -49,23 +49,20 @@
   "goal": "total() 返回两数之和",
   "outOfScope": ["定价规则", "模块结构调整"],
   "acceptance": [
-    { "id": "AC1", "text": "total(2, 3) 为 5", "check": "tests",
-      "paths": ["src/price.js", "tests/price*"], "tests": ["tests/price*"] }
-  ],
-  "budget": { "maxFiles": 3, "maxChangedLines": 40 }
+    { "id": "AC1", "text": "total(2, 3) 为 5", "check": "price",
+      "paths": ["src/price.js", "tests/price*"] }
+  ]
 }
-```
-
-```hephi-test AC1 tests/hephi/AC1.test.sh
-node -e "process.exit(require('./src/price.js').total(2, 3) === 5 ? 0 : 1)"
 ```
 ````
 
-- 合同哈希覆盖整张任务卡；`hephi-test` 块是冻结验收测试，存放在 Worker 检出目录之外，按内容哈希校验。
-- 改动文件必须同时落在 `HEPHI_ALLOWED_PATHS` 和某个验收项的 `paths` 内；直接 `write`/`edit` 越界会被当场拒绝。
-- ready 时检查改动预算、重命名、纯格式化改动和已有测试的删除（`protect`，默认覆盖常见测试路径）。`allowRenames`、`allowFormatOnly` 可显式放开。
-- `hephi_check("AC1")` 在两个临时 worktree 里运行该项的检查：HEAD 加冻结测试必须通过，base 加冻结测试和 Worker 的匹配测试必须失败。依赖目录（如 `node_modules`）通过检查配置的 `proofLinks` 链接进去。
-- ready 时每条证据都必须能在宿主 Session 事件中找到对应的原生 bash 调用（`HEPHI_REQUIRE_SESSION_BINDING=0` 可关闭，仅用于宿主核对事件格式期间）。XML 解析器、强制反向验证和项目专用报告转换器已删除。检查命令不再接受 `parser`、`reportPaths`、`targetTests`、`expect` 字段；已有此类配置必须明确修订后创建新任务，不能静默忽略。
+- 合同哈希覆盖整张任务卡。目标、非目标和各验收项每轮都在 Worker 系统提示中。
+- 每个验收项指向一个已冻结的项目行为检查（`kind: "test"`；构建检查不能作为验收）。ready 要求所有 required 检查和验收项引用的检查都在当前 HEAD 上通过；多个验收项引用同一检查时只运行、核验一次。HEPHI 不在 base 上重跑检查，复现或行为保持由项目检查本身表达。
+- 改动文件必须同时落在 `HEPHI_ALLOWED_PATHS` 和某个验收项的 `paths` 内。直接 `write`/`edit` 的路径按实际检出目录解析（相对路径以 Session cwd 为基准，符号链接解析到真实位置），越界当场拒绝；shell 写入和读不到路径的调用由检查和 ready 时的最终 diff 兜底。
+- ready 拒绝删除已有测试（`protect`，默认覆盖常见测试路径）。`budget`（`maxFiles`、`maxChangedLines`）只在 Issue 作者写明时生效。这些都是机械限制，不能识别允许路径内的语义漂移。
+- 检查目录不存在等确定未启动的失败记为 `blocked`（原因以 `check not started:` 开头），修正后可重试，历史保留；可能仍在运行的执行记为 `unknown`，保持关闭，需人工处理。
+- `HEPHI_REQUIRE_SESSION_BINDING=1` 时，ready 要求每条证据在当前 Worker Session（不含继承事件）中有且仅有一个同 callId 的 `bash` 调用，命令和目录与记录一致，且有一个非错误的结果；结果带退出码时必须与记录一致。默认关闭：内部检查调用在真实宿主 Session 中的事件结构尚未核实。
+- 检查命令不接受 `parser`、`reportPaths`、`targetTests`、`expect` 字段；任务卡不接受 `hephi-test` 块；已有此类配置必须明确修订后创建新任务，不能静默忽略。
 
 ## 开发和验收
 

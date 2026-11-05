@@ -30,7 +30,6 @@ fi
 
 export HEPHI_ENABLED=1 HEPHI_REQUIRE_PULL_REQUEST=1 HEPHI_ISSUE_TITLE HEPHI_ISSUE_BODY
 export HEPHI_REQUIRE_TASK=${HEPHI_REQUIRE_TASK:-1}
-export HEPHI_REQUIRE_FROZEN_TEST=${HEPHI_REQUIRE_FROZEN_TEST:-1}
 export HEPHI_BASE_REF=$base_ref HEPHI_BASE_COMMIT=$base_sha
 plugin_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 exec node "$plugin_dir/lib/cli.mjs" prepare
