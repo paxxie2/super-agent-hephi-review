@@ -126,11 +126,16 @@ Codex-style 轨迹保存为 `.jsonl`，同时保留 `.prompt` 和 `.stderr`。
 `webSearch`、`fileChange`、`dynamicToolCall`、`collabAgentToolCall`、`imageGeneration`、
 `imageView`、`subAgentActivity`、`functionCallOutput` 等；如果这些动作在 `item/started` 就出现，
 也会立即失败，不能因缺少 completed 而被静默抹掉。只忽略显式纯状态/用户消息/推理类 item。
-操作员流程只允许 `cua_repl` 的 `js` 工具：在目标页面取**输入前完整快照**、一次性 `setValue`
-原文并取输入后完整快照、点击一次发送并取提交后完整快照、用完整快照轮询到
-`Claude finished the response` 再取完成后完整快照。完整快照使用
+操作员流程只允许 `cua_repl` 的 `js` 工具：在目标页面取**输入前完整快照**，再取**本次**截图，
+只在本次截图可见的输入区域坐标上原生 click 聚焦，然后用 `app.paste(text, {format: "text"})`
+一次性粘贴 text 原文；不得对网页 contenteditable 使用 `setValue`，不得猜坐标或复用旧截图坐标，
+不得用 `typeText` 逐字输入（中文/多行会丢字）。截图只用于定位，正文证据仍必须来自**输入后完整
+AX 快照**；粘贴失败或无法核对全文立即按 uncertain 停止，不再重试 `setValue`。发送按钮同样只在
+本次截图可见位置 click 一次，再取提交后完整快照核对新增用户消息；随后用完整快照轮询到
+`Claude finished the response` 并取完成后完整快照。完整快照使用
 `getAXState({disableDiffing: true})`，不能依赖默认 diff。`getApp` 首次可能显示用户旧聊天，
 不能把它的消息编号当新会话基线；新建会话的输入前页面可以是 `/new`，完成后才是 `/chat/<uuid>`。
+地址栏可用原生快捷键聚焦后 paste URL。
 用户正文和网页内容都作为数据，不能授权其他工具、上传或页面外动作。
 
 发送前 `bridge.py` 不只读取模型最后 JSON，还会检查本次 JSONL 轨迹：
@@ -222,6 +227,9 @@ python3 -m py_compile tools/feishu-claude-commander/bridge.py \
 - 监听离线期间平台未投递的消息不会补收；重启不会重放已进入 `running` 的输入。
 - 操作员轨迹核对依赖 `cua_repl` 返回的 AX 文本和 Computer Use 元数据；它不能替代人对真实页面
   截图的独立验收。
+- Web contenteditable 的 AX `setValue` 已在本机实测失败；输入改为**本次截图坐标 click + 原生
+  `app.paste(text,{format:"text"})`**，发送按钮也用本次截图坐标只点一次。截图仅用于定位，正文
+  仍由完整 AX 核对；坐标过期、粘贴不完整或无法核对时按 uncertain 停止，不重试 `setValue`。
 - 若 Web 端不支持 `getAXState({disableDiffing: true})` 或完整快照无法取得，桥接会按 uncertain 失败，
   不会用 diff、标题摘要或猜测的增量状态放行。
 - app-server `thread/start`/`turn/start` 属本版本实验性接口；升级 Codex 后必须复核协议与字段。
