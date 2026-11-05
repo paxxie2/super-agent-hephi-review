@@ -809,11 +809,13 @@ AX_HEADER_PREFIXES = (
     "Completion summary received.",
     "## ",
 )
-AX_DIFF_MARKER = "diff from the previous accessibility tree"
+AX_DIFF_MARKER = "the following is a diff from the previous accessibility tree"
 
 
 def _is_ax_diff(text: str) -> bool:
-    return AX_DIFF_MARKER in (text or "").lower()
+    # The tool prefixes diff results with this header.  Do not classify a full
+    # snapshot as a diff just because an answer happens to mention the phrase.
+    return (text or "").lstrip().lower().startswith(AX_DIFF_MARKER)
 
 
 def _strip_diff_marker(line: str) -> str:
