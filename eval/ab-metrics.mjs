@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-// Score A/B delivery runs from their Git results.
+// Measure and summarize A/B delivery runs from their Git results.
+//
+// This is a descriptive measurement tool: it reports mechanical metrics and
+// per-arm means, and never emits an effectiveness verdict.
 //
 //   node eval/ab-metrics.mjs eval/runs.json
 //
@@ -30,9 +33,6 @@ export function measure(run, task) {
     lines.set(file, added === '-' ? 1 : Number(added) + Number(removed))
   }
   const deleted = git(run.repo, 'diff', '--name-only', '--no-renames', '--diff-filter=D', ...range).split('\n').filter(Boolean)
-  const renames = git(run.repo, 'diff', '--name-status', '-M', ...range).split('\n').filter(row => /^[RC]/.test(row)).length
-  const formatOnly = files.filter(file => !deleted.includes(file)
-    && !git(run.repo, 'diff', '--no-renames', '-w', '--ignore-blank-lines', ...range, '--', file).trim())
   const outside = files.filter(file => !matches(file, task.expectedFiles))
   const totalLines = [...lines.values()].reduce((a, b) => a + b, 0)
   const outsideLines = outside.reduce((sum, file) => sum + (lines.get(file) ?? 0), 0)
@@ -49,7 +49,7 @@ export function measure(run, task) {
   return {
     task: run.task, arm: run.arm, files: files.length, lines: totalLines,
     outsideFiles: outside.length, outsideLines, outsideShare: totalLines ? outsideLines / totalLines : 0,
-    formatOnlyFiles: formatOnly.length, renames, deletedTests: deleted.filter(file => matches(file, TEST)).length,
+    deletedTests: deleted.filter(file => matches(file, TEST)).length,
     hiddenPass, minutes: run.minutes ?? null, tokens: run.tokens ?? null, readyDenials: run.readyDenials ?? null,
     humanDriftScore: run.humanDriftScore ?? null,
   }
@@ -65,27 +65,13 @@ export function summarize(rows) {
       runs: r.length,
       outsideLines: mean(r.map(x => x.outsideLines)),
       outsideShare: mean(r.map(x => x.outsideShare)),
-      unrelatedRefactor: mean(r.map(x => x.formatOnlyFiles + x.renames)),
       deletedTests: mean(r.map(x => x.deletedTests)),
       hiddenPassRate: mean(r.map(x => x.hiddenPass === null ? null : Number(x.hiddenPass))),
       humanDriftScore: mean(r.map(x => x.humanDriftScore)),
       minutes: mean(r.map(x => x.minutes)), tokens: mean(r.map(x => x.tokens)), readyDenials: mean(r.map(x => x.readyDenials)),
     }
   }
-  const off = arms.off
-  const verdict = {}
-  for (const [arm, s] of Object.entries(arms)) {
-    if (arm === 'off' || !off) continue
-    const drop = (a, b) => (a === null || b === null || a === 0) ? null : (a - b) / a
-    const outsideDrop = drop(off.outsideLines, s.outsideLines)
-    const refactorDrop = drop(off.unrelatedRefactor, s.unrelatedRefactor)
-    const completionHeld = off.hiddenPassRate === null || s.hiddenPassRate === null ? null : s.hiddenPassRate >= off.hiddenPassRate - 0.05
-    verdict[arm] = {
-      outsideLinesDrop: outsideDrop, unrelatedRefactorDrop: refactorDrop, completionHeld,
-      effective: outsideDrop !== null && outsideDrop >= 0.3 && (refactorDrop === null || refactorDrop >= 0.3) && completionHeld === true,
-    }
-  }
-  return { arms, verdict }
+  return { arms }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
