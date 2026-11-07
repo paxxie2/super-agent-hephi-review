@@ -1,6 +1,6 @@
 # 发布流水线 S1–S7（ROADMAP-95 §3.2）
 
-状态（2026-11-08）：S1 脚本已实现；下文保留早期 `73d2862` 的 dry-run/skip-check 失败与限制记录。PR40 在 `0c0b7ac` 记录 545 tests、281 假宿主断言、41 effects-db 检查通过，不能替代真实验收。
+状态（2026-11-08）：S1 脚本已实现；下文保留早期 `73d2862` 的 dry-run/skip-check 结果与限制记录。PR40 在 `0c0b7ac` 记录 545 tests、281 假宿主断言、41 effects-db 检查通过，不能替代真实验收。
 当前 main `bc21caca316d6032ebcc3d2bc6387c38e0a3579c` 已部署成功，activation=`verified`，previous=`e490fe34`，部署结束保持暂停；当前版本 A2/A5 完整真实验收仍待执行。
 本轮部署保留了首次缺 peer-root、错误目标导致激活缺失/回滚失败及最终修正目标后的成功记录；不能描述为一次无失败通过。原日志 `/tmp/deploy-bc21cac.log` 及其后续编号日志需与最终部署记录一起核对。
 部署原件：`/Users/zm/dsh-instances/experiment/logs/deploy-20261107T181639Z-43593.json`（2026-11-07 18:16:39Z / 北京时间 11-08 02:16:39）。
