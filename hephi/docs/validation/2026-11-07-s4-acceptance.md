@@ -11,7 +11,7 @@
 | 项 | 值 |
 | --- | --- |
 | main（代码） | **`bc21caca316d6032ebcc3d2bc6387c38e0a3579c`**（包含 PR37、PR38 F1、PR33、PR39、PR40 F2–F5、PR41 记录更新） |
-| 历史验收时点 | 证据采集于旧 main `9fa8598f2beabe179b28733e484275c3775279d3`（PR30 merge `2c603c6` + PR31 docs）；本次 rebase 未重跑验收 |
+| 历史验收时点 | 证据采集于旧 main `9fa8598f2beabe179b28733e484275c3775279d3`（PR30 merge `2c603c6` + PR31 docs）；当前候选的 A2/A5 复验另记 |
 | 当前部署构建 | `bc21caca316d6032ebcc3d2bc6387c38e0a3579c`（部署记录的双入口 activation verified，PID 44914；新任务 `pluginCommit` 交叉核对及 A2/A5 仍待补验） |
 | 历史 E2E 构建 | `e490fe34dfd13117db2516d9b9c7cb0459c1d219`（历史 activation markers PID 95240；以下已执行 E2E 不自动变为当前候选证据） |
 | 当前部署记录 | `deploy-20261107T181639Z-43593.json`，sha256 `bb2dd8b6d6c9dd240d30df261afe06c5ef949c0d8488854b22d3ab0f45dc69b5`；`result=ok`、`activation=verified`、`keptPaused=yes` |
@@ -68,7 +68,7 @@ H1 pass(path-B)、H2 fail、H3 pass（disposable profile）、H4 pass、H5 pass�
 - 真实 A2 H1–H6 未在生产实载构建上复跑（生产快照 check record pluginCommit=efdd406）。
 - 真实 supervisor 自动重启行为、非零 effect 等待、运行期网络隔离。
 - C3 review→Trigger、C4.2 真实工具可见性、C1 真实 E2E。
-- E5/E9；E1-off 的干净 off 环境。E1-on 仅等价清理（未验证真实缺陷修复类型）；E-PR1 依赖同一 run。
+- E5/E9；E1-off 的干净 off 环境。E1-on 仅等价清理（未验证真实缺陷修复类型）；E-PR1 依赖同一 run，仅证明首次 PR 创建→ready 成功，未证明“无 PR 时先 ready 拒绝”的负向步骤。
 - F1/F2–F5 已合并整改；当前 `bc21caca` 已部署，但本文件未收录其完整 S1 报告及 A2/A5 复验。F3 仍要求 peer 路径稳定。
 - B 线实验（B5/B7/B8）未开始。
 

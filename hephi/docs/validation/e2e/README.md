@@ -161,7 +161,7 @@
 - **记录路径**：`e2e/<date>-E4.md`（写入 `hephi/docs/validation/e2e/`）。
 ### E5｜检查执行中宿主中断（A3 前后两段）— **BLOCKED**
 
-- **前置**：A3 已合并（`resolutions.jsonl` + runner 跳过 + `hephi resolve`）；**真实宿主中断/停机探针 H0、
+- **前置**：A3 已合并（`resolutions.jsonl` + runner 跳过 + `hephi resolve`）；**真实宿主停机探针 H0、
   SQLite 停读 H7 已有历史证据（见 `docs/deployment-prerequisite-decisions-2026-11-07.md`），但 A3 可信操作者边界及当前候选真实恢复验证仍未完成**。
 - **执行顺序**：检查执行中让宿主中断/连接断开 → 记录遗留 `running`/`unknown` → ready 拒绝 →
   操作者用 `hephi resolve` 解除 → 重新检查 → 核对旧记录不变。
