@@ -19,7 +19,17 @@ export type NativeJobView = {
   detail?: string
 }
 
-type NativeJobRead = { chunks: readonly { at: number; text: string }[]; lossy: boolean }
+type NativeJobRead = {
+  chunks: readonly { at: number; text: string; gapBefore?: true }[]
+  lossy: boolean
+  /** UTF-8 byte offset to resume from; absent on host surfaces without incremental reads. */
+  next?: number
+}
+
+/** One native Job lifecycle or output event; collection reads only the identity and the ring total. */
+export type NativeJobEvent =
+  | { type: 'registered' | 'progress' | 'stopping' | 'removed' | 'settled'; job: { id?: string; owner?: string; status?: string; detail?: string } }
+  | { type: 'output'; id?: string; owner?: string; total?: number }
 
 /** Host-provided `ctx.jobs` surface; only the operations a check needs. */
 export type NativeJobs = {
@@ -27,6 +37,8 @@ export type NativeJobs = {
   wait(id: string, timeoutMs: number, caller?: string, signal?: AbortSignal): Promise<NativeJobView>
   readAt(id: string, from: number, caller?: string): NativeJobRead
   kill(id: string, caller?: string, reason?: string): 'requested' | 'already-finished'
+  /** Optional event stream; a host without it keeps the end-of-run read and its lossy refusal. */
+  events?: { subscribe(filter: { owner: string }, listener: (event: NativeJobEvent) => void): () => void }
 }
 
 const JOB_WAIT_MS = 30_000
@@ -93,6 +105,142 @@ async function readJobOutput(jobs: NativeJobs, jobId: string, sessionId: string)
   }
   if (read.lossy) throw new Error('native Job output was lost before it could be read')
   return read.chunks.map(chunk => chunk.text).join('')
+}
+
+/** One subscribed Job's byte cursor and every byte collected since its registration. */
+type JobCollector = { readonly id: string; cursor: number; output: string; error?: string }
+
+const isByteOffset = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+
+/** Keep a chunk's tail from a byte offset; an offset inside a UTF-8 sequence is malformed. */
+function chunkTail(text: string, from: number): string {
+  const bytes = Buffer.from(text, 'utf8')
+  const part = bytes.subarray(from)
+  const tail = part.toString('utf8')
+  if (!Buffer.from(tail, 'utf8').equals(part)) throw new Error('chunk is not cut on a UTF-8 boundary')
+  return tail
+}
+
+/**
+ * Drain one Job strictly from its own byte cursor. Every read must be a
+ * lossless, gap-free, byte-addressed continuation; a host may return a whole
+ * retained chunk whose `at` precedes the cursor, so only the unread tail is
+ * appended. Failures stay on the Job and never escape to the event registry.
+ */
+function drainJobOutput(jobs: NativeJobs, sessionId: string, collector: JobCollector): void {
+  if (collector.error !== undefined) return
+  let read: NativeJobRead
+  try {
+    read = jobs.readAt(collector.id, collector.cursor, sessionId)
+  } catch (error) {
+    collector.error = `native Job output read failed: ${error instanceof Error ? error.message : String(error)}`
+    return
+  }
+  if (!read || typeof read.lossy !== 'boolean' || !Array.isArray(read.chunks)) {
+    collector.error = 'native Job output read returned an unknown structure'
+    return
+  }
+  const next = read.next
+  if (!isByteOffset(next) || next < collector.cursor) {
+    collector.error = 'native Job output read did not advance a byte cursor'
+    return
+  }
+  if (read.lossy) {
+    collector.error = 'native Job output was lost before it could be collected'
+    return
+  }
+  let cursor = collector.cursor
+  const pieces: string[] = []
+  for (const chunk of read.chunks) {
+    if (!chunk || !isByteOffset(chunk.at) || typeof chunk.text !== 'string' || chunk.gapBefore !== undefined) {
+      collector.error = 'native Job output returned an unknown or discontinuous chunk'
+      return
+    }
+    const end = chunk.at + Buffer.byteLength(chunk.text, 'utf8')
+    if (end <= cursor) continue
+    if (chunk.at > cursor) {
+      collector.error = `native Job output skipped bytes before offset ${chunk.at}`
+      return
+    }
+    try {
+      pieces.push(chunkTail(chunk.text, cursor - chunk.at))
+    } catch (error) {
+      collector.error = `native Job output chunk is malformed: ${error instanceof Error ? error.message : String(error)}`
+      return
+    }
+    cursor = end
+  }
+  if (cursor !== next) {
+    collector.error = cursor < next
+      ? 'native Job output did not cover the advertised byte cursor'
+      : 'native Job output overran the advertised byte cursor'
+    return
+  }
+  collector.output += pieces.join('')
+  collector.cursor = next
+}
+
+/** Live subscription over this Session's newly registered Jobs, kept for one native call. */
+type JobCollection = {
+  /** The Job the native call actually returned; collectors for every other Job are dropped. */
+  take(id: string): JobCollector | undefined
+  /** A collection-level failure (the event stream itself is unusable), if any. */
+  failure(): string | undefined
+  dispose(): void
+}
+
+/**
+ * Subscribe before the native call starts so no registration or output event can
+ * be missed. The owner filter also delivers unowned Jobs, which are explicitly
+ * excluded; a Job is collected only when its owner is exactly this Session.
+ */
+function startJobCollection(jobs: NativeJobs | undefined, sessionId: string): JobCollection | undefined {
+  const events = jobs?.events
+  if (jobs === undefined || events === undefined) return undefined
+  const registry = jobs
+  const collectors = new Map<string, JobCollector>()
+  let selected: JobCollector | undefined
+  let failure: string | undefined
+  const onEvent = (raw: NativeJobEvent) => {
+    let collector: JobCollector | undefined
+    try {
+      const event = raw as NativeJobEvent | null | undefined
+      if (!event || typeof event !== 'object') return
+      const id = event.type === 'output' ? event.id : event.job?.id
+      const owner = event.type === 'output' ? event.owner : event.job?.owner
+      if (typeof id !== 'string' || owner !== sessionId) return
+      // After selection, other Job ids are ignored before any collector is
+      // created: a later registration must never become a second collection.
+      if (selected !== undefined && selected.id !== id) return
+      collector = collectors.get(id)
+      if (collector === undefined) {
+        if (event.type !== 'registered') return
+        collector = { id, cursor: 0, output: '' }
+        collectors.set(id, collector)
+      }
+      if (event.type === 'registered' || event.type === 'output' || event.type === 'settled') drainJobOutput(registry, sessionId, collector)
+    } catch (error) {
+      if (collector !== undefined && collector.error === undefined) {
+        collector.error = `native Job output collection failed: ${error instanceof Error ? error.message : String(error)}`
+      }
+    }
+  }
+  let unsubscribe: (() => void) | undefined
+  try {
+    unsubscribe = events.subscribe({ owner: sessionId }, onEvent)
+  } catch (error) {
+    failure = `native Job output events could not be subscribed: ${error instanceof Error ? error.message : String(error)}`
+  }
+  return {
+    take(id) {
+      selected = collectors.get(id)
+      for (const key of [...collectors.keys()]) if (key !== id) collectors.delete(key)
+      return selected
+    },
+    failure: () => failure,
+    dispose: () => { unsubscribe?.() },
+  }
 }
 
 /** Confirm that a killed Job reached a terminal status, using the remaining budget. */
@@ -193,6 +341,7 @@ export async function runCheck(options: {
   }
   record.cwd = cwd
   await saveRun(stateDir, record)
+  const collection = startJobCollection(options.jobs, record.sessionId)
   let terminal = false
   try {
     options.internal?.(innerCallId)
@@ -226,11 +375,20 @@ export async function runCheck(options: {
       const jobs = options.jobs
       if (!jobs) throw new Error('native bash returned a background Job but the host Job registry is unavailable')
       const sessionId = record.sessionId
+      // The Job the native call really returned selects its own collector; every
+      // other collector is dropped without touching its Job. A host without the
+      // event surface keeps the original end-of-run read below.
+      const collector = collection?.take(jobId)
+      if (collector !== undefined) drainJobOutput(jobs, sessionId, collector)
+      const uncollected = collection !== undefined && collector === undefined
+        ? collection.failure() ?? `native Job ${jobId} was not observed in its Session's output events`
+        : undefined
       let view: NativeJobView | undefined
       let timedOut = false
       let waitError: string | undefined
       while (true) {
         if (outer.signal.aborted) break
+        if (uncollected !== undefined || collector?.error !== undefined) break
         const remaining = deadline - Date.now()
         if (remaining <= 0) { timedOut = true; break }
         try {
@@ -254,23 +412,42 @@ export async function runCheck(options: {
           throw new Error(`native Job ${jobId} could not be stopped: ${error instanceof Error ? error.message : String(error)}`)
         }
         view = await confirmTerminal(jobs, jobId, sessionId, JOB_CONFIRM_MS)
-        const stopReason = timedOut
-          ? `check exceeded its contract deadline of ${check.timeoutMs}ms`
-          : waitError !== undefined ? `native Job wait failed: ${waitError}` : 'check was cancelled'
+        const stopReason = uncollected
+          ?? (collector?.error !== undefined
+            ? `native Job output collection failed: ${collector.error}`
+            : timedOut
+              ? `check exceeded its contract deadline of ${check.timeoutMs}ms`
+              : waitError !== undefined ? `native Job wait failed: ${waitError}` : 'check was cancelled')
         if (!view) throw new Error(`native Job ${jobId} termination is unconfirmed after ${stopReason}`)
         terminal = true
         record.exitCode = null
-        try {
-          const stoppedOutput = await readJobOutput(jobs, jobId, sessionId)
-          await writeFile(join(dir, 'output.log'), stoppedOutput)
-          record.outputHash = sha256(stoppedOutput)
-        } catch {
-          // A confirmed stopped Job is blocked even when its output is gone.
+        if (collector !== undefined) {
+          // Only a complete collection may become the check output.
+          drainJobOutput(jobs, sessionId, collector)
+          if (collector.error === undefined) {
+            await writeFile(join(dir, 'output.log'), collector.output)
+            record.outputHash = sha256(collector.output)
+          }
+        } else if (collection === undefined) {
+          try {
+            const stoppedOutput = await readJobOutput(jobs, jobId, sessionId)
+            await writeFile(join(dir, 'output.log'), stoppedOutput)
+            record.outputHash = sha256(stoppedOutput)
+          } catch {
+            // A confirmed stopped Job is blocked even when its output is gone.
+          }
         }
         throw new Error(stopReason)
       }
       terminal = true
-      output = await readJobOutput(jobs, jobId, sessionId)
+      if (uncollected !== undefined) throw new Error(uncollected)
+      if (collector !== undefined) {
+        drainJobOutput(jobs, sessionId, collector)
+        if (collector.error !== undefined) throw new Error(`native Job output collection failed: ${collector.error}`)
+        output = collector.output
+      } else {
+        output = await readJobOutput(jobs, jobId, sessionId)
+      }
       if (view.status === 'completed') {
         const code = jobExitCode(view.detail)
         if (code === undefined) jobFailure = `native Job detail is not the documented exit-code form: ${String(view.detail)}`
@@ -301,6 +478,7 @@ export async function runCheck(options: {
     record.status = terminal ? 'blocked' : 'unknown'
     record.reason = error instanceof Error ? error.message : String(error)
   } finally {
+    collection?.dispose()
     options.internal?.()
     record.finishedAt = new Date().toISOString()
     await saveRun(stateDir, record)

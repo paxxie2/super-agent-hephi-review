@@ -7,7 +7,7 @@ import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ActivationContract } from '../../src/control/activation.js'
 import type { VerificationCheck } from '../../src/contracts/checks.js'
-import { runCheck, type NativeJobView, type NativeJobs, type CheckTools } from '../../src/control/check-runner.js'
+import { runCheck, type NativeJobEvent, type NativeJobView, type NativeJobs, type CheckTools } from '../../src/control/check-runner.js'
 import { checkRunDir, readRuns } from '../../src/control/check-store.js'
 import { sha256 } from '../../src/verification/fingerprint.js'
 
@@ -286,5 +286,346 @@ describe('native background check jobs', () => {
     })
     expect(changed.status).toBe('blocked')
     expect(changed.reason).toBe('source changed during check')
+  })
+})
+
+/**
+ * Simulated native Job registry: a bounded output ring that trims on every
+ * append and once more on settlement, plus the synchronous event stream the
+ * real host publishes. The retention simulation lets a test prove the check no
+ * longer depends on re-reading a settled (already-trimmed) ring.
+ */
+type FakeChunk = { at: number; text: string; bytes: number; gapBefore?: true }
+
+type FakeJob = {
+  id: string
+  owner?: string
+  label: string
+  status: 'running' | 'stopping' | 'completed' | 'killed' | 'failed'
+  detail?: string
+  total: number
+  earliest: number
+  retainedBytes: number
+  chunks: FakeChunk[]
+}
+
+class FakeJobs implements NativeJobs {
+  readonly reads: Array<{ id: string; from: number; caller?: string }> = []
+  readonly kills: Array<{ id: string; caller?: string; reason?: string }> = []
+  readonly waitCalls: Array<{ id: string; caller?: string }> = []
+  readonly filters: Array<{ owner: string }> = []
+  disposeCalls = 0
+  waitHook?: (id: string) => void
+  readHook?: (id: string, from: number) => unknown
+  private readonly jobs = new Map<string, FakeJob>()
+  private readonly listeners = new Set<(event: NativeJobEvent) => void>()
+  private readonly session: string
+  private readonly liveCap: number
+  private readonly settledCap: number
+  private readonly wholeChunks: boolean
+  readonly events: { subscribe(filter: { owner: string }, listener: (event: NativeJobEvent) => void): () => void }
+
+  constructor(session: string, options: { liveCap?: number; settledCap?: number; wholeChunks?: boolean } = {}) {
+    this.session = session
+    this.liveCap = options.liveCap ?? 256 * 1024
+    this.settledCap = options.settledCap ?? 16 * 1024
+    this.wholeChunks = options.wholeChunks === true
+    this.events = {
+      subscribe: (filter, listener) => {
+        this.filters.push(filter)
+        this.listeners.add(listener)
+        return () => { this.disposeCalls += 1; this.listeners.delete(listener) }
+      },
+    }
+  }
+
+  register(id: string, owner: string | null = this.session, label = 'HEPHI check', seed = ''): void {
+    const job: FakeJob = {
+      id, ...(owner === null ? {} : { owner }), label, status: 'running', total: 0, earliest: 0, retainedBytes: 0, chunks: [],
+    }
+    this.jobs.set(id, job)
+    // Seeding inside the starter call reaches the ring before the registration commit,
+    // exactly like the host producer's first append.
+    if (seed.length > 0) this.write(job, seed)
+    this.emit({ type: 'registered', job: this.eventJob(job) })
+  }
+
+  append(id: string, text: string): void {
+    const job = this.must(id)
+    if (job.status !== 'running' || text.length === 0) return
+    this.write(job, text)
+    this.emitOutput(job)
+  }
+
+  private write(job: FakeJob, text: string): void {
+    const bytes = Buffer.byteLength(text, 'utf8')
+    job.chunks.push({ at: job.total, text, bytes })
+    job.total += bytes
+    job.retainedBytes += bytes
+    this.trim(job, this.liveCap)
+  }
+
+  settle(id: string, status: 'completed' | 'killed' | 'failed', detail?: string): void {
+    const job = this.must(id)
+    if (job.status === 'completed' || job.status === 'killed' || job.status === 'failed') return
+    job.status = status
+    job.detail = detail
+    this.trim(job, this.settledCap)
+    this.emit({ type: 'settled', job: this.eventJob(job) })
+    this.emitOutput(job)
+  }
+
+  emit(event: NativeJobEvent): void {
+    for (const listener of [...this.listeners]) listener(event)
+  }
+
+  emitOutput(job: FakeJob): void {
+    this.emit({ type: 'output', ...(job.owner === undefined ? {} : { owner: job.owner }), id: job.id, total: job.total })
+  }
+
+  get(id: string, _caller?: string): NativeJobView {
+    const job = this.must(id)
+    return { status: job.status, ...(job.detail === undefined ? {} : { detail: job.detail }) }
+  }
+
+  async wait(id: string, _timeoutMs: number, caller?: string): Promise<NativeJobView> {
+    this.waitCalls.push({ id, caller })
+    this.waitHook?.(id)
+    return this.get(id)
+  }
+
+  readAt(id: string, from: number, caller?: string) {
+    this.reads.push({ id, from, caller })
+    const job = this.must(id)
+    if (this.readHook !== undefined) return this.readHook(id, from) as never
+    const lossy = from < job.earliest
+    if (this.wholeChunks) {
+      const text = job.chunks.map(chunk => chunk.text).join('')
+      return { chunks: text === '' ? [] : [{ at: job.chunks[0]!.at, text }], next: job.total, lossy }
+    }
+    const chunks = job.chunks
+      .filter(chunk => chunk.at + chunk.bytes > from)
+      .map(chunk => ({ at: chunk.at, text: chunk.text, ...(chunk.gapBefore === undefined ? {} : { gapBefore: chunk.gapBefore }) }))
+    return { chunks, next: job.total, lossy }
+  }
+
+  kill(id: string, caller?: string, reason?: string): 'requested' | 'already-finished' {
+    const job = this.must(id)
+    this.kills.push({ id, caller, reason })
+    if (job.status === 'completed' || job.status === 'killed' || job.status === 'failed') return 'already-finished'
+    job.status = 'killed'
+    job.detail = reason
+    this.trim(job, this.settledCap)
+    this.emit({ type: 'settled', job: this.eventJob(job) })
+    this.emitOutput(job)
+    return 'requested'
+  }
+
+  private must(id: string): FakeJob {
+    const job = this.jobs.get(id)
+    if (job === undefined) throw new Error(`unknown Job ${id}`)
+    return job
+  }
+
+  private eventJob(job: FakeJob): { id?: string; owner?: string; status?: string; detail?: string } {
+    return {
+      id: job.id,
+      ...(job.owner === undefined ? {} : { owner: job.owner }),
+      status: job.status,
+      ...(job.detail === undefined ? {} : { detail: job.detail }),
+    }
+  }
+
+  /** Mirror the host ring: evict whole head chunks, and cut one oversized chunk to its UTF-8-safe tail. */
+  private trim(job: FakeJob, cap: number): void {
+    while (job.retainedBytes > cap && job.chunks.length > 1) {
+      const dropped = job.chunks.shift()
+      if (dropped === undefined) break
+      job.retainedBytes -= dropped.bytes
+    }
+    const single = job.chunks.length === 1 ? job.chunks[0] : undefined
+    if (single !== undefined && single.bytes > cap) {
+      const bytes = Buffer.from(single.text, 'utf8')
+      let start = bytes.length - cap
+      while (start < bytes.length && (bytes[start]! & 0xc0) === 0x80) start += 1
+      const tail = bytes.subarray(start)
+      single.at += single.bytes - tail.length
+      single.text = tail.toString('utf8')
+      single.bytes = tail.length
+      single.gapBefore = true
+      job.retainedBytes = tail.length
+    }
+    job.earliest = job.chunks[0]?.at ?? job.total
+  }
+}
+
+const promotedJob = (jobId: string) => ({ kind: 'promoted', jobId, timeoutMs: 1000, output: '' })
+const foregroundOk = (stdout: string) => ({
+  kind: 'foreground', cwd: '.', exitCode: 0, signal: null, timedOut: false, aborted: false, timeoutMs: 5000,
+  stdout: { text: stdout, truncated: false }, stderr: { text: '', truncated: false },
+})
+const toolsThat = (start: () => void, value: Record<string, unknown>): CheckTools => ({
+  execute: async () => { start(); return { isError: false, content: [], value } as never },
+})
+const outputLog = async (stateDir: string, runId: string) =>
+  readFile(join(checkRunDir(stateDir, 'ticket-1', runId), 'output.log'), 'utf8')
+
+describe('incremental native Job output collection', () => {
+  it('collects output while the Job runs even when the settled ring can no longer be read from zero', async () => {
+    const x = await setup()
+    const jobs = new FakeJobs('worker-session', { liveCap: 4096, settledCap: 1024 })
+    const parts = Array.from({ length: 20 }, (_, i) => `chunk-${i}-` + '世界'.repeat(160) + '\n')
+    const tail = 'tail 🚀 done\n'
+    jobs.waitHook = id => { jobs.append(id, tail); jobs.settle(id, 'completed', 'exit code: 0') }
+    const record = await x.execute(toolsThat(() => {
+      // The first chunk is ring seed output committed by the registration event.
+      jobs.register('bash-job', 'worker-session', 'HEPHI build', parts[0])
+      for (const part of parts.slice(1)) jobs.append('bash-job', part)
+    }, promotedJob('bash-job')), jobs)
+    const body = parts.join('') + tail
+    expect(Buffer.byteLength(body, 'utf8')).toBeGreaterThan(16 * 1024)
+    expect(record.status).toBe('passed')
+    expect(record.jobId).toBe('bash-job')
+    expect(record.outputHash).toBe(sha256(body))
+    expect(await outputLog(x.stateDir, record.runId)).toBe(body)
+    expect(jobs.readAt('bash-job', 0).lossy).toBe(true)
+    expect(jobs.filters).toEqual([{ owner: 'worker-session' }])
+    expect(jobs.kills).toEqual([])
+    expect(jobs.disposeCalls).toBe(1)
+  })
+
+  it('collects only the Job the native call returned, never unowned or foreign jobs', async () => {
+    const x = await setup()
+    const jobs = new FakeJobs('worker-session')
+    jobs.waitHook = () => {
+      // A registration after selection must be ignored before a collector exists.
+      jobs.register('job-late', 'worker-session', 'same label')
+      jobs.append('job-late', 'late\n')
+      jobs.append('job-a', 'A late\n')
+      jobs.append('job-b', 'B late\n')
+      jobs.append('job-unowned', 'unowned late\n')
+      jobs.append('job-foreign', 'foreign late\n')
+      jobs.settle('job-b', 'completed', 'exit code: 0')
+    }
+    const record = await x.execute(toolsThat(() => {
+      jobs.register('job-a', 'worker-session', 'same label')
+      jobs.register('job-b', 'worker-session', 'same label')
+      jobs.register('job-unowned', null, 'same label')
+      jobs.register('job-foreign', 'other-session', 'same label')
+      jobs.append('job-a', 'A only\n')
+      jobs.append('job-b', 'B only\n')
+      jobs.append('job-unowned', 'unowned\n')
+      jobs.append('job-foreign', 'foreign\n')
+    }, promotedJob('job-b')), jobs)
+    expect(record.status).toBe('passed')
+    expect(await outputLog(x.stateDir, record.runId)).toBe('B only\nB late\n')
+    expect(jobs.kills).toEqual([])
+  })
+
+  it('tracks a UTF-8 byte cursor across overlapping chunks and empty advances', async () => {
+    const x = await setup()
+    const jobs = new FakeJobs('worker-session', { wholeChunks: true })
+    jobs.waitHook = id => { jobs.append(id, '🚀'); jobs.emit({ type: 'output', id, owner: 'worker-session' }); jobs.settle(id, 'completed', 'exit code: 0') }
+    const record = await x.execute(toolsThat(() => {
+      jobs.register('bash-job')
+      jobs.append('bash-job', '你好')
+      jobs.emit({ type: 'output', id: 'bash-job', owner: 'worker-session' })
+      jobs.append('bash-job', '世界')
+    }, promotedJob('bash-job')), jobs)
+    expect(record.status).toBe('passed')
+    expect(await outputLog(x.stateDir, record.runId)).toBe('你好世界🚀')
+  })
+
+  const unsoundReads: Array<{ name: string; read: (from: number) => unknown }> = [
+    { name: 'a lossy ring', read: from => ({ chunks: [], next: from, lossy: true }) },
+    { name: 'a gap marker', read: from => ({ chunks: [{ at: from, text: 'x', gapBefore: true }], next: from + 1, lossy: false }) },
+    { name: 'a backwards cursor', read: from => ({ chunks: [], next: Math.max(0, from - 1), lossy: false }) },
+    { name: 'an uncovered advance', read: from => ({ chunks: [], next: from + 2, lossy: false }) },
+    { name: 'a chunk gap', read: from => ({ chunks: [{ at: from + 2, text: 'xx' }], next: from + 4, lossy: false }) },
+    { name: 'an unknown structure', read: () => null },
+    { name: 'a fractional cursor', read: from => ({ chunks: [], next: from + 1.5, lossy: false }) },
+    { name: 'a negative chunk offset', read: from => ({ chunks: [{ at: -1, text: 'x' }], next: from + 1, lossy: false }) },
+  ]
+  for (const unsound of unsoundReads) {
+    it(`stops and blocks a Job when incremental collection hits ${unsound.name}`, async () => {
+      const x = await setup()
+      const jobs = new FakeJobs('worker-session')
+      jobs.waitHook = id => jobs.append(id, 'more\n')
+      const record = await x.execute(toolsThat(() => {
+        jobs.register('bash-job')
+        jobs.append('bash-job', 'seed\n')
+        jobs.readHook = (_id, from) => unsound.read(from)
+      }, promotedJob('bash-job')), jobs)
+      expect(record.status).toBe('blocked')
+      expect(record.reason).toContain('native Job output collection failed')
+      expect(record.outputHash).toBeUndefined()
+      expect(jobs.kills).toEqual([{ id: 'bash-job', caller: 'worker-session', reason: 'HEPHI check timeout or cancellation' }])
+    })
+  }
+
+  it('still refuses output lost to a single retention window while the Job is live', async () => {
+    const x = await setup()
+    const jobs = new FakeJobs('worker-session', { liveCap: 64 })
+    jobs.waitHook = id => jobs.append(id, 'x'.repeat(200))
+    const record = await x.execute(toolsThat(() => jobs.register('bash-job'), promotedJob('bash-job')), jobs)
+    expect(record.status).toBe('blocked')
+    expect(record.reason).toContain('output was lost')
+    expect(jobs.kills).toHaveLength(1)
+  })
+
+  it('cleans up events and stops only the returned Job on timeout and abort', async () => {
+    const timedOut = await setup(60)
+    const timeoutJobs = new FakeJobs('worker-session')
+    timeoutJobs.waitHook = () => timeoutJobs.append('other-job', 'other late\n')
+    const timeoutRecord = await timedOut.execute(toolsThat(() => {
+      timeoutJobs.register('bash-job')
+      timeoutJobs.register('other-job')
+      timeoutJobs.append('other-job', 'other output\n')
+    }, promotedJob('bash-job')), timeoutJobs)
+    expect(timeoutRecord.status).toBe('blocked')
+    expect(timeoutRecord.reason).toContain('contract deadline')
+    expect(timeoutJobs.kills).toEqual([{ id: 'bash-job', caller: 'worker-session', reason: 'HEPHI check timeout or cancellation' }])
+    expect(timeoutJobs.get('other-job').status).toBe('running')
+    expect(timeoutJobs.disposeCalls).toBe(1)
+
+    const aborted = await setup()
+    const abortJobs = new FakeJobs('worker-session')
+    const controller = new AbortController()
+    abortJobs.waitHook = () => controller.abort()
+    const abortRecord = await aborted.execute(toolsThat(() => {
+      abortJobs.register('bash-job')
+      abortJobs.register('other-job')
+    }, promotedJob('bash-job')), abortJobs, controller.signal)
+    expect(abortRecord.status).toBe('blocked')
+    expect(abortRecord.reason).toContain('cancelled')
+    expect(abortJobs.kills.map(kill => kill.id)).toEqual(['bash-job'])
+    expect(abortJobs.get('other-job').status).toBe('running')
+    expect(abortJobs.disposeCalls).toBe(1)
+  })
+
+  it('unsubscribes on pass, blocked exit and a throwing native call, and keeps foreground output', async () => {
+    const passed = await setup()
+    const passedJobs = new FakeJobs('worker-session')
+    const passedRecord = await passed.execute(toolsThat(() => {
+      passedJobs.register('other-job')
+      passedJobs.append('other-job', 'background output\n')
+    }, foregroundOk('ok\n')), passedJobs)
+    expect(passedRecord.status).toBe('passed')
+    expect(await outputLog(passed.stateDir, passedRecord.runId)).toBe('ok\n\n')
+    expect(passedJobs.disposeCalls).toBe(1)
+
+    const failed = await setup()
+    const failedJobs = new FakeJobs('worker-session')
+    failedJobs.waitHook = id => failedJobs.settle(id, 'completed', 'exit code: 3')
+    const failedRecord = await failed.execute(toolsThat(() => failedJobs.register('bash-job'), promotedJob('bash-job')), failedJobs)
+    expect(failedRecord.status).toBe('blocked')
+    expect(failedRecord.exitCode).toBe(3)
+    expect(failedJobs.disposeCalls).toBe(1)
+
+    const thrown = await setup()
+    const thrownJobs = new FakeJobs('worker-session')
+    const thrownRecord = await thrown.execute({ execute: async () => { throw new Error('native bash failed to start') } }, thrownJobs)
+    expect(thrownRecord.status).toBe('unknown')
+    expect(thrownJobs.disposeCalls).toBe(1)
   })
 })
