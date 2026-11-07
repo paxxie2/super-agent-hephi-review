@@ -1,15 +1,16 @@
 # 威胁模型（A4，2026-11-07，草稿）
 
 > 状态：**草案 / 部分未验证**。本文按 ROADMAP-95 §A4 编写，用于固定信任边界与已知防线；
-> 涉及宿主隔离的结论依赖 G1 第 7、8 项探针（未做）与 A2 H1–H6 探针（未做），因此不能作为
-> “宿主已隔离”或“证据不可伪造”的证明。
+> 2026-11-08 同步：已有 [A2 历史核实记录](validation/2026-11-07-a2-final.md)，但 H2/H6 为 fail，
+> H3/H5 仅有一次性 profile 的有限证据；强绑定保持关闭。本文不能证明“宿主已隔离”或“证据不可伪造”。
+> 代码对象为 `bc21caca`；该构建已部署并完成双入口激活回读（见 §4），当前版本完整真实验收仍未通过。
 
 ## 1. 资产与攻击者
 
 | 项 | 说明 |
 | --- | --- |
 | 资产 | 检查记录（`run.json` + `output.log`）、决策日志、激活合同、ready 判定结果、真实宿主执行结果 |
-| 攻击者 A：Worker（模型/被劫持的工具调用） | 能在工作区读写、能执行 bash、能请求 `hephi_check` 与 `orchestrator_report`；**能否影响自己的 Session 快照未验证（H6）** |
+| 攻击者 A：Worker（模型/被劫持的工具调用） | 能在工作区读写、能执行 bash、能请求 `hephi_check` 与 `orchestrator_report`；**一次性 profile 已观察到可写 Session 快照和检查状态（H6 fail）；生产 B 未执行写入尝试** |
 | 攻击者 B：同机非特权用户 | 若与插件同 UID，可读写宿主状态目录（G1 第 7、8 项未验证） |
 | 攻击者 C：恶意/被篡改的插件构建 | 本模型不覆盖：构建来源由 P2/部署控制；磁盘哈希 ≠ 实载 commit（L5） |
 
@@ -17,11 +18,11 @@
 
 | 边界 | 状态 | 证据/限制 |
 | --- | --- | --- |
-| 状态目录 `<stateDir>/hephi/` | **可被 Worker 所在进程写入**（同一宿主进程/同一 UID） | 无 OS 隔离证据；G1 第 7、8 项未做 |
-| Session 快照（`sessionQuery.readSession`） | 只读 API；**Worker 是否能伪造事件未验证（H6）** | 若 H6 失败，A1-BIND 整体不得启用（P1-7 回退） |
-| Job 接口（`jobs.get/readAt`） | 宿主服务，按 Session 隔离（H3 未验证错误 session 的行为） | 后台证据依赖它 |
+| 状态目录 `<stateDir>/hephi/` | **可被 Worker 所在进程写入**（同一宿主进程/同一 UID） | 无 OS 隔离证据；A2 的一次性同 UID profile 已观察到状态写入，不能外推为生产伪造交付成功 |
+| Session 快照（`sessionQuery.readSession`） | 只读 API 不等于磁盘不可写；**H6 在一次性 profile 为 fail** | 快照追加/状态写入成功；未证明伪造事件能被采信；生产未写测，A1-BIND 保持关闭 |
+| Job 接口（`jobs.get/readAt`） | 一次性 profile 中 own Job 终态可读，foreign Session 的 get/readAt 被拒绝 | H3 的生产探针仍为 manual；该证据不证明生产 ready 实际调用了接口 |
 | 操作者解除入口（A3 `resolutions.jsonl`） | 默认关闭；`HEPHI_ALLOW_OPERATOR_RESOLUTIONS` 只是策略开关，**不是安全边界**（Worker 的 shell 会继承宿主 env） | 可信边界待 G1 第 9 项 + 宿主配置字段；关闭时 runner/verifier 均不采信 |
-| 输出绑定（A1-OUT） | 绑定生效时从 Session 结果/Job 输出重算哈希；不可得即拒绝 | 依赖 H2/H5 格式；路径 B（job 事件）下前台输出不可得 → `ready.output-unverified` |
+| 输出绑定（A1-OUT） | 绑定生效时从 Session 结果/Job 输出重算哈希；不可得即拒绝 | 历史 H2 的持久化 Session 缺结构化 value，不等于运行期检查全部失败；权威输出不可得时仍拒绝。H5 只覆盖无截断分支，截断/lossy 原生 E2E 未通过 |
 
 ## 3. 防线与对应攻击
 
@@ -39,15 +40,16 @@
 ## 4. 已知缺口（未验证，不能写成已解决）
 
 1. 宿主隔离（G1 第 7、8 项）：若 Worker 能写状态目录，伪造记录/日志仍可能，只有 A1-BIND/A1-OUT 能发现一部分。
-2. H6：Worker 若能让 Session 快照包含伪造调用，A1-BIND 失效 → 必须停止启用绑定并回到 A4 整改。
+2. H6：历史一次性 profile 的快照追加与状态写入成功，结论为 fail；生产 B 未执行写入尝试。按已批准回退保持强绑定关闭，不据此新增隔离架构，也不宣称已成功伪造 ready。
 3. A3 的可信边界：操作者配置必须 Worker 不可读/不可继承；本轮只有默认关闭 + 文档告警。
-4. 实载 commit 不可回读（L5）：磁盘哈希与健康不能证明运行中的代码。
+4. 实载回读已具备：[正式 D4 记录](../../docs/deployment-prerequisite-decisions-2026-11-07.md) 归档了历史 `e490fe34` 的双入口激活与新任务 `pluginCommit`。2026-11-08 02:16:39（北京时间）部署记录 `/Users/zm/dsh-instances/experiment/logs/deploy-20261107T181639Z-43593.json` 为 `target=bc21caca316d6032ebcc3d2bc6387c38e0a3579c`、`result=ok`、`activation=verified`，新 PID `44914` 的 index/tools 各一条、同 SHA。该次部署完成时保持 paused；不等于当前版本 A2/S4 已通过，也不构成不可篡改证据。磁盘哈希和健康仍不能单独替代激活回读。
 5. `hephi_check` 期间的文件改动又改回（K7 #1）：指纹只能证明前后一致。
+6. H2/H3/H5 的历史结论不能充当当前构建验收：A2 的生产快照对应 `efdd406`，H3/H5 通过来自一次性 profile；H5 的 `lossy=true` 只有真实子进程 + Job 注册表组件集成证据，截断/超长 spill 的原生链路仍未验证。
 
 ## 5. 需要宿主/负责人决定的事项
 
 - 是否采用 OS 级隔离（独立 UID、只读状态目录、操作者凭据）——属外部资源与安全审批。
 - A3 操作者配置的存放位置与权限（仅操作者可写、Worker 不可读）。
-- H6 结果若为“可影响”，是否接受“A 线降级为只检测已列举伪造”并相应下调 D1 目标。
+- H6 已按现有方案回退为强绑定关闭；若要改变隔离方式或能力目标，须另行明确范围，不能以此次文档同步作授权。
 
-> 本文不修改任何既有结论；R3.7/P8 仍为部分/unverified，D1 未通过。
+> 本文只同步已有证据及限制，不改默认策略；部署与激活成功不等于完整 S4、A1-BIND 或安全隔离通过。当前版本真实端到端未验证通过。

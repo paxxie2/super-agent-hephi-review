@@ -1,12 +1,14 @@
 # 发布流水线 S1–S7（ROADMAP-95 §3.2）
 
-状态：**操作文档（本轮新增）**。S1 预检脚本已实现（`scripts/release/preflight.mjs`；本轮已实测 dry-run，并在干净临时克隆上跑通 `--skip-check` 冒烟：141/41 断言套件 PASS，install/check 如实标 SKIP）；
-S2–S7 是流程定义，**尚未执行**；真实部署/真实验收仍被 Z1/D1–D5/open Ticket 阻断。
-本文不改变任何“未验证/blocked”结论；**不得把流程文档当成验收通过证明**。
+状态（2026-11-08）：S1 脚本已实现；下文保留早期 `73d2862` 的 dry-run/skip-check 失败与限制记录。PR40 在 `0c0b7ac` 记录 545 tests、281 假宿主断言、41 effects-db 检查通过，不能替代真实验收。
+当前 main `bc21caca316d6032ebcc3d2bc6387c38e0a3579c` 已部署成功，activation=`verified`，previous=`e490fe34`，部署结束保持暂停；当前版本 A2/A5 完整真实验收仍待执行。
+本轮部署保留了首次缺 peer-root、错误目标导致激活缺失/回滚失败及最终修正目标后的成功记录；不能描述为一次无失败通过。原日志 `/tmp/deploy-bc21cac.log` 及其后续编号日志需与最终部署记录一起核对。
+部署原件：`/Users/zm/dsh-instances/experiment/logs/deploy-20261107T181639Z-43593.json`（2026-11-07 18:16:39Z / 北京时间 11-08 02:16:39）。
+正式 D1/D2/D4/D5 与原两 Ticket 关闭记录见 `../../docs/deployment-prerequisite-decisions-2026-11-07.md`；历史失败不再充作当前缺决策结论。
 
 ## 0. 硬边界（先读）
 
-1. **工作树 = 宿主实载插件目录**：禁止在工作树运行 `pnpm build`/`pnpm check`。
+1. **若工作树是宿主实载插件目录**：禁止在该工作树运行 `pnpm build`/`pnpm check`。
    S1 预检只在 `mkdtemp` 临时克隆里构建与测试；手工复核同样必须用独立 clone/worktree。
 2. **只改文档/证据的提交不需要重新部署**：不改变运行代码，不产生新构建 SHA，可复用已有构建证据
    （前提是代码树与已验收 SHA 相同）。
@@ -15,7 +17,7 @@ S2–S7 是流程定义，**尚未执行**；真实部署/真实验收仍被 Z1/
 4. **实载回读（D4）**：只能用决策日志 `pluginCommit` 或启动日志行证明实载版本；读不到写 `unverified`。
    磁盘哈希/重启时间**不能**替代实载 commit（R3.7/R37 已确认）。
 5. **S1 PASS ≠ 真实部署/验收**：S1 只证明候选构建在临时克隆中自测通过；S3 还需 S2 复核通过与外部解阻项。
-6. 不连宿主、不推分支、不部署；脚本/文档失败时保留证据并如实报告。
+6. 本文更新不执行宿主操作、推送或部署；实际操作须遵循既有授权及本流水线，失败保留证据。
 
 ## 1. 流程总览
 
@@ -46,7 +48,7 @@ node scripts/release/preflight.mjs --skip-check --out /tmp/s1-skip-check.json
   非 40hex ref 时要求 source `HEAD == ref`；PATH 有 `node`/`pnpm`。
 - **步骤**：源校验 → 临时 `git clone --no-hardlinks` + `checkout ref` + 克隆树干净 →
   `hephi/` 下 `pnpm install --frozen-lockfile` + `pnpm check` → 假宿主
-  `node scripts/host/test-deploy-hephi.mjs`（期望 PASS 141）+ `node scripts/host/test-effects-db.mjs`（期望 PASS 41）。
+  `node scripts/host/test-deploy-hephi.mjs`（PR40 记录 PASS 281；以实际输出核对）+ `node scripts/host/test-effects-db.mjs`（期望 PASS 41）。
 - **产物**：JSON 报告 `source/ref/headSha/treeClean/node/pnpm/steps[{name,command,cwd,exit,seconds,tail}]/verdict`；
   `--out` 落盘，否则打印摘要（stdout）+ JSON 报告路径（stderr）。
 - **失败处理**：任一步非零/超时 → `verdict=FAIL`、exit 1；修复后**新提交 = 新构建 SHA**，重跑 S1。
@@ -69,7 +71,7 @@ node scripts/release/preflight.mjs --skip-check --out /tmp/s1-skip-check.json
 - 失败处理：Request changes → 回 S1（新提交=新构建 SHA）；**S2 未通过不得进入 S3**。
 - 关联：Z1（R3.8 二次独立复核）属于同一类独立复核门禁；Z1 未关闭前 R3.8/相关证据不得标“真实验证”。
 
-## 4. S3：真实部署（停机式排空）— 当前 **blocked**
+## 4. S3：真实部署（停机式排空）— bc21caca 已部署，S4 待验
 
 ```sh
 # 形态示例（真实执行前必须满足下方依赖；先 --dry-run 验证参数/门禁）
@@ -85,14 +87,14 @@ scripts/host/deploy-hephi.sh \
 
 | 依赖 | 要求 | 当前状态 |
 | --- | --- | --- |
-| Z1 | R3.8 二次独立复核通过 | 未完成 |
+| Z1 | R3.8 二次独立复核通过 | 按候选核对已有独立复核，不以部署成功替代复核 |
 | D1 | 排空证据方案（`--drain effects` + H0/H7 探针） | H0/H7 已做，真实有 effect 的等待行为未验证 |
-| D2 | 正式 hostVersion 来源 | 未定义（实验性标识不采纳） |
-| D3 | open Ticket 已处置 | **2 个 open Ticket**，真实部署被门禁阻断 |
-| D4 | 实载 SHA 回读方式 | 决策日志 `pluginCommit`（需一次真实工具调用）/启动日志；未纳入 R-P8-01 序列前不得声称 |
-| D5 | 维护窗口（暂停/停机/恢复派发的人工窗口） | 未定义 |
-| S2 | deploy 脚本改动先过独立复核（P1-2/P0-5） | 脚本改动未单独 S2 |
-| 探针 | H0 停机、H7 SQLite copy 模式通过并记录 | H0/H7 已完成记录；真实 drain 未验证 |
+| D2 | 正式 hostVersion 来源 | 正式 D2 已记录；每次核对实际来源 |
+| D3 | open Ticket 已处置 | 原 2 个已关闭；再次部署重新检查当时 open Ticket |
+| D4 | 实载 SHA 回读方式 | 正式 D4 已确定双入口激活及新任务 `pluginCommit`；当前激活 verified，任务交叉回读待做 |
+| D5 | 维护窗口（暂停/停机/恢复派发的人工窗口） | 正式 D5 已归档历史授权/窗口；后续按当前授权执行 |
+| S2 | deploy 脚本改动先过独立复核（P1-2/P0-5） | 每次候选核对对应独立复核，历史结果不自动覆盖新增代码 |
+| 探针 | H0 停机、H7 SQLite copy 模式通过并记录 | H0/H7 及无待处理 effect 的真实部署已记录；非零等待不外推 |
 
 **执行顺序（P0-4）**：暂停 → 排空/effects 查询 → 记录进程与（可选）Job 标识 → 停止宿主 →
 最终查询（`check-effects-db --mode copy`）→ 切换不可变 release → 启动 → 10 项健康 →
@@ -103,8 +105,8 @@ scripts/host/deploy-hephi.sh \
 **失败处理**：脚本 fail-closed；恢复 previous 并复检；双失败保持 paused、保留两段证据、人工接管；
 **不得**默认 0drain 字段、编造 hostVersion 或绕过 open Ticket。真实部署失败/中断后不得“继续切换”。
 
-**当前状态**：真实 `--drain effects --dry-run` 被 2 个 open Ticket 门禁阻断（exit 1，未停机/未切换），
-见 `hephi/docs/validation/2026-11-07-maintenance-drain-probe.md`。**S3 未执行**。
+**历史失败**：早期 dry-run 曾被 2 个 open Ticket 拒绝（exit 1，未停机/未切换），见 `validation/2026-11-07-maintenance-drain-probe.md`。原两项后来关闭并完成 e490fe34 部署，见正式决策记录。
+**最新部署**：bc21caca 的部署记录 result=ok、activation=verified、keptPaused=yes；不能由此推导 A2/A5 通过。再次部署仍需重新检查 Ticket/effects。
 
 ## 5. S4：真实验收
 
@@ -115,7 +117,7 @@ scripts/host/deploy-hephi.sh \
   decisions.jsonl、PR 状态、候选/实载 SHA、结论）；E9/E5 前置未满足时记 blocked。
 - **失败处理**：blocked/fail 如实记录；不得用假宿主/单测/fixture 作为 E2E 通过证据；
   回滚/恢复按 S3 的 fail-closed 流程。
-- **当前状态**：未执行（S3 未通过，A5 所有场景 pending/blocked）。
+- **当前状态**：历史场景见 `validation/2026-11-07-s4-acceptance.md`，E5/E9 blocked、E1-off partial；当前 bc21caca 的完整 S4 未验证通过。
 
 ## 6. S5：默认值变更
 
@@ -135,7 +137,7 @@ scripts/host/deploy-hephi.sh \
 - **只含文档/证据的合并**：不改变运行代码，不需重新部署（前提：代码树与已验收 SHA 相同；merge 未引入代码冲突解决）。
 - **产物**：main SHA、merge commit 构建的预检/冒烟记录、合并说明。
 - **失败处理**：合并引入新代码/冲突解决导致构建变化 → 当作新候选重走 S1/S2/S3/S4；无法则不合入 main。
-- **当前状态**：未合并（分支 `agent/roadmap95` 未开 PR/未合并；main 未移动）。
+- **当前状态**：PR37/38/40/41 已合并，main 为 bc21caca；合并不等于完整 S4 通过。
 
 ## 8. S7：投入使用
 
@@ -145,7 +147,7 @@ scripts/host/deploy-hephi.sh \
 - **产物**：投入记录（时间、release SHA、操作者、监控窗口、回滚点）。
 - **失败处理**：回滚到 previous release（`deploy-hephi.sh --rollback` 或恢复 previous）；保持 paused/人工接管；
   记录事故与恢复证据。
-- **当前状态**：未开始。
+- **当前状态**：历史 e490fe34 基础交付已有记录；bc21caca 部署结束保持暂停，后续投入及验收另记。
 
 ## 9. 版本与证据规则（P2-7 / P0-4）
 
@@ -160,15 +162,15 @@ scripts/host/deploy-hephi.sh \
 
 | 项 | 状态 |
 | --- | --- |
-| S1 预检脚本 | 已实现；dry-run（exit 0）与 `--skip-check` 冒烟（141/41 套件 PASS）已实测；完整 `pnpm install/check` 未在本轮跑 |
-| S2 独立复核 | 送审材料已整理（s2-review-bundle），**复核未做** |
-| S3 真实部署 | **blocked**：D3 2 个 open Ticket；D1/D2/D4/D5、Z1、deploy 脚本单独 S2 未完成；未停机/未切换 |
-| S4 真实验收 | 未执行（S3 未通过） |
-| S5 默认值变更 | 未做 |
-| S6 合并 | 未做（分支未合并） |
-| S7 投入使用 | 未开始 |
-| 实载 commit 回读 | unverified（无宿主回读入口） |
-| A5 E2E / A2 H1–H6 | A2 探针已提供但真实宿主结论未完成；A5 未执行 |
+| S1 预检脚本 | 已实现；历史 skip-check 141/41 保留；PR40 记录完整开发检查通过，仍须按候选核对 S1 报告 |
+| S2 独立复核 | 按对应提交核对复核报告；部署成功不替代独立复核 |
+| S3 真实部署 | bc21caca 已部署，activation=verified；原两 Ticket 与 D1/D2/D4/D5 已有关闭记录 |
+| S4 真实验收 | 当前 bc21caca 完整真实端到端未验证通过 |
+| S5 默认值变更 | 未做，强绑定保持关闭 |
+| S6 合并 | main=bc21caca，PR37/38/40/41 已合并 |
+| S7 投入使用 | bc21caca 部署结束 keptPaused=yes；后续运行另记 |
+| 实载 commit 回读 | 当前部署双入口激活 verified；新任务 pluginCommit 交叉回读待核对 |
+| A5 E2E / A2 H1–H6 | 历史场景已有记录，H2/H6 fail、E5/E9 blocked；当前候选待复验 |
 
 ## 11. 关联
 
