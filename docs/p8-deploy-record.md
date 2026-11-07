@@ -135,3 +135,51 @@ R37 独立复核（审查 `8fd199d`）在 69 断言之外动态复现 3 个失�
 - 已知限制：重启窗口内服务不可用；本记录中的 `lib` 切换在停机状态下用 `mv` 完成，非热切换（R3 改为 release 目录 + 版本指针，尚未验收）；`meta.json` 只有 sha256，没有签名；R3 原实现被独立复核判定不通过（F1–F6），返修提交 `2409613` 已关闭 F1–F6 并补 N1–N5；**R37 二次独立复核（2026-11-07，审查 `8fd199d`）确认 F1–F6 直接修复有效、69 断言独立复跑通过，但新发现 X1–X3 失败语义缺陷 → R3.8 返修提交 `cfb5a18`（97 断言、双向实测）已完成，待对 `cfb5a18` 的二次独立复核**；R3.7 仍 blocked。
 - 状态口径：**P8 仍为部分（未通过）**。假宿主套件（含返修负例与 R3.8 新增用例）即使全绿也不等于 R3.7 真实宿主验收。
 - 备注：脚本新增 `--hephi`/`--repo` 以适配本机 `<instance>/hephi-review` 布局（提交 `185f5e9`）。
+
+## T1 发布依赖与插件激活门禁（issue #26，2026-11-07）
+
+本节记录**脚本机制**与假宿主自测；**未在真实宿主执行部署**（本任务只提交 PR，由主助手在候选 SHA 上重新部署验收）。
+
+### 实现
+
+- 发布包依赖：`build_release` 在 `pnpm install --frozen-lockfile && pnpm check` 后用**同一冻结 lockfile**
+  执行 `pnpm install --prod --frozen-lockfile --offline`，把生产依赖 `node_modules`、`package.json`、
+  `pnpm-lock.yaml` 一起放进 incoming；不依赖源码工作区 `node_modules`。
+- peer 解析显式化：新增 `--peer-root <dir>`。声明的 peerDependencies 只在 incoming 内链接到宿主
+  peer 根；若生产安装已放入同名包（autoInstallPeers/同时是生产依赖），**只在 incoming 内替换**该入口，
+  不改构建目录/宿主，并在 `meta.dependencies.peersReplaced` 记录。
+- 停机前导入探针：新增 `--node <宿主 Node>`；在目标 release 路径实际 `import index.mjs/tools.mjs`，
+  校验所有生产依赖与 peer 可解析、`describePlugin().commit` 等于目标 SHA；失败发生在停机前并删除 incoming。
+- 激活标识：两个 bundle entry 在注册完成后各写一行
+  `[hephi-activation] entry=<index|tools> plugin=… commit=<sha> pid=<pid>`。
+  部署记录启动前 `host.log` 偏移，健康 ready 后只认该偏移之后、新 host.pid、目标 SHA 的两条标识；
+  缺失任一 → `activation-missing`，走既有恢复/回滚。
+- 回滚边界：旧格式 meta（无 `entries/dependencies/activation`）按历史字段校验，启动按 health-only，
+  记录 `activation=unverified-legacy`、`importProbe=skipped-legacy`；新格式 meta 缺少 activation
+  **fail-closed**（拒绝，不静默退回 health-only）。
+- meta 新增 `entries{index,tools}`、`activation`、`dependencies{lockfileSha256,nodeModulesSha256,resolved,peers}`、
+  `node{command,version}`；`release-meta.mjs check` 重新计算入口/依赖树哈希与 peer 目标可用性。
+
+### 自测（假宿主，聚焦）
+
+`scripts/host/test-deploy-hephi.mjs` 扩展为 **174 断言全绿**（原 142 + T1 32），套件明确标注为假宿主；
+`hephi/tests/control/deploy-script.test.ts` 同步断言 174 并把超时提高到 900s。新增场景：
+
+- T1-A/T1-B：健康 10 项 ready 但缺任一激活标识 → 目标失败、恢复旧版本、记录 `targetFailureKind=activation-missing`；
+- T1-C：旧格式 release 回滚成功并记录 `unverified-legacy`；
+- T1-D：release 导入时缺运行依赖 → 停机前拒绝，宿主/指针不变、无发布；
+- T1-E：package.json 声明未写入冻结 lockfile 的依赖 → 构建阶段拒绝；
+- T1-F：声明 peerDependencies 但无 `--peer-root` → 停机前拒绝；
+- T1-G：生产安装已包含同名 peer 时，只在 incoming 内替换为显式宿主 peer 链接，宿主版本生效；
+- T1-H：新格式 release 缺 activation 元数据 → 拒绝，不回退 health-only。
+
+真实 `pnpm --prod` 实测（本机 store，离线）：对本仓库真实 package，peer 包（`@deepseek-ai/*` 同时是
+devDependencies）在 `--prod` 后**不存在**于 `node_modules`；因此真实部署仍需显式 `--peer-root`
+（实验宿主 B 的宿主 peer 根为 `/Users/zm/dsh-instances/runtime/node_modules`）。T1-G 专门覆盖
+“路径已存在”的边界。
+
+### 状态口径
+
+- 已证明：发布包依赖/peer/导入/激活/回滚边界的**脚本机制**（假宿主 + 真实 pnpm 离线安装）；
+- 未证明：真实宿主上的重新部署、实载 pluginCommit 回读与激活标识采集（本任务不执行部署）；
+  P8/R3.7 结论不变，仍为部分。

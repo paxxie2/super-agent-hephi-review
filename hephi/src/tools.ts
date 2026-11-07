@@ -4,6 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { searchKnowledgeBase } from './kb/index.js'
 import { activationPath, defaultStateDir, loadActivation } from './control/activation.js'
 import { resolveWorkspace } from './control/workspace.js'
+import { activationMarker } from './version.js'
 import { isWorkerAgent, workerTicketId } from './control/worker-mount.js'
 
 
@@ -53,4 +54,6 @@ export function apply(ctx: Context, config: { stateDir?: string } = {}): void {
   const tools = (ctx as Context & { tools: { register(definition: unknown): () => void } }).tools
   const disposers = hephiToolDefinitions(config.stateDir).map((tool) => tools.register(tool))
   ctx.effect(() => () => { for (const dispose of disposers) dispose() })
+  // Registration completed: emit the deploy-verifiable activation marker (issue #26).
+  console.log(activationMarker('tools'))
 }

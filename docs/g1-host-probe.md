@@ -2,6 +2,8 @@
 
 本记录只覆盖可自动回读的部分，**不构成 G1 完成**；G1 要求 11 项原编号与 3 项新增能力逐项结论，其余项必须由宿主操作者在真实 Worker / 牺牲性 Session 上人工探测并记录原始输出。
 
+> A2 证据链宿主探针的 path A/path B 识别、`--job-evidence` 运行时证据与限制见 [a2-host-evidence-probe.md](./a2-host-evidence-probe.md)。
+
 ## 1. 已自动执行
 
 - 命令：`node hephi/scripts/host-capabilities.mjs --host http://127.0.0.1:3083 --out <evidence>/host-state.json`

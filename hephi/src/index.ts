@@ -4,7 +4,7 @@ import { defaultStateDir } from './control/activation.js'
 import type { NativeJobs } from './control/check-runner.js'
 import { createEvidenceVerifier, type SessionSnapshot } from './control/evidence-verifier.js'
 import { installWorkerMount } from './control/worker-mount.js'
-import { pluginCommit, pluginName, pluginVersion } from './version.js'
+import { activationMarker, pluginCommit, pluginName, pluginVersion } from './version.js'
 
 export * from './control/index.js'
 
@@ -50,6 +50,8 @@ export function apply(ctx: Context, config: {
   const verify = createEvidenceVerifier({ stateDir, readSession, requireSessionBinding: hostRequireSessionBinding, allowOperatorResolutions, jobs })
   const dispose = installWorkerMount(ctx, { stateDir, verify, allowOperatorResolutions, retryLimit })
   ctx.effect(() => dispose, `${pluginName}: worker ready gate`)
+  // Registration completed: emit the deploy-verifiable activation marker (issue #26).
+  console.log(activationMarker('index'))
 }
 
 /**

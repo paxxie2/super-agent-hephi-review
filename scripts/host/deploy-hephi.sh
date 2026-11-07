@@ -13,15 +13,23 @@
 # 9. 首次从普通 lib 目录迁移是显式事务：先原子改名旧目录，再改名 symlink；第二步失败必须恢复旧目录。
 # 10. 记录中的 paused／load／health 必须来自部署结束时的真实回读；不可读记为 unverified，不得硬编码 true。
 # 11. rollback 只接受显式 --target（及显式 --previous），不得隐式取仓库 HEAD；恢复目标必须通过校验。
+# 12. 发布包包含同一冻结 lockfile 的生产依赖；peer 只通过显式 --peer-root 链接到宿主提供方，
+#     发布前用 --node（宿主 Node）在目标 release 路径实际导入 index/tools，失败发生在停机前。
+# 13. 两个 bundle entry 注册后各写一行 [hephi-activation]（含 pluginCommit 与 process.pid）；
+#     部署只认本次启动日志偏移之后、新 host.pid、目标 SHA 的两条标识。
+# 14. 健康 10 项 ready 但缺少任一激活标识必须失败并走现有恢复/回滚；旧格式 release
+#     （meta 无 activation）按 health-only 处理并记为 unverified-legacy，保持回滚边界。
 #
 # 用法：deploy-hephi.sh --instance <dir> --host <url> --host-version <单行值>
 #        [--target <40sha>] [--previous <40sha>] [--rollback] [--dry-run]
 #        [--releases <dir>] [--repo <dir>] [--hephi <dir>] [--timeout <秒>]
 #        [--drain effects] [--effects-db <path>] --stop-command <command>
 #        [--stop-timeout <秒>] [--auto-restart-wait <秒>] [--process-file <path>]
+#        [--node <宿主 Node 路径>] [--peer-root <宿主 peer 根目录>]
 set -eu
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 effects_tool="$script_dir/check-effects-db.mjs"
+release_tool="$script_dir/release-meta.mjs"
 
 usage() {
   cat >&2 <<'USAGE'
@@ -30,6 +38,7 @@ usage: deploy-hephi.sh --instance <dir> --host <url> --host-version <single-line
        [--releases <dir>] [--repo <dir>] [--hephi <dir>] [--timeout <seconds>]
        [--drain effects] [--effects-db <path>] --stop-command <command>
        [--stop-timeout <seconds>] [--auto-restart-wait <seconds>] [--process-file <path>]
+       [--node <host Node path>] [--peer-root <host peer package root>]
 USAGE
   exit 2
 }
@@ -38,6 +47,7 @@ instance=""; host=""; host_version=""; target=""; previous=""; rollback="no"; dr
 target_set="no"; previous_set="no"
 releases=""; repo=""; hephi=""; timeout=120
 drain_mode=""; effects_db=""; stop_command=""; stop_timeout=""; auto_restart_wait=""; process_file=""
+node_cmd=""; peer_root=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --instance) [ $# -ge 2 ] || usage; instance="$2"; shift 2 ;;
@@ -57,11 +67,21 @@ while [ $# -gt 0 ]; do
     --stop-timeout) [ $# -ge 2 ] || usage; stop_timeout="$2"; shift 2 ;;
     --auto-restart-wait) [ $# -ge 2 ] || usage; auto_restart_wait="$2"; shift 2 ;;
     --process-file) [ $# -ge 2 ] || usage; process_file="$2"; shift 2 ;;
+    --node) [ $# -ge 2 ] || usage; node_cmd="$2"; shift 2 ;;
+    --peer-root) [ $# -ge 2 ] || usage; peer_root="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) echo "unknown argument: $1" >&2; usage ;;
   esac
 done
 [ -n "$instance" ] && [ -n "$host" ] && [ -n "$host_version" ] || usage
+[ -n "$node_cmd" ] || node_cmd=node
+if [ -n "$peer_root" ]; then
+  [ -d "$peer_root" ] || { echo "peer root is not a directory: $peer_root" >&2; exit 2; }
+  peer_root=$(CDPATH= cd -- "$peer_root" && pwd)
+fi
+[ -f "$release_tool" ] || { echo "release tooling not found: $release_tool" >&2; exit 2; }
+node_version=$("$node_cmd" -v 2>/dev/null) || { echo "host Node is not runnable: $node_cmd" >&2; exit 2; }
+IMPORT_PROBE="not-run"; ACTIVATION_MODE="unverified"; ACTIVATION_EVIDENCE="not-checked"
 lines=$(printf '%s\n' "$host_version" | wc -l | tr -d ' ')
 [ "$lines" -eq 1 ] || { echo "host version must be a single-line value" >&2; exit 2; }
 printf '%s' "$host_version" | grep -qE '^[[:print:]]+$' || { echo "host version must be a non-empty printable value" >&2; exit 2; }
@@ -145,20 +165,139 @@ release_validate() {
     is_sha "$expected" || { echo "release directory is not a full SHA: $expected" >&2; return 1; }
   fi
   is_sha "$expected" || { echo "expected release SHA is invalid: $expected" >&2; return 1; }
-  name="$expected"
-  node -e '
-    const fs=require("fs"); const [dir,name]=process.argv.slice(1);
-    const meta=JSON.parse(fs.readFileSync(dir+"/meta.json","utf8"));
-    const fail=m=>{console.error(m);process.exit(1)};
-    if(meta.formatVersion!==1) fail("unsupported release meta format: "+meta.formatVersion);
-    if(meta.pluginCommit!==name) fail("release meta pluginCommit does not match directory: "+meta.pluginCommit+" vs "+name);
-    if(typeof meta.entrySha256!=="string"||!/^[0-9a-f]{64}$/.test(meta.entrySha256)) fail("invalid entrySha256 in release meta");
-    if(typeof meta.hostVersion!=="string"||meta.hostVersion.trim()==="") fail("release meta is missing hostVersion");
-  ' "$dir" "$name" || return 1
-  actual=$(sha256_file "$dir/lib/index.mjs")
-  expected=$(node -e 'const fs=require("fs");console.log(JSON.parse(fs.readFileSync(process.argv[1]+"/meta.json","utf8")).entrySha256)' "$dir")
-  [ "$actual" = "$expected" ] || { echo "release entry hash mismatch: $dir" >&2; return 1; }
+  node "$release_tool" check --release "$dir" --sha "$expected" >/dev/null 2>"$releases/.release-check-$$-$expected.err" || {
+    cat "$releases/.release-check-$$-$expected.err" >&2
+    rm -f "$releases/.release-check-$$-$expected.err"
+    return 1
+  }
+  rm -f "$releases/.release-check-$$-$expected.err"
 }
+
+# 目标 release 的导入探针：用宿主 Node 在 release 路径实际导入 index/tools，
+# 校验生产依赖与显式 peer 可解析、入口可加载、describePlugin().commit 等于目标 SHA。
+# 旧格式 release 没有运行依赖记录，跳过并如实标记（保持回滚边界）。
+release_import_probe() {
+  dir="$1"; sha="$2"
+  mode=$(node "$release_tool" activation --release "$dir" 2>/dev/null || printf 'none')
+  case "$mode" in
+    required:*) : ;;
+    *) IMPORT_PROBE="skipped-legacy"; echo "import probe: skipped (release has no runtime dependency record): $dir" >&2; return 0 ;;
+  esac
+  [ -f "$dir/package.json" ] || { IMPORT_PROBE="failed: missing package.json"; echo "release import probe failed: missing $dir/package.json" >&2; return 1; }
+  out=$( cd "$dir" && "$node_cmd" --input-type=module -e '
+import { readFileSync } from "node:fs"
+const sha = process.argv[1]
+const pkg = JSON.parse(readFileSync("package.json", "utf8"))
+const index = await import("./lib/index.mjs")
+const tools = await import("./lib/tools.mjs")
+const deps = {}
+for (const name of Object.keys(pkg.dependencies ?? {})) {
+  try { deps[name] = import.meta.resolve(name) } catch (error) {
+    throw new Error("production dependency " + name + " does not resolve from the release: " + error.message)
+  }
+}
+const peers = {}
+for (const name of Object.keys(pkg.peerDependencies ?? {})) {
+  try { peers[name] = import.meta.resolve(name) } catch (error) {
+    if (pkg.peerDependenciesMeta?.[name]?.optional === true) { peers[name] = "optional-missing"; continue }
+    throw new Error("peer dependency " + name + " does not resolve from the release: " + error.message)
+  }
+}
+if (typeof index.apply !== "function") throw new Error("lib/index.mjs does not export apply()")
+if (typeof tools.apply !== "function") throw new Error("lib/tools.mjs does not export apply()")
+const describe = typeof index.describePlugin === "function" ? index.describePlugin() : null
+if (!describe || describe.commit !== sha) throw new Error("describePlugin().commit=" + (describe && describe.commit) + " does not match release " + sha)
+process.stdout.write(JSON.stringify({ ok: true, describe, deps: Object.keys(deps), peers: Object.keys(peers) }))
+' "$sha" 2>&1 ) || {
+    IMPORT_PROBE="failed: $out"
+    echo "release import probe failed for $sha: $out" >&2
+    return 1
+  }
+  IMPORT_PROBE="$out"
+  echo "import probe ok ($node_cmd $node_version): $out" >&2
+}
+
+# release 的激活门禁模式：required:<entry,...> / legacy / none。
+activation_mode_for() {
+  [ -n "$1" ] || { printf 'none'; return 0; }
+  node "$release_tool" activation --release "$releases/$1" 2>/dev/null || printf 'none'
+}
+
+host_log_size() {
+  if [ -f "$instance/logs/host.log" ]; then wc -c < "$instance/logs/host.log" | tr -d ' '; else printf '0'; fi
+}
+
+# 只读本次启动日志偏移之后的内容，要求目标 SHA、新 host.pid 下两条 entry 标识齐全。
+activation_check() {
+  sha="$1"; pid="$2"; offset="$3"; mode="$4"
+  case "$mode" in
+    required:*)
+      entries=${mode#required:}
+      waited=0
+      while :; do
+        if out=$(node -e '
+          const fs = require("fs")
+          const [file, offsetText, sha, pidText, entriesText] = process.argv.slice(1)
+          let text = ""
+          try {
+            const size = fs.statSync(file).size
+            const start = Number(offsetText) || 0
+            if (size > start) {
+              const fd = fs.openSync(file, "r")
+              const length = size - start
+              const buffer = Buffer.alloc(length)
+              fs.readSync(fd, buffer, 0, length, start)
+              fs.closeSync(fd)
+              text = buffer.toString("utf8")
+            }
+          } catch (error) { console.error("cannot read host log: " + error.message); process.exit(2) }
+          const expected = entriesText.split(",").filter(Boolean)
+          const found = {}
+          for (const raw of text.split("\n")) {
+            const match = /^\[hephi-activation\] entry=([a-z-]+) plugin=([^ ]+) commit=([0-9a-f]{40}) pid=([0-9]+)$/.exec(raw.trim())
+            if (!match) continue
+            if (match[3] !== sha || match[4] !== pidText) continue
+            if (!expected.includes(match[1])) continue
+            found[match[1]] = (found[match[1]] || 0) + 1
+          }
+          const missing = expected.filter((name) => !found[name])
+          process.stdout.write(JSON.stringify({ ok: missing.length === 0, sha, pid: pidText, logOffset: Number(offsetText) || 0, expectedEntries: expected, found, missing }))
+          process.exit(missing.length === 0 ? 0 : 1)
+        ' "$instance/logs/host.log" "$offset" "$sha" "$pid" "$entries" 2>/dev/null); then
+          ACTIVATION_MODE="verified"
+          ACTIVATION_EVIDENCE="$out"
+          echo "plugin activation verified ($sha, pid $pid): $out" >&2
+          return 0
+        fi
+        if [ "$waited" -ge 5 ]; then break; fi
+        sleep 1; waited=$((waited+1))
+      done
+      ACTIVATION_MODE="missing"
+      ACTIVATION_EVIDENCE="${out:-no activation markers in the current startup log segment}"
+      echo "plugin activation markers missing for $sha (pid $pid): $ACTIVATION_EVIDENCE" >&2
+      return 1
+      ;;
+    legacy)
+      ACTIVATION_MODE="unverified-legacy"
+      ACTIVATION_EVIDENCE="release $sha has no activation metadata; the 10-service health gate is the only evidence"
+      echo "activation: legacy release $sha (health-only, no markers required)" >&2
+      return 0
+      ;;
+    invalid)
+      ACTIVATION_MODE="invalid-metadata"
+      ACTIVATION_EVIDENCE="release $sha is new-format but has no valid activation metadata; refusing the health-only fallback"
+      echo "activation: release $sha is new-format but lacks activation metadata; refusing the health-only fallback" >&2
+      return 1
+      ;;
+    *)
+      ACTIVATION_MODE="unverified"
+      ACTIVATION_EVIDENCE="no release metadata for $sha"
+      echo "activation: no release metadata for $sha (health-only)" >&2
+      return 0
+      ;;
+  esac
+}
+
 
 
 set_pointer() {
@@ -218,34 +357,61 @@ build_release() {
   build_root=$(mktemp -d "$releases/.build-$sha-XXXXXX")
   git -C "$repo" archive "$sha" | tar -x -C "$build_root" || { echo "cannot archive commit $sha" >&2; exit 1; }
   [ -d "$build_root/hephi" ] || { echo "archived source has no hephi directory" >&2; exit 1; }
+  [ -f "$build_root/hephi/pnpm-lock.yaml" ] || { echo "archived source has no hephi/pnpm-lock.yaml; production dependencies cannot be frozen" >&2; exit 1; }
   ( cd "$build_root/hephi" && HEPHI_BUILD_COMMIT="$sha" pnpm install --frozen-lockfile && HEPHI_BUILD_COMMIT="$sha" pnpm check ) || { echo "build failed for $sha" >&2; exit 1; }
   [ -f "$build_root/hephi/lib/index.mjs" ] || { echo "build produced no lib/index.mjs" >&2; exit 1; }
+  [ -f "$build_root/hephi/lib/tools.mjs" ] || { echo "build produced no lib/tools.mjs" >&2; exit 1; }
+  prod_dep_count=$(node -e 'const p=require(process.argv[1]);process.stdout.write(String(Object.keys(p.dependencies??{}).length))' "$build_root/hephi/package.json")
+  if [ "$prod_dep_count" != "0" ]; then
+    # 同一冻结 lockfile 的生产依赖单独安装到构建目录再打包；离线执行，缺包即失败。
+    ( cd "$build_root/hephi" && pnpm install --prod --frozen-lockfile --offline ) || { echo "cannot package the frozen production dependencies for $sha" >&2; exit 1; }
+  fi
   incoming="$releases/.incoming-$sha-$$"
   rm -rf "$incoming"
   mkdir -p "$incoming"
   cp -R "$build_root/hephi/lib" "$incoming/lib"
-  entry=$(sha256_file "$incoming/lib/index.mjs")
+  cp "$build_root/hephi/package.json" "$incoming/package.json"
+  cp "$build_root/hephi/pnpm-lock.yaml" "$incoming/pnpm-lock.yaml"
+  if [ "$prod_dep_count" != "0" ]; then
+    [ -d "$build_root/hephi/node_modules" ] || { echo "production dependency install produced no node_modules for $sha" >&2; exit 1; }
+    cp -R "$build_root/hephi/node_modules" "$incoming/node_modules"
+  fi
   tree=$(git -C "$repo" rev-parse "$sha^{tree}")
-  node -e '
-    const fs=require("fs"); const [dir,sha,tree,entry,hostVersion]=process.argv.slice(1);
-    fs.writeFileSync(dir+"/meta.json", JSON.stringify({formatVersion:1, pluginCommit:sha, sourceTree:tree, entrySha256:entry, builtAt:new Date().toISOString(), buildCommand:"pnpm install --frozen-lockfile && pnpm check", hostVersion, source:"git-archive"}, null, 2)+"\n");
-  ' "$incoming" "$sha" "$tree" "$entry" "$host_version"
+  if ! meta_out=$(node "$release_tool" prepare --build "$build_root/hephi" --incoming "$incoming" --sha "$sha" --tree "$tree" \
+      --host-version "$host_version" --node "$node_cmd" --node-version "$node_version" --peer-root "$peer_root"); then
+    rm -rf "$incoming"
+    echo "cannot prepare the immutable release package for $sha" >&2
+    exit 1
+  fi
+  echo "release package: $meta_out" >&2
   release_validate "$incoming" "$sha" || { rm -rf "$incoming"; echo "incoming release failed validation" >&2; exit 1; }
+  release_import_probe "$incoming" "$sha" || { rm -rf "$incoming"; echo "incoming release failed the host-Node import probe" >&2; exit 1; }
   mv "$incoming" "$releases/$sha"
   rm -rf "$build_root"
 }
 
 LAST_STATE=""; FAIL_STATE=""; FAIL_KIND=""; HEALTH_STATE=""
-# 启动 $instance/start.sh 并等待 10 项全量健康；用于重启与 §4.5 停机后的启动。
+# 启动 $instance/start.sh 并等待 10 项全量健康；随后核对本次启动日志偏移之后的插件激活标识。
+# 健康 ready 但缺少任一激活标识按启动失败处理，交由既有恢复/回滚路径。
 start_instance() {
   LAST_STATE=""; FAIL_STATE=""; FAIL_KIND=""; HEALTH_STATE=""
+  activation_sha=$(current_pointer_sha 2>/dev/null || true)
+  activation_mode=$(activation_mode_for "$activation_sha")
+  activation_offset=$(host_log_size)
   nohup "$instance/start.sh" >> "$instance/logs/host.log" 2>&1 &
   echo $! > "$instance/host.pid"
+  pid=$!
   waited=0; got_state="no"
   while :; do
     if state=$(read_state 2>/dev/null); then
       LAST_STATE="$state"; got_state="yes"
-      if health_ok "$state" 2>/dev/null; then HEALTH_STATE="$state"; return 0; fi
+      if health_ok "$state" 2>/dev/null; then
+        if activation_check "$activation_sha" "$pid" "$activation_offset" "$activation_mode"; then
+          HEALTH_STATE="$state"; return 0
+        fi
+        FAIL_STATE="$state"; FAIL_KIND="activation-missing"
+        return 1
+      fi
     fi
     if [ "$waited" -ge "$timeout" ]; then
       FAIL_STATE="$LAST_STATE"
@@ -617,6 +783,7 @@ deploy_effects() {
   # 4) 构建/校验目标 release（停机前完成，缩短停机窗口）。
   if [ -d "$releases/$target/lib" ]; then
     release_validate "$releases/$target" || effects_abort failed-drain-release "target release is invalid: $target"
+    release_import_probe "$releases/$target" "$target" || effects_abort failed-drain-release "target release failed the host-Node import probe: $target"
   else
     build_release "$target"
     release_validate "$releases/$target" || effects_abort failed-drain-release "new release failed validation: $target"
@@ -687,7 +854,8 @@ deploy_effects() {
     processFile "${managed_file:-none}" hostPid "${host_pid:-none}" hostLstart "${host_lstart:-none}" \
     managedCount "${managed_count:-0}" stopExit "${EFFECT_STOP_EXIT:-none}" stopOutput "${EFFECT_STOP_OUTPUT:-}" \
     stopCommand "${stop_command:-none}" autoRestartWait "${auto_restart_wait}" recoverHealth all-required-ready \
-    migration "${MIGRATION_BACKUP:-none}" keptPaused yes
+    migration "${MIGRATION_BACKUP:-none}" keptPaused yes \
+    activation "$ACTIVATION_MODE" activationEvidence "$ACTIVATION_EVIDENCE" importProbe "$IMPORT_PROBE" nodeVersion "$node_version"
   echo "deploy complete (stop-based drain); host remains paused; effect final check total=0 journal=wal"
   exit 0
 }
@@ -736,6 +904,7 @@ fi
 
 if [ "$rollback" = "yes" ]; then
   release_validate "$releases/$target" || fail_keep_paused "rollback target release is invalid: $target"
+  release_import_probe "$releases/$target" "$target" || fail_keep_paused "rollback target release failed the host-Node import probe: $target"
   if [ "$previous_set" = "yes" ]; then
     release_validate "$releases/$previous" || fail_keep_paused "rollback previous release is invalid: $previous"
   fi
@@ -755,7 +924,7 @@ if [ "$rollback" = "yes" ]; then
       record rollback rollback failed-not-paused target "$target" previous "${previous:-$current}" pointerBefore "$pointer_before" pointerAfter "$(pointer_after)" health all-required-ready keptPaused "$flag" error "host did not report paused=true after rollback; manual takeover required"
       fail_keep_paused "host is not paused after rollback; manual takeover required"
     fi
-    record rollback rollback ok target "$target" previous "${previous:-$current}" pointerBefore "$pointer_before" pointerAfter "$(pointer_after)" health all-required-ready loadedCommitReadback unverified migration "${MIGRATION_BACKUP:-none}" keptPaused yes
+    record rollback rollback ok target "$target" previous "${previous:-$current}" pointerBefore "$pointer_before" pointerAfter "$(pointer_after)" health all-required-ready loadedCommitReadback unverified migration "${MIGRATION_BACKUP:-none}" keptPaused yes activation "$ACTIVATION_MODE" activationEvidence "$ACTIVATION_EVIDENCE" importProbe "$IMPORT_PROBE" nodeVersion "$node_version"
     echo "rollback complete; host remains paused, verify loaded build then resume via API"
     exit 0
   fi
@@ -779,7 +948,7 @@ if [ "$rollback" = "yes" ]; then
   fi
   if restart_instance; then
     flag=$(paused_flag)
-    record rollback rollback failed-restored-previous target "$target" previous "$restore_kind:$restore_target" pointerBefore "$pointer_before" pointerAfter "$(pointer_after)" health not-ready targetFailure "$target_fail_state" targetFailureKind "$target_fail_kind" restoreHealth all-required-ready keptPaused "$flag" error "rollback target failed; previous build restored"
+    record rollback rollback failed-restored-previous target "$target" previous "$restore_kind:$restore_target" pointerBefore "$pointer_before" pointerAfter "$(pointer_after)" health not-ready targetFailure "$target_fail_state" targetFailureKind "$target_fail_kind" restoreHealth all-required-ready keptPaused "$flag" activation "$ACTIVATION_MODE" activationEvidence "$ACTIVATION_EVIDENCE" importProbe "$IMPORT_PROBE" nodeVersion "$node_version" error "rollback target failed; previous build restored"
     fail_after_switch "rollback target failed health; previous build restored"
   fi
   flag=$(paused_flag)
@@ -794,6 +963,7 @@ fi
 # 构建或复用不可变 release。
 if [ -d "$releases/$target/lib" ]; then
   release_validate "$releases/$target" || fail_keep_paused "target release is invalid: $target"
+  release_import_probe "$releases/$target" "$target" || fail_keep_paused "target release failed the host-Node import probe: $target"
 else
   build_release "$target"
   release_validate "$releases/$target" || fail_keep_paused "new release failed validation: $target"
@@ -828,7 +998,7 @@ if restart_instance; then
     record deploy deploy failed-not-paused target "$target" previous "$previous" pointerBefore "$pointer_before" pointerAfter "$(pointer_after)" health all-required-ready loadedCommitReadback unverified migration "${MIGRATION_BACKUP:-none}" keptPaused "$flag" error "host did not report paused=true after switch; manual takeover required"
     fail_keep_paused "host is not paused after switch; manual takeover required"
   fi
-  record deploy deploy ok target "$target" previous "$previous" pointerBefore "$pointer_before" pointerAfter "$(pointer_after)" health all-required-ready loadedCommitReadback unverified migration "${MIGRATION_BACKUP:-none}" keptPaused yes
+  record deploy deploy ok target "$target" previous "$previous" pointerBefore "$pointer_before" pointerAfter "$(pointer_after)" health all-required-ready loadedCommitReadback unverified migration "${MIGRATION_BACKUP:-none}" keptPaused yes activation "$ACTIVATION_MODE" activationEvidence "$ACTIVATION_EVIDENCE" importProbe "$IMPORT_PROBE" nodeVersion "$node_version"
   echo "deploy complete; host remains paused; loaded commit readback is unavailable (disk hash only)"
   exit 0
 fi
@@ -855,7 +1025,7 @@ if ! set_pointer "$restore_target"; then
 fi
 if restart_instance; then
   flag=$(paused_flag)
-  record deploy deploy failed-restored-previous target "$target" previous "$restore_kind:$restore_target" pointerBefore "$pointer_before" pointerAfter "$(pointer_after)" health not-ready migration "${MIGRATION_BACKUP:-none}" migrationRestore "${MIGRATION_RESTORE:-none}" targetFailure "$target_fail_state" targetFailureKind "$target_fail_kind" restoreHealth all-required-ready keptPaused "$flag" error "target failed after switch; previous build restored"
+  record deploy deploy failed-restored-previous target "$target" previous "$restore_kind:$restore_target" pointerBefore "$pointer_before" pointerAfter "$(pointer_after)" health not-ready migration "${MIGRATION_BACKUP:-none}" migrationRestore "${MIGRATION_RESTORE:-none}" targetFailure "$target_fail_state" targetFailureKind "$target_fail_kind" restoreHealth all-required-ready keptPaused "$flag" activation "$ACTIVATION_MODE" activationEvidence "$ACTIVATION_EVIDENCE" importProbe "$IMPORT_PROBE" nodeVersion "$node_version" error "target failed after switch; previous build restored"
   fail_after_switch "target failed after switch; previous build restored"
 fi
 flag=$(paused_flag)

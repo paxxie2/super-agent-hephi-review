@@ -74,7 +74,17 @@ function writeStart(scriptBody) {
 }
 function normalStart() {
   const resume = state.pauseOnStart ? `\n: > "${instance}/resumed.marker"` : ''
-  writeStart(`echo started >> "${instance}/start.log"\n: > "${instance}/started.marker"${resume}\nexec sleep 3600`)
+  writeStart(`echo started >> "${instance}/start.log"\n${activationMarkers()}\n: > "${instance}/started.marker"${resume}\nexec sleep 3600`)
+}
+
+// 假宿主激活标识：真实插件由 lib 内两个 entry 在注册后写同样格式的行；
+// 这里由假 start 脚本按当前指针 SHA 与自身 pid 写出，用于验证部署门禁（明确是聚焦假宿主）。
+function activationMarkers() {
+  return [
+    `sha=$(basename "$(dirname "$(readlink "${instance}/hephi/lib")")")`,
+    `echo "[hephi-activation] entry=index plugin=stub-hephi commit=$sha pid=$$"`,
+    `echo "[hephi-activation] entry=tools plugin=stub-hephi commit=$sha pid=$$"`,
+  ].join('\n')
 }
 
 // 普通目录迁移/恢复失败注入：只在 deploy 的 PATH 前置一个 node 垫片，第 N 次 renameSync 调用失败。
@@ -168,10 +178,25 @@ async function initWorld(options = {}) {
   normalStart()
   state.marker = join(instance, 'started.marker')
 
-  // stub plugin repository: git archive + frozen install + pnpm check must succeed
-  writeFileSync(join(repo, 'hephi', 'package.json'), JSON.stringify({ name: 'stub-hephi', version: '0.0.0', private: true, type: 'module', scripts: { check: 'node build.mjs' } }, null, 2))
-  writeFileSync(join(repo, 'hephi', 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\n\nsettings:\n  autoInstallPeers: true\n  excludeLinksFromLockfile: false\n\nimporters:\n  .: {}\n")
-  writeFileSync(join(repo, 'hephi', 'build.mjs'), "import { mkdirSync, writeFileSync } from 'node:fs'\nmkdirSync('lib', { recursive: true })\nwriteFileSync('lib/index.mjs', `export function describePlugin(){return {name:'stub',version:'0.0.0',commit:${JSON.stringify(process.env.HEPHI_BUILD_COMMIT ?? 'unknown')}}}\\n`)\n")
+  // stub plugin repository: git archive + frozen install + pnpm check must succeed.
+  // 真实生产依赖（file: 本地包）用于验证发布包依赖打包；不访问网络，离线可复现。
+  writeFileSync(join(repo, 'hephi', 'package.json'), JSON.stringify({
+    name: 'stub-hephi', version: '0.0.0', private: true, type: 'module',
+    dependencies: { 'stub-dep': 'file:./vendor/stub-dep' },
+    scripts: { check: 'node build.mjs' },
+  }, null, 2))
+  mkdirSync(join(repo, 'hephi', 'vendor', 'stub-dep'), { recursive: true })
+  writeFileSync(join(repo, 'hephi', 'vendor', 'stub-dep', 'package.json'), JSON.stringify({ name: 'stub-dep', version: '1.0.0', type: 'module', main: 'index.js' }, null, 2))
+  writeFileSync(join(repo, 'hephi', 'vendor', 'stub-dep', 'index.js'), "export const VALUE = 'stub-dep-ok'\n")
+  writeFileSync(join(repo, 'hephi', 'build.mjs'), [
+    "import { mkdirSync, writeFileSync } from 'node:fs'",
+    "mkdirSync('lib', { recursive: true })",
+    "writeFileSync('lib/index.mjs', `import { VALUE } from 'stub-dep'\\nexport function describePlugin(){return {name:'stub',version:'0.0.0',commit:${JSON.stringify(process.env.HEPHI_BUILD_COMMIT ?? 'unknown')},dep:VALUE}}\\nexport function apply(){}\\n`)",
+    "writeFileSync('lib/tools.mjs', `export const name = 'stub/tools'\\nexport function apply(){}\\n`)",
+    '',
+  ].join('\n'))
+  const stubLockfile = run('pnpm', ['install', '--lockfile-only', '--offline'], { cwd: join(repo, 'hephi') })
+  if (!existsSync(join(repo, 'hephi', 'pnpm-lock.yaml'))) throw new Error(`stub lockfile was not generated: ${stubLockfile.out}`)
   run('git', ['init', '-q', '-b', 'main'], { cwd: repo })
   run('git', ['config', 'user.email', 'test@example.invalid'], { cwd: repo })
   run('git', ['config', 'user.name', 'deploy test'], { cwd: repo })
@@ -234,7 +259,7 @@ function effectsDeployArgs(extra = [], options = {}) {
 
 async function deploy(extra, timeout = 120_000) {
   const flags = process.env.HARNESS_DEBUG ? ['-x', script] : [script]
-  return runAsync('sh', [...flags, '--instance', instance, '--host', base, '--host-version', 'host-1.0.0', '--repo', repo, '--hephi', join(instance, 'hephi'), '--releases', releases, '--timeout', '6', ...extra], { timeout, env: deployEnv })
+  return runAsync('sh', [...flags, '--instance', instance, '--host', base, '--host-version', 'host-1.0.0', '--repo', repo, '--hephi', join(instance, 'hephi'), '--releases', releases, '--timeout', '6', '--node', process.execPath, ...extra], { timeout, env: deployEnv })
 }
 function pointer() { try { return readlinkSync(join(instance, 'hephi', 'lib')) } catch { return '' } }
 function releaseDir(sha) { return join(releases, sha) }
@@ -253,6 +278,23 @@ function readRecords(kind) {
     .filter((name) => name.endsWith('.json') && (!kind || name.startsWith(`${kind}-`)))
     .map((name) => { try { return JSON.parse(readFileSync(join(dir, name), 'utf8')) } catch { return null } })
     .filter(Boolean)
+}
+function commitRepo(message) {
+  run('git', ['add', '.'], { cwd: repo })
+  const commit = run('git', ['commit', '-q', '-m', message], { cwd: repo })
+  if (commit.code !== 0) throw new Error(`cannot commit stub repo: ${commit.out}`)
+  return run('git', ['rev-parse', 'HEAD'], { cwd: repo }).out.trim()
+}
+function legacyRelease(sha) {
+  const dir = join(releases, sha)
+  mkdirSync(join(dir, 'lib'), { recursive: true })
+  writeFileSync(join(dir, 'lib', 'index.mjs'), 'export function describePlugin(){ return { name: "legacy", version: "0.0.0", commit: "legacy" } }\n')
+  writeFileSync(join(dir, 'lib', 'tools.mjs'), 'export function apply() {}\n')
+  writeFileSync(join(dir, 'meta.json'), JSON.stringify({
+    formatVersion: 1, pluginCommit: sha, sourceTree: sha, entrySha256: sha256(join(dir, 'lib', 'index.mjs')),
+    builtAt: new Date().toISOString(), buildCommand: 'legacy release fixture', hostVersion: 'host-1.0.0', source: 'legacy-fixture',
+  }, null, 2))
+  return dir
 }
 function renameFailEnv(at) {
   const counter = join(root, 'rename-counter')
@@ -283,7 +325,8 @@ function treeHash(dir) {
     for (const name of readdirSync(d).sort()) {
       const p = join(d, name)
       const stat = lstatSync(p)
-      if (stat.isDirectory()) walk(p)
+      if (stat.isSymbolicLink()) rows.push(`${p.slice(dir.length)}:link:${readlinkSync(p)}`)
+      else if (stat.isDirectory()) walk(p)
       else rows.push(`${p.slice(dir.length)}:${sha256(p)}`)
     }
   }
@@ -306,6 +349,23 @@ async function runMainSuite() {
   check('R3-T01 release A lib exists', existsSync(join(releaseDir(A), 'lib', 'index.mjs')))
   check('R3-T01 meta fields complete', metaA.formatVersion === 1 && metaA.pluginCommit === A && /^[0-9a-f]{64}$/.test(metaA.entrySha256) && metaA.hostVersion === 'host-1.0.0' && /^[0-9a-f]{40}$/.test(metaA.sourceTree) && typeof metaA.builtAt === 'string' && metaA.buildCommand.includes('pnpm check'), JSON.stringify(metaA))
   check('R3-T01 pointer points to release A', pointer() === join(releaseDir(A), 'lib'), pointer())
+  // T1：发布包自带同一冻结 lockfile 的生产依赖，且源码工作区 node_modules 不参与。
+  const lockfileA = join(repo, 'hephi', 'pnpm-lock.yaml')
+  check('T1 release A packages the frozen production dependency', existsSync(join(releaseDir(A), 'node_modules', 'stub-dep', 'package.json')) && existsSync(join(releaseDir(A), 'package.json')) && existsSync(join(releaseDir(A), 'pnpm-lock.yaml')), JSON.stringify(metaA.dependencies))
+  check('T1 release A records dependency provenance', metaA.dependencies && metaA.dependencies.lockfileSha256 === sha256(lockfileA) && metaA.dependencies.resolved['stub-dep'] === '1.0.0' && /^[0-9a-f]{64}$/.test(String(metaA.dependencies.nodeModulesSha256)), JSON.stringify(metaA.dependencies))
+  check('T1 release A records entry hashes for index and tools', metaA.entries && metaA.entries.index === sha256(join(releaseDir(A), 'lib', 'index.mjs')) && metaA.entries.tools === sha256(join(releaseDir(A), 'lib', 'tools.mjs')), JSON.stringify(metaA.entries))
+  check('T1 release A declares the two-entry activation marker', metaA.activation && metaA.activation.markerVersion === 1 && metaA.activation.entries.join(',') === 'index,tools', JSON.stringify(metaA.activation))
+  check('T1 source archive has no node_modules', !existsSync(join(repo, 'hephi', 'node_modules')), join(repo, 'hephi', 'node_modules'))
+  const importCheck = run(process.execPath, ['--input-type=module', '-e', `
+import { readFileSync } from 'node:fs'
+const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
+const index = await import('./lib/index.mjs')
+const tools = await import('./lib/tools.mjs')
+const resolved = {}
+for (const name of Object.keys(pkg.dependencies ?? {})) resolved[name] = import.meta.resolve(name)
+process.stdout.write(JSON.stringify({ commit: index.describePlugin().commit, dep: index.describePlugin().dep, toolsApply: typeof tools.apply, deps: Object.keys(resolved) }))
+`], { cwd: releaseDir(A) })
+  check('T1 published release imports index/tools and resolves deps outside the source tree', importCheck.code === 0 && JSON.parse(importCheck.out).commit === A && JSON.parse(importCheck.out).dep === 'stub-dep-ok' && JSON.parse(importCheck.out).toolsApply === 'function' && JSON.parse(importCheck.out).deps.includes('stub-dep'), importCheck.out)
 
   // R3-T02 同 SHA 重发
   writeFileSync(join(releaseDir(A), 'sentinel'), 'keep')
@@ -385,7 +445,11 @@ async function runMainSuite() {
 
   // R3-T08 重启失败自动恢复 previous
   state.health = 'marker'
-  writeStart(`echo attempt >> "${instance}/start.log"\nif [ ! -f "${instance}/fail-once-used" ]; then : > "${instance}/fail-once-used"; exit 1; fi\n: > "${instance}/started.marker"\nexec sleep 3600`)
+  writeStart(`echo attempt >> "${instance}/start.log"
+if [ ! -f "${instance}/fail-once-used" ]; then : > "${instance}/fail-once-used"; exit 1; fi
+${activationMarkers()}
+: > "${instance}/started.marker"
+exec sleep 3600`)
   rmSync(join(instance, 'started.marker'), { force: true })
   const t8 = await deploy(['--target', B, '--previous', A])
   check('R3-T08 restart failure exits nonzero', t8.code !== 0, t8.out)
@@ -420,6 +484,7 @@ async function runMainSuite() {
   check('R3-T17 success record complete', okDeploy && okDeploy.target === B && okDeploy.previous === A && okDeploy.hostVersion === 'host-1.0.0' && okDeploy.health === 'all-required-ready' && okDeploy.paused === true && typeof okDeploy.at === 'string', JSON.stringify(okDeploy))
   check('R3-T17 failure record complete', failedDeploy && typeof failedDeploy.target === 'string' && failedDeploy.hostVersion === 'host-1.0.0' && typeof failedDeploy.at === 'string', JSON.stringify(failedDeploy))
   check('R3-T17 success record uses real paused/load/health readback', okDeploy && okDeploy.paused === true && okDeploy.load && okDeploy.load.running === 0 && okDeploy.healthReadback && Object.keys(okDeploy.healthReadback).length === 10 && okDeploy.healthReadback.github.state === 'ready', JSON.stringify(okDeploy))
+  check('T1 success record keeps activation and import-probe evidence', Boolean(okDeploy) && okDeploy.activation === 'verified' && /"ok":true/.test(String(okDeploy.importProbe)) && String(okDeploy.activationEvidence).includes('index') && okDeploy.nodeVersion === process.version, JSON.stringify(okDeploy && { activation: okDeploy.activation, importProbe: okDeploy.importProbe, nodeVersion: okDeploy.nodeVersion }))
   const restoredDeploy = records.find((r) => r.action === 'deploy' && r.result === 'failed-restored-previous')
   check('R3-T08 restored record keeps both health evidences', restoredDeploy && restoredDeploy.restoreHealth === 'all-required-ready' && String(restoredDeploy.targetFailure).length > 2 && restoredDeploy.paused === true, JSON.stringify(restoredDeploy))
 
@@ -494,6 +559,7 @@ async function runNegativeSuite() {
     state.health = 'marker'
     writeStart(`echo attempt >> "${instance}/start.log"
 if [ ! -f "${instance}/fail-once-used" ]; then : > "${instance}/fail-once-used"; exit 1; fi
+${activationMarkers()}
 : > "${instance}/started.marker"
 exec sleep 3600`)
     rmSync(join(instance, 'started.marker'), { force: true })
@@ -514,6 +580,7 @@ exec sleep 3600`)
     state.health = 'marker'
     writeStart(`echo attempt >> "${instance}/start.log"
 if [ ! -f "${instance}/fail-once-used" ]; then : > "${instance}/fail-once-used"; exit 1; fi
+${activationMarkers()}
 : > "${instance}/started.marker"
 exec sleep 3600`)
     rmSync(join(instance, 'started.marker'), { force: true })
@@ -785,6 +852,7 @@ async function runF02Suite() {
   try {
     writeStart([
       `echo started >> "${instance}/start.log"`,
+      activationMarkers(),
       `if [ ! -f "${instance}/child-spawned" ]; then`,
       `  : > "${instance}/child-spawned"`,
       '  sleep 300 &',
@@ -889,10 +957,209 @@ async function runF02Suite() {
   }
 }
 
+// T1（issue #26）：发布依赖打包、停机前导入探针、双入口激活门禁与旧版本回滚边界。
+// 全部是聚焦假宿主测试：stub 仓库用 file: 依赖离线构建，假 start 脚本写激活标识；
+// 不访问真实宿主、不证明真实部署通过。
+async function runT1Suite() {
+  // T1-A：健康 ready 但缺少插件激活标识 → 目标失败并按既有路径恢复旧版本。
+  await initWorld()
+  try {
+    const setup = await deploy(['--target', A])
+    if (setup.code !== 0) { check('T1-A setup deploys A', false, setup.out); return }
+    state.health = 'marker'
+    writeStart(`echo attempt >> "${instance}/start.log"
+if [ ! -f "${instance}/fail-once-used" ]; then : > "${instance}/fail-once-used"; : > "${instance}/started.marker"; exec sleep 3600; fi
+${activationMarkers()}
+: > "${instance}/started.marker"
+exec sleep 3600`)
+    rmSync(join(instance, 'started.marker'), { force: true })
+    const startsBefore = starts()
+    const r = await deploy(['--target', B, '--previous', A])
+    const rec = readRecords('deploy').find((x) => x.result === 'failed-restored-previous')
+    check('T1-A healthy host without activation markers exits nonzero', r.code !== 0, `code=${r.code} ${r.out}`)
+    check('T1-A output names the missing activation markers', /activation markers missing/.test(r.out), r.out)
+    check('T1-A target failure kind is activation-missing', Boolean(rec) && rec.targetFailureKind === 'activation-missing', JSON.stringify(rec))
+    check('T1-A previous release restored and healthy', pointer() === join(releaseDir(A), 'lib') && Boolean(rec) && rec.restoreHealth === 'all-required-ready', `${pointer()} ${JSON.stringify(rec)}`)
+    check('T1-A restore start verified both activation entries', Boolean(rec) && rec.activation === 'verified' && /"index"/.test(String(rec.activationEvidence)) && /"tools"/.test(String(rec.activationEvidence)), JSON.stringify(rec && rec.activationEvidence))
+    check('T1-A healthy target did not restart more than once per attempt', starts() >= startsBefore + 2, `starts ${startsBefore} -> ${starts()}`)
+  } finally {
+    await closeWorld()
+  }
+
+  // T1-B：健康 ready 但只缺一个入口标识（tools）也必须失败。
+  await initWorld()
+  try {
+    const setup = await deploy(['--target', A])
+    if (setup.code !== 0) { check('T1-B setup deploys A', false, setup.out); return }
+    state.health = 'marker'
+    const shaLine = `sha=$(basename "$(dirname "$(readlink "${instance}/hephi/lib")")")`
+    writeStart(`echo attempt >> "${instance}/start.log"
+if [ ! -f "${instance}/fail-once-used" ]; then
+  : > "${instance}/fail-once-used"
+  ${shaLine}
+  echo "[hephi-activation] entry=index plugin=stub-hephi commit=$sha pid=$$"
+  : > "${instance}/started.marker"
+  exec sleep 3600
+fi
+${activationMarkers()}
+: > "${instance}/started.marker"
+exec sleep 3600`)
+    rmSync(join(instance, 'started.marker'), { force: true })
+    const r = await deploy(['--target', B, '--previous', A])
+    const rec = readRecords('deploy').find((x) => x.result === 'failed-restored-previous')
+    check('T1-B one missing entry marker fails the activation gate', r.code !== 0 && Boolean(rec) && rec.targetFailureKind === 'activation-missing', `code=${r.code} ${JSON.stringify(rec)}`)
+    check('T1-B restore start writes both entries again', pointer() === join(releaseDir(A), 'lib') && Boolean(rec) && rec.restoreHealth === 'all-required-ready', `${pointer()} ${JSON.stringify(rec)}`)
+  } finally {
+    await closeWorld()
+  }
+
+  // T1-C：旧格式 release（无 activation 元数据）回滚必须成功，并如实记 unverified-legacy。
+  await initWorld()
+  try {
+    const setup = await deploy(['--target', A])
+    if (setup.code !== 0) { check('T1-C setup deploys A', false, setup.out); return }
+    const legacySha = FULL('c')
+    legacyRelease(legacySha)
+    // 旧 release 不可能有激活标识：start 只写健康标识。
+    writeStart(`echo attempt >> "${instance}/start.log"\n: > "${instance}/started.marker"\nexec sleep 3600`)
+    rmSync(join(instance, 'started.marker'), { force: true })
+    const r = await deploy(['--rollback', '--target', legacySha])
+    const rec = readRecords('rollback').find((x) => x.result === 'ok')
+    check('T1-C legacy release rollback still succeeds', r.code === 0, `code=${r.code} ${r.out}`)
+    check('T1-C pointer switches to the legacy release', pointer() === join(releaseDir(legacySha), 'lib'), pointer())
+    check('T1-C legacy activation is recorded as unverified-legacy', Boolean(rec) && rec.activation === 'unverified-legacy' && rec.importProbe === 'skipped-legacy', JSON.stringify(rec))
+  } finally {
+    await closeWorld()
+  }
+
+  // T1-D：构建成功但 release 导入时缺运行依赖 → 停机前拒绝，宿主/指针不变。
+  await initWorld()
+  try {
+    const setup = await deploy(['--target', A])
+    if (setup.code !== 0) { check('T1-D setup deploys A', false, setup.out); return }
+    writeFileSync(join(repo, 'hephi', 'build.mjs'), [
+      "import { mkdirSync, writeFileSync } from 'node:fs'",
+      "mkdirSync('lib', { recursive: true })",
+      "writeFileSync('lib/index.mjs', \"import 'not-packaged-dep'\\nexport function describePlugin(){return {commit: process.env.HEPHI_BUILD_COMMIT}}\\nexport function apply(){}\\n\")",
+      "writeFileSync('lib/tools.mjs', \"export function apply(){}\\n\")",
+      '',
+    ].join('\n'))
+    const brokenSha = commitRepo('broken runtime dependency')
+    const oldPid = hostPidValue()
+    const startsBefore = starts()
+    const r = await deploy(['--target', brokenSha, '--previous', A])
+    check('T1-D import probe failure rejects before stop', r.code !== 0 && /import probe failed|failed the host-Node import probe/.test(r.out), `code=${r.code} ${r.out}`)
+    check('T1-D host and pointer are untouched', pointer() === join(releaseDir(A), 'lib') && hostPidValue() === oldPid && pidAlive(oldPid) && starts() === startsBefore, `pointer=${pointer()} pid=${hostPidValue()} starts ${startsBefore} -> ${starts()}`)
+    check('T1-D no published release for the failed import probe', !existsSync(releaseDir(brokenSha)), releaseDir(brokenSha))
+  } finally {
+    await closeWorld()
+  }
+
+  // T1-E：package.json 声明了未写入冻结 lockfile 的依赖 → 构建阶段（停机前）拒绝。
+  await initWorld()
+  try {
+    const setup = await deploy(['--target', A])
+    if (setup.code !== 0) { check('T1-E setup deploys A', false, setup.out); return }
+    const pkgFile = join(repo, 'hephi', 'package.json')
+    const pkg = JSON.parse(readFileSync(pkgFile, 'utf8'))
+    pkg.dependencies['not-in-lockfile'] = '^9.9.9'
+    writeFileSync(pkgFile, JSON.stringify(pkg, null, 2))
+    const unlockedSha = commitRepo('dependency missing from the frozen lockfile')
+    const oldPid = hostPidValue()
+    const startsBefore = starts()
+    const r = await deploy(['--target', unlockedSha, '--previous', A])
+    check('T1-E frozen lockfile mismatch rejects before stop', r.code !== 0 && /build failed|ERR_PNPM|lockfile/i.test(r.out), `code=${r.code} ${r.out}`)
+    check('T1-E host and pointer are untouched on lockfile failure', pointer() === join(releaseDir(A), 'lib') && hostPidValue() === oldPid && starts() === startsBefore, `pointer=${pointer()} pid=${hostPidValue()} starts ${startsBefore} -> ${starts()}`)
+    check('T1-E no published release for the lockfile failure', !existsSync(releaseDir(unlockedSha)), releaseDir(unlockedSha))
+  } finally {
+    await closeWorld()
+  }
+
+  // T1-F：声明 peerDependencies 但未提供 --peer-root → 停机前显式拒绝（peer 解析不得猜测）。
+  await initWorld()
+  try {
+    const setup = await deploy(['--target', A])
+    if (setup.code !== 0) { check('T1-F setup deploys A', false, setup.out); return }
+    const pkgFile = join(repo, 'hephi', 'package.json')
+    const pkg = JSON.parse(readFileSync(pkgFile, 'utf8'))
+    mkdirSync(join(repo, 'hephi', 'vendor', 'stub-peer'), { recursive: true })
+    writeFileSync(join(repo, 'hephi', 'vendor', 'stub-peer', 'package.json'), JSON.stringify({ name: 'stub-peer', version: '1.0.0', type: 'module', main: 'index.js' }, null, 2))
+    writeFileSync(join(repo, 'hephi', 'vendor', 'stub-peer', 'index.js'), "export const VERSION = 'bundled-1.0.0'\n")
+    pkg.dependencies['stub-peer'] = 'file:./vendor/stub-peer'
+    pkg.peerDependencies = { 'stub-peer': '^1.0.0' }
+    writeFileSync(pkgFile, JSON.stringify(pkg, null, 2))
+    const lock = run('pnpm', ['install', '--lockfile-only', '--offline'], { cwd: join(repo, 'hephi') })
+    if (lock.code !== 0) throw new Error(`cannot refresh the stub lockfile: ${lock.out}`)
+    const peerSha = commitRepo('peer dependency without an explicit peer root')
+    const oldPid = hostPidValue()
+    const startsBefore = starts()
+    const r = await deploy(['--target', peerSha, '--previous', A])
+    check('T1-F declared peer without --peer-root rejects before stop', r.code !== 0 && /peer-root|peerDependencies/.test(r.out), `code=${r.code} ${r.out}`)
+    check('T1-F host untouched on missing peer root', pointer() === join(releaseDir(A), 'lib') && hostPidValue() === oldPid && starts() === startsBefore, `pointer=${pointer()} pid=${hostPidValue()} starts ${startsBefore} -> ${starts()}`)
+    check('T1-F no published release without explicit peer resolution', !existsSync(releaseDir(peerSha)), releaseDir(peerSha))
+  } finally {
+    await closeWorld()
+  }
+
+  // T1-G：生产安装已放入同名 peer（peer 同时是生产依赖）时，只在 incoming 内替换为宿主
+  // peer 入口；不改构建目录/宿主，且替换有记录。真实 pnpm --prod 对纯 devDeps peer 不安装，
+  // 本用例专门覆盖“路径已存在”的边界。
+  await initWorld()
+  try {
+    const setup = await deploy(['--target', A])
+    if (setup.code !== 0) { check('T1-G setup deploys A', false, setup.out); return }
+    const hostPeerRoot = join(root, 'host-peers')
+    mkdirSync(join(hostPeerRoot, 'stub-peer'), { recursive: true })
+    writeFileSync(join(hostPeerRoot, 'stub-peer', 'package.json'), JSON.stringify({ name: 'stub-peer', version: '2.0.0', type: 'module', main: 'index.js' }, null, 2))
+    writeFileSync(join(hostPeerRoot, 'stub-peer', 'index.js'), "export const VERSION = 'host-2.0.0'\n")
+    mkdirSync(join(repo, 'hephi', 'vendor', 'stub-peer'), { recursive: true })
+    writeFileSync(join(repo, 'hephi', 'vendor', 'stub-peer', 'package.json'), JSON.stringify({ name: 'stub-peer', version: '1.0.0', type: 'module', main: 'index.js' }, null, 2))
+    writeFileSync(join(repo, 'hephi', 'vendor', 'stub-peer', 'index.js'), "export const VERSION = 'bundled-1.0.0'\n")
+    const pkgFile = join(repo, 'hephi', 'package.json')
+    const pkg = JSON.parse(readFileSync(pkgFile, 'utf8'))
+    pkg.dependencies['stub-peer'] = 'file:./vendor/stub-peer'
+    pkg.peerDependencies = { 'stub-peer': '^2.0.0' }
+    writeFileSync(pkgFile, JSON.stringify(pkg, null, 2))
+    const lock = run('pnpm', ['install', '--lockfile-only', '--offline'], { cwd: join(repo, 'hephi') })
+    if (lock.code !== 0) throw new Error(`cannot refresh the stub lockfile: ${lock.out}`)
+    const peerSha = commitRepo('peer that is also a production dependency')
+    const r = await deploy(['--target', peerSha, '--previous', A, '--peer-root', hostPeerRoot])
+    const metaG = existsSync(join(releaseDir(peerSha), 'meta.json')) ? JSON.parse(readFileSync(join(releaseDir(peerSha), 'meta.json'), 'utf8')) : null
+    const peerLink = join(releaseDir(peerSha), 'node_modules', 'stub-peer')
+    check('T1-G deploy with an existing peer path succeeds', r.code === 0, `code=${r.code} ${r.out}`)
+    check('T1-G incoming peer entry is replaced by the explicit host peer link', Boolean(metaG) && metaG.dependencies.peers['stub-peer'] === join(hostPeerRoot, 'stub-peer') && metaG.dependencies.peersReplaced.includes('stub-peer') && existsSync(peerLink), JSON.stringify(metaG && metaG.dependencies))
+    check('T1-G host peer version wins over the packaged one', existsSync(peerLink) && JSON.parse(readFileSync(join(peerLink, 'package.json'), 'utf8')).version === '2.0.0', peerLink)
+  } finally {
+    await closeWorld()
+  }
+
+  // T1-H：新格式 release 缺 activation 元数据 → 停机前拒绝，禁止静默退回 health-only 门禁。
+  await initWorld()
+  try {
+    const setup = await deploy(['--target', A])
+    if (setup.code !== 0) { check('T1-H setup deploys A', false, setup.out); return }
+    const strippedSha = FULL('e')
+    const copy = run('cp', ['-R', releaseDir(A), releaseDir(strippedSha)])
+    if (copy.code !== 0) throw new Error(`cannot copy the release fixture: ${copy.out}`)
+    const metaFile = join(releaseDir(strippedSha), 'meta.json')
+    const meta = JSON.parse(readFileSync(metaFile, 'utf8'))
+    meta.pluginCommit = strippedSha
+    delete meta.activation
+    writeFileSync(metaFile, JSON.stringify(meta, null, 2))
+    const startsBefore = starts()
+    const r = await deploy(['--rollback', '--target', strippedSha])
+    check('T1-H new-format release without activation metadata is rejected', r.code !== 0 && /missing activation metadata/.test(r.out), `code=${r.code} ${r.out}`)
+    check('T1-H no health-only fallback and no restart', pointer() === join(releaseDir(A), 'lib') && starts() === startsBefore, `pointer=${pointer()} starts ${startsBefore} -> ${starts()}`)
+  } finally {
+    await closeWorld()
+  }
+}
+
 await runMainSuite()
 await runNegativeSuite()
 await runRemediationSuite()
 await runF02Suite()
+await runT1Suite()
 
 for (const line of results) console.log(line)
 if (failures > 0) {
