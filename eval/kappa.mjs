@@ -36,6 +36,12 @@ if (items.length === 0) {
 const labels = Array.isArray(data.labels) && data.labels.length > 0
   ? data.labels
   : [...new Set(items.flatMap((item) => [item.raterA, item.raterB]))]
+// K01：与 eval/stats/kappa.py 同口径——labels 有重复项直接拒绝（重复类别会把 pe 抬到 2、
+// kappa 虚高为 1），不得继续计算。
+if (new Set(labels).size !== labels.length) {
+  console.error(`labels 有重复项：${labels.join(',')}（与 eval/stats/kappa.py 的拒绝口径一致）`)
+  process.exit(2)
+}
 for (const item of items) {
   for (const key of ['raterA', 'raterB']) {
     if (!labels.includes(item[key])) {
