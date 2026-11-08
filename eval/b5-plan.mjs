@@ -35,7 +35,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const PLAN_SCHEMA_VERSION = 1
-export const KNOWN_GROUPS = ['off', 'native', 'staged']
+export const KNOWN_GROUPS = ['legacy-system', 'full-package', 'off', 'native', 'staged']
+// PREREG v1.2: legacy-system=原系统组(含旧赫菲) / full-package=整包组；off/native 为旧 B5 历史值，新运行禁用
 export const TASK_CATEGORIES = ['defect-fix', 'new-feature', 'behavior-preserving-refactor', 'cross-module', 'staged-suitable']
 const SAFE_TASK_ID = /^[a-z0-9][a-z0-9._-]{1,63}$/
 
@@ -177,7 +178,7 @@ export function generatePlan({ tasks, groups, seed, repeatFraction, generatedAt 
 }
 
 export function parseArgs(argv) {
-  const options = { tasks: null, groups: ['off', 'native'], seed: null, repeatFraction: 0.2, out: null, dryRun: false, selfTest: false }
+  const options = { tasks: null, groups: ['legacy-system', 'full-package'], seed: null, repeatFraction: 0.2, out: null, dryRun: false, selfTest: false }
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
     if (arg === '--self-test') { options.selfTest = true; continue }

@@ -42,7 +42,7 @@ import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
-const ARMS = new Set(['off', 'native', 'staged'])
+const ARMS = new Set(['legacy-system', 'full-package', 'off', 'native', 'staged'])
 const DEFAULT_SEED = 20261107
 
 // 硬痕迹：命中即拒绝导出（fail-closed）。只匹配能直接暴露组别/赫菲的标记，
@@ -50,16 +50,18 @@ const DEFAULT_SEED = 20261107
 const HARD_TRACE_PATTERNS = [
   { id: 'hephi', re: /hephi/i },
   { id: 'hephi-zh', re: /赫菲/ },
+  { id: 'full-package-group', re: /full-package\s*(?:arm|group|组)/i },
+  { id: 'legacy-system-group', re: /legacy-system\s*(?:arm|group|组)/i },
   { id: 'native-group', re: /native\s*(?:arm|group|组)/i },
   { id: 'off-group', re: /\boff\s*(?:arm|group|组)/i },
   { id: 'staged-group', re: /staged\s*(?:arm|group|组)/i },
   { id: 'shadow-group', re: /shadow\s*(?:arm|group|组)/i },
-  { id: 'arm-equals', re: /\barm\s*[=:]\s*(?:off|native|staged|shadow)\b/i },
+  { id: 'arm-equals', re: /\barm\s*[=:]\s*(?:off|native|staged|shadow|legacy-system|full-package)\b/i },
   { id: 'plugin-commit', re: /pluginCommit|loadedShaReadback/i },
   { id: 'roadmap', re: /ROADMAP[-_ ]?95/i },
   { id: 'branch-ref', re: /\b(?:agent|docs|codex|fix|feat)\/[a-z0-9][a-z0-9._-]*/i },
   { id: 'pull-ref', re: /\bpull\/\d+\b|#\d{2,4}\b(?=[^\n]*(?:merge|pr\b))/i },
-  { id: 'run-id-arm', re: /\b[a-z0-9][a-z0-9._-]*[-_](?:off|native|staged)[-_][a-z0-9._-]+\b/i },
+  { id: 'run-id-arm', re: /\b[a-z0-9][a-z0-9._-]*[-_](?:off|native|staged|legacy-system|full-package)[-_][a-z0-9._-]+\b/i },
   { id: 'decision-log', re: /decisions\.jsonl/i },
 ]
 

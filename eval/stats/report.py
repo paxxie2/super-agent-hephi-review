@@ -66,6 +66,14 @@ except ImportError as exc:  # pragma: no cover - 环境相关
 # ---- 常量（占位值必须由负责人确认，见 eval/PREREG.md） ----------------------
 
 DEFAULT_SEED = 20261108
+# PREREG v1.2 分组：legacy-system=原系统组(对照) / full-package=整包组(处理)；
+# off/native 为旧 B5 历史值，读取时归一化为 control/treatment。
+CONTROL_ARMS = ("legacy-system", "off")
+TREATMENT_ARMS = ("full-package", "native")
+def normalize_arm(arm: str) -> str:
+    if arm in CONTROL_ARMS: return "control"
+    if arm in TREATMENT_ARMS: return "treatment"
+    return arm
 DEFAULT_N_BOOT = 10000
 DEFAULT_MIN_PAIRS = 67
 DEFAULT_NONINFERIORITY_MARGIN = -0.05
@@ -203,7 +211,7 @@ def load_runs(document) -> list[Run]:
         raise ValueError("输入必须是运行记录数组，或 {\"runs\": [...]} 且非空")
     runs = [parse_run(record) for record in records]
     for run in runs:
-        if run.arm not in ("off", "native", "staged"):
+        if run.arm not in ("legacy-system", "full-package", "off", "native", "staged"):
             raise ValueError(f"arm 非法：{run.arm}")
     return runs
 
@@ -269,11 +277,12 @@ def paired_tasks(runs: list[Run], repetition: int) -> dict[str, dict[str, Run]]:
     for run in runs:
         if run.repetition != repetition:
             continue
-        if run.arm not in ("off", "native"):
+        arm = normalize_arm(run.arm)
+        if arm not in ("control", "treatment"):
             continue
         bucket = pairs.setdefault(run.task_id, {})
-        bucket.setdefault(run.arm, run)
-    return {task: arms for task, arms in pairs.items() if "off" in arms and "native" in arms}
+        bucket.setdefault(arm, run)
+    return {task: arms for task, arms in pairs.items() if "control" in arms and "treatment" in arms}
 
 
 def evaluate_metric(pairs: dict[str, dict[str, Run]], metric_key: str, direction: str,
@@ -287,8 +296,8 @@ def evaluate_metric(pairs: dict[str, dict[str, Run]], metric_key: str, direction
     improved_pairs = 0
     worsened_pairs = 0
     for arms in pairs.values():
-        off_value = outcome(arms["off"], metric_key)
-        native_value = outcome(arms["native"], metric_key)
+        off_value = outcome(arms["control"], metric_key)
+        native_value = outcome(arms["treatment"], metric_key)
         if off_value is None or native_value is None:
             continue
         off_total += 1
@@ -341,8 +350,8 @@ def evaluate_metric(pairs: dict[str, dict[str, Run]], metric_key: str, direction
 def evaluate_cost(pairs: dict[str, dict[str, Run]], runs: list[Run], caps: dict) -> dict:
     # PREREG §7：环境不可用/任务卡不一致等被排除出**效果指标**的运行，记录保留并计入成本/稳定性。
     # 因此成本统计包含全部运行（不再按 env_available 过滤）；效果指标仍只用有效配对。
-    native_runs = [run for run in runs if run.arm == "native"]
-    off_runs = [run for run in runs if run.arm == "off"]
+    native_runs = [run for run in runs if normalize_arm(run.arm) == "treatment"]
+    off_runs = [run for run in runs if normalize_arm(run.arm) == "control"]
     native_minutes = [run.minutes for run in native_runs]
     off_minutes = [run.minutes for run in off_runs]
     native_tokens = [float(run.tokens) for run in native_runs if run.tokens is not None]
@@ -350,9 +359,9 @@ def evaluate_cost(pairs: dict[str, dict[str, Run]], runs: list[Run], caps: dict)
     human_median = median([float(run.human_interventions) for run in native_runs]) if native_runs else None
     very_slow = []
     for arms in pairs.values():
-        control = arms["off"].minutes
+        control = arms["control"].minutes
         if control > 0:
-            very_slow.append(arms["native"].minutes > 3 * control)
+            very_slow.append(arms["treatment"].minutes > 3 * control)
     very_slow_share = (sum(very_slow) / len(very_slow)) if very_slow else None
     values = {
         "native_median_minutes": median(native_minutes),
@@ -387,7 +396,7 @@ def repeat_consistency(runs: list[Run], metric_key: str) -> dict:
     """20% 重复运行的一致性：同一 (task, arm) 的 repetition=1 与 repetition>=2 结果是否一致。"""
     by_key: dict[tuple[str, str], dict[int, bool]] = {}
     for run in runs:
-        if not run.env_available or run.arm not in ("off", "native"):
+        if not run.env_available or normalize_arm(run.arm) not in ("control", "treatment"):
             continue
         value = outcome(run, metric_key)
         if value is None:

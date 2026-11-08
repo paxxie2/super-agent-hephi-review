@@ -1,32 +1,32 @@
 # B5 运行手册（RUNBOOK）— ROADMAP-95 工作线 B
 
-状态：**骨架 v0.1（2026-11-07）· 供 review**。本手册规定第一轮对照实验（Q1：同一任务卡 off vs native）
+状态：**v0.2（2026-11-09）· 供 review**。本手册规定第一轮对照实验（Q1：同一任务卡 原系统组 legacy-system vs 整包组 full-package，PREREG v1.2 口径）
 的分组定义、任务卡投递、计划生成约束、运行记录、盲评与统计流程。
 
 > 本版**没有执行任何真实运行**；所有宿主相关能力（drain 字段、hostVersion、实载 SHA 回读、P4 shadow）
 > 均沿用 ROADMAP-95 现状核对与计划审查（`ROADMAP95-plan-review.md`）的“未验证/blocked”口径。
 > 本手册不改变 R3.7 blocked 与 P8 部分完成的结论。
 
-## 1. 名词与分组定义（统一口径，避免 off/native/shadow 混用）
+## 1. 名词与分组定义（统一口径；off/native 为旧 B5 历史值，新运行禁用）
 
 | 名词 | 定义 | 记录字段 |
 | --- | --- | --- |
 | **native** | 挂载赫菲插件（enforce 模式），Issue 走 `hephi/delivery` → Ticket → Worker，产生合同与检查记录 | `arm=native` |
-| **off** | **不挂载赫菲**（不打 `hephi/delivery` 标签、不挂载插件），但使用与 native **逐字节相同**的任务卡 | `arm=off` |
+| **legacy-system（原系统组）** | 以 T01 冻结制品运行（HEPHI `6d24e1b` + SA `62d7d53` + 原配置，含旧赫菲），使用与整包组**逐字节相同**的任务卡 | `arm=legacy-system` |
 | **staged** | 挂载赫菲且使用 staged 执行方式；**只用于 Q3 单独实验**、只用 `staged-suitable` 任务 | `arm=staged` |
 | **shadow** | 执行机制，不是分组：Worker 完全不受影响，同时按同一套规则记录违规（P4）。**只允许 `arm=off` + `executionMode=shadow`** | `executionMode=shadow` |
 
 硬性规则：
 
 1. `arm` 是**分析分组**，`executionMode` 是**执行机制**；两者不得互相替代。
-2. off 组严禁出现赫菲合同/Ticket/检查记录；出现即该运行无效（记录保留，标 `invalid`）。
+2. 原系统组严禁出现任何新制品（新插件 SHA/新提示/新配置）；出现即该运行无效（记录保留，标 `invalid`）。旧 B5 的"off 不挂赫菲"规则自 v1.2 废弃（原系统组合法包含旧赫菲）。
 3. shadow 只有在 P4 影子模式经负责人确认可用后才可启用；不可用时 off 组按普通模式运行，
    `executionMode=normal`，并在报告中注明“未用 shadow，机械指标可能不同口径”。
 4. 不得为了凑数把 staged 运行并入 native 分析。
 
 ## 2. 实验轮次与范围
 
-- **第一轮（必做，Q1）**：同一任务集，off vs native；本手册只覆盖这一轮。
+- **第一轮（必做，Q1）**：同一任务集，legacy-system vs full-package；本手册只覆盖这一轮。
 - Q2（普通需求 vs 任务卡需求，都不开赫菲）与 Q3（native vs staged）是**后续单独实验**，
   另行修订 RUNBOOK；只做过 Q1 时报告不得声称 Q2/Q3 已验证。
 - 仓库/模型范围按 `eval/PREREG.md` §10 D-7 决定；**每个仓库/模型/类别分层分别估计样本量**，
