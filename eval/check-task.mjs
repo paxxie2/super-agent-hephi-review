@@ -86,16 +86,16 @@ function sameIds(list) {
 // 已确认的动态字段；原始 stdout/stderr 与 outputSha256 始终保留，归一化规则写入
 // validation 报告（顶层 normalization 及 checks.{base,reference}.normalization）。
 const NORMALIZATION = {
-  version: 3,
+  version: 4,
   scope: 'stdout+stderr',
   rules: [
     'CRLF/CR → LF',
-    '行首日志时间戳（可带 [] 或 " - " 分隔）只替换时间本身为 <log-timestamp>，保留日志级别与正文',
-    '仅日志元数据行上的关联 ID 键值（requestId/traceId/spanId/pid/correlationId 等）→ <dynamic>',
-    'AssertionError/assert/actual=/expected= 等业务断言行内的键值（含 requestId）不归一化；timestamp/createdAt 等业务值一律不归一化',
+    '行首结构化日志前缀（[ts] [LEVEL] 或 ts - LEVEL -）的时间只替换为 <log-timestamp>，保留级别与正文',
+    '关联 ID 键值（requestId/traceId/spanId/pid/correlationId 等）只在带上述日志前缀的日志行内 → <dynamic>',
+    '普通 JSON 行、AssertionError 任意行（含多行负载）、actual=/expected= 等业务内容一律不归一化；timestamp/createdAt 等业务值也不归一化',
     '裸值、actual=/expected= 之后的值、普通文本中的时间/UUID 不归一化（业务结果差异必须保留）',
   ],
-  note: 'C02：级别、正文与业务断言负载保留；只有已确认的日志时间戳与日志元数据上下文被归一化。原始 stdout/stderr 与 outputSha256 不删除。',
+  note: 'N02：只有带结构化日志前缀的日志行才做时间/关联 ID 归一化；普通 JSON 与断言负载（含多行）保留原值。原始 stdout/stderr 与 outputSha256 不删除。',
 }
 
 const METADATA_KEYS = 'requestId|request_id|traceId|trace_id|spanId|span_id|pid|correlationId|correlation_id|x-request-id'
@@ -104,7 +104,9 @@ const METADATA_KV_PATTERN = new RegExp(
   'gi',
 )
 const LOG_LEVELS = 'TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL'
-// C02：只替换时间部分，保留 [LEVEL] 与正文；两种日志前缀均支持。
+// N02：只有带结构化日志前缀的行才归一化；普通 JSON/断言负载不参与关联 ID 归一化。
+const LOG_LINE_TEST_BRACKET = new RegExp(`^\\[\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?\\]\\s*\\[(?:${LOG_LEVELS})\\]`)
+const LOG_LINE_TEST_DASH = new RegExp(`^\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?\\s+-\\s+(?:${LOG_LEVELS})\\s+-`)
 const LOG_TIMESTAMP_BRACKET_PATTERN = new RegExp(
   `^(\\[\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?\\])(\\s*\\[(?:${LOG_LEVELS})\\])`,
   'gm',
@@ -113,17 +115,16 @@ const LOG_TIMESTAMP_DASH_PATTERN = new RegExp(
   `^(\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?)(\\s+-\\s+(?:${LOG_LEVELS})\\s+-)`,
   'gm',
 )
-// C02：业务断言行内的键值不归一化（requestId 也可能出现在断言负载里）。
-const ASSERTION_CONTEXT_PATTERN = /AssertionError|\bactual\s*=|\bexpected\s*=|^\s*(?:assert|FAIL(?:ED)?)\b/mi
 
 function normalizeStableOutput(text) {
-  let out = String(text ?? '').replace(/\r\n?/g, '\n')
-  // C02：只替换日志行首的时间字段，保留级别与正文。
-  out = out.replace(LOG_TIMESTAMP_BRACKET_PATTERN, '<log-timestamp>$2')
-  out = out.replace(LOG_TIMESTAMP_DASH_PATTERN, '<log-timestamp>$2')
-  // C02：关联 ID 只在日志元数据行归一；断言上下文（AssertionError/actual=/expected= 等）原样保留。
-  out = out.split('\n').map(line => ASSERTION_CONTEXT_PATTERN.test(line) ? line : line.replace(METADATA_KV_PATTERN, '$1<dynamic>')).join('\n')
-  return out
+  const lines = String(text ?? '').replace(/\r\n?/g, '\n').split('\n')
+  return lines.map(line => {
+    const isLogLine = LOG_LINE_TEST_BRACKET.test(line) || LOG_LINE_TEST_DASH.test(line)
+    if (!isLogLine) return line
+    let normalized = line.replace(LOG_TIMESTAMP_BRACKET_PATTERN, '<log-timestamp>$2')
+    normalized = normalized.replace(LOG_TIMESTAMP_DASH_PATTERN, '<log-timestamp>$2')
+    return normalized.replace(METADATA_KV_PATTERN, '$1<dynamic>')
+  }).join('\n')
 }
 
 const VALID_BASE_FAILURE_CLASSES = new Set(['target-assertion-failed', 'target-symbol-missing'])
@@ -280,58 +281,194 @@ function moduleBelongsToTarget(moduleName, roots) {
  * R5：归属核对。只有模块/符号属于任务目标（worktree 内 traceback 帧，或缺失模块名匹配
  * 本地包根）才算 target-symbol-missing；第三方依赖/客户端版本问题返回 null（归 environment-error）。
  */
+/** 读取 worktree 内文本文件；失败返回空串。 */
+function readTextSafe(file) {
+  try { return readFileSync(file, 'utf8') } catch { return '' }
+}
+
+/** 解析 traceback：帧路径、函数、以及帧后源码行（参数绑定失败时被调函数无帧）。 */
+function parseTraceback(text) {
+  const lines = String(text ?? '').split('\n')
+  const frames = []
+  for (let index = 0; index < lines.length; index++) {
+    const match = /^\s*File "([^"]+)", line (\d+), in (.+)$/.exec(lines[index])
+    if (!match) continue
+    let sourceLine = null
+    for (let next = index + 1; next < Math.min(index + 4, lines.length); next++) {
+      const candidate = lines[next]
+      if (/^\s*File "/.test(candidate)) break
+      if (/^\s{2,}\S/.test(candidate)) { sourceLine = candidate.trim(); break }
+    }
+    frames.push({ path: match[1], func: match[3].trim(), sourceLine })
+  }
+  return frames
+}
+
+/** 从「模块.名字(...)」取限定调用；无源码行时从异常消息取被调符号。 */
+function calledExpression(frames, text) {
+  const message = String(text ?? '')
+  const messageCall = /(?:TypeError|ValueError|AttributeError|KeyError|IndexError|RuntimeError|NotImplementedError|NameError):\s*([A-Za-z_][\w.]*)\(\)/.exec(message)
+  const messageName = messageCall ? messageCall[1].split('.').pop() : null
+  for (let index = frames.length - 1; index >= 0; index--) {
+    const source = frames[index].sourceLine
+    if (!source) continue
+    const matches = [...source.matchAll(/([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*\(/g)].map(match => match[1])
+    if (matches.length === 0) continue
+    // 优先选与异常消息同名的被调函数（源码行可能含 print(...) 等外层调用）；否则取最内层。
+    const preferred = messageName ? matches.find(name => name.split('.').pop() === messageName) : null
+    return preferred ?? matches[matches.length - 1]
+  }
+  return messageCall ? messageCall[1] : null
+}
+
+/** 把 import 语句解析成 alias -> 完整模块名（只处理绝对模块；相对导入不用于归属）。 */
+function importBindings(content) {
+  const modules = new Map()
+  const symbols = new Map()
+  for (const match of content.matchAll(/^\s*import\s+([A-Za-z_][\w.]*)(?:\s+as\s+([A-Za-z_]\w*))?/gm)) {
+    modules.set(match[2] ?? match[1].split('.')[0], match[1])
+  }
+  for (const match of content.matchAll(/^\s*from\s+([A-Za-z_][\w.]*)\s+import\s+([^\n#]+)/gm)) {
+    const module = match[1]
+    for (const spec of match[2].split(',')) {
+      const item = /^\s*([A-Za-z_]\w*)(?:\s+as\s+([A-Za-z_]\w*))?\s*$/.exec(spec)
+      if (!item) continue
+      symbols.set(item[2] ?? item[1], module)
+      // 该符号也可能是子模块（from pkg import submodule as alias）。
+      modules.set(item[2] ?? item[1], `${module}.${item[1]}`)
+    }
+  }
+  return { modules, symbols }
+}
+
+/** 模块名是否解析到 worktree 内的 Python 文件（sys.path 可能是仓库根或其子目录）。 */
+function moduleFileInWorktree(worktree, moduleName, packageRoots = []) {
+  const segments = String(moduleName).split('.').filter(Boolean)
+  if (segments.length === 0) return null
+  const bases = [worktree]
+  for (const root of packageRoots) if (root && !root.includes('*')) bases.push(join(worktree, root))
+  try {
+    for (const entry of readdirSync(worktree, { withFileTypes: true })) {
+      if (entry.isDirectory() && entry.name !== '.git' && entry.name !== 'node_modules') bases.push(join(worktree, entry.name))
+    }
+  } catch { /* ignore */ }
+  for (const base of bases) {
+    const file = join(base, ...segments) + '.py'
+    if (existsSync(file)) return file
+    const init = join(base, ...segments, '__init__.py')
+    if (existsSync(init)) return init
+  }
+  return null
+}
+
+/** 文件内是否定义/从本地模块导入了 `name`（同名定义只在无关文件不算）。 */
+function fileDefinesOrImportsLocal(filePath, name, worktree, packageRoots) {
+  const content = readTextSafe(filePath)
+  if (new RegExp(`^\\s*(?:async\\s+)?def\\s+${name}\\s*\\(`, 'm').test(content)) return { evidence: `def ${name} in ${filePath}` }
+  if (new RegExp(`^\\s*class\\s+${name}\\b`, 'm').test(content)) return { evidence: `class ${name} in ${filePath}` }
+  const bindings = importBindings(content)
+  const moduleName = bindings.symbols.get(name) ?? bindings.modules.get(name)
+  if (moduleName) {
+    const moduleFile = moduleFileInWorktree(worktree, moduleName, packageRoots)
+    if (moduleFile) return { evidence: `import ${name} from local module ${moduleName} (${moduleFile})` }
+  }
+  return null
+}
+
+/** 从限定调用表达式解析模块：优先调用文件里的 import 绑定，其次本地包根/模块路径。 */
+function resolveQualifiedModule(expression, frameFile, worktree, packageRoots) {
+  const parts = expression.split('.')
+  const functionName = parts.pop()
+  if (!functionName) return null
+  const qualifier = parts.join('.')
+  const content = frameFile ? readTextSafe(frameFile) : ''
+  const bindings = importBindings(content)
+  const first = qualifier.split('.')[0]
+  let moduleName = null
+  if (bindings.modules.has(first)) {
+    const base = bindings.modules.get(first)
+    const rest = qualifier.split('.').slice(1)
+    moduleName = rest.length ? `${base}.${rest.join('.')}` : base
+  } else if (bindings.symbols.has(first)) {
+    moduleName = qualifier === first ? bindings.symbols.get(first) : `${bindings.symbols.get(first)}.${qualifier.split('.').slice(1).join('.')}`
+  } else if (packageRoots.includes(first)) {
+    moduleName = qualifier
+  } else {
+    moduleName = qualifier
+  }
+  const moduleFile = moduleFileInWorktree(worktree, moduleName, packageRoots)
+  return moduleFile ? { moduleName, moduleFile, functionName } : null
+}
+
 function targetSymbolEvidence(text, { worktree, packageRoots = [], sourceIndex = null } = {}) {
   const index = sourceIndex ?? (worktree ? buildSourceIndex(worktree) : { functions: new Map(), classes: new Map(), modules: new Map() })
-  // 1) 共享的本地包根证据（ModuleNotFoundError/ImportError 的模块名）。
+  const frames = parseTraceback(text)
+  const worktreeFrames = frames.filter(frame => pathInsideWorktree(frame.path, worktree))
+  const stdinFrames = frames.length > 0 && frames.every(frame => frame.path === '<stdin>' || frame.path === '<string>' || frame.path === '<module>')
+  // 1) 本地包缺失模块：模块名必须是本地包根（或能解析为 worktree 模块文件）。
   for (const name of text.matchAll(IMPORT_ERROR_PATTERN)) {
-    if (moduleBelongsToTarget(name[1], packageRoots)) {
-      return { reason: `missing module '${name[1]}' matches local package root (${packageRoots.join(', ')})` }
+    if (moduleBelongsToTarget(name[1], packageRoots) || moduleFileInWorktree(worktree, name[1], packageRoots)) {
+      return { reason: `missing module '${name[1]}' belongs to the task worktree` }
     }
   }
-  for (const symbol of exceptionSymbols(text)) {
-    if (symbol.kind === 'cannot-import') {
-      if (moduleBelongsToTarget(symbol.module, packageRoots) || index.modules.has(String(symbol.module).split('.').pop())) {
-        return { reason: `cannot import name '${symbol.name}' from local module '${symbol.module}'` }
-      }
-      continue
-    }
-    if (symbol.kind === 'call') {
-      const parts = String(symbol.name).split('.')
-      if (parts.length >= 2) {
-        const className = parts[parts.length - 2]
-        const methodName = parts[parts.length - 1]
-        const klass = index.classes.get(className)
-        if (klass) {
-          const files = [...klass.files].join(', ')
-          return { reason: `exception raised by ${symbol.name}() whose class ${className} is defined in the task worktree (${files}); target implementation` }
-        }
-        // 形如 thirdparty.Client.__init__ 的类不在 worktree：不是任务目标。
-        continue
-      }
-      const defined = index.functions.get(symbol.name)
-      if (defined) {
-        return { reason: `exception raised by function '${symbol.name}()' whose definition is in the task worktree (${defined.join(', ')})` }
-      }
-      continue
-    }
-    if (symbol.kind === 'attribute') {
-      const moduleName = String(symbol.name).split('.').pop()
-      if (index.modules.has(moduleName)) {
-        return { reason: `AttributeError on module '${symbol.name}' loaded from the task worktree (${index.modules.get(moduleName).join(', ')}); missing attribute '${symbol.attribute}'` }
-      }
-      const klass = index.classes.get(moduleName)
-      if (klass) {
-        return { reason: `AttributeError on class '${symbol.name}' defined in the task worktree (${[...klass.files].join(', ')}); missing attribute '${symbol.attribute}'` }
-      }
-      continue
-    }
-    if (symbol.kind === 'name') {
-      const defined = index.functions.get(symbol.name) ?? index.classes.get(symbol.name)
-      if (defined) return { reason: `NameError for '${symbol.name}' whose definition is in the task worktree` }
-    }
+  const cannotImport = CANNOT_IMPORT_PATTERN.exec(text)
+  if (cannotImport && (moduleBelongsToTarget(cannotImport[2], packageRoots) || moduleFileInWorktree(worktree, cannotImport[2], packageRoots))) {
+    return { reason: `cannot import name '${cannotImport[1]}' from local module '${cannotImport[2]}'` }
   }
-  // 2) 只有异常抛出点本身在 worktree 且目标符号无法归属时，不能凭空判目标：
-  //    保持 fail-closed（环境错误）；调用者帧不作为归属依据。
+  // 2) AttributeError：模块的本地文件 / 调用文件内的类定义才可作为目标依据；同名索引只是候选。
+  const attributeError = /AttributeError: (?:module )?['"]?([A-Za-z_][\w.]*)['"]?(?: object)? has no attribute ['"]?(\w+)/.exec(text)
+  if (attributeError) {
+    const owner = attributeError[1]
+    const basename = owner.split('.').pop()
+    if (index.modules.has(basename)) {
+      return { reason: `AttributeError on local module '${owner}' loaded from ${index.modules.get(basename).join(', ')}` }
+    }
+    const frame = worktreeFrames[worktreeFrames.length - 1]
+    const defined = frame ? fileDefinesOrImportsLocal(frame.path, basename, worktree, packageRoots) : null
+    if (defined) return { reason: `AttributeError on class '${owner}' defined in the task worktree (${defined.evidence})` }
+    // 同名类在无关文件里出现，不构成归属证据。
+    return null
+  }
+  // 3) 被调符号：优先源码行里的限定/裸调用；无源码行时回退异常消息（仅 stdin/裸函数可用）。
+  const expression = calledExpression(frames, text)
+  if (expression) {
+    const parts = expression.split('.')
+    const functionName = parts[parts.length - 1]
+    if (parts.length >= 2) {
+      const frame = worktreeFrames[worktreeFrames.length - 1]
+      const resolved = resolveQualifiedModule(expression, frame?.path, worktree, packageRoots)
+      if (resolved) {
+        return { reason: `exception raised by ${functionName}() whose module ${resolved.moduleName} resolves to the task worktree (${resolved.moduleFile})` }
+      }
+      return null
+    }
+    const frame = worktreeFrames[worktreeFrames.length - 1]
+    if (frame) {
+      const defined = fileDefinesOrImportsLocal(frame.path, functionName, worktree, packageRoots)
+      if (defined) return { reason: `exception raised by ${functionName}() which the calling file defines/imports locally (${defined.evidence})` }
+      return null
+    }
+    if (stdinFrames || frames.length === 0) {
+      if (index.functions.has(functionName) || index.classes.has(functionName)) {
+        return { reason: `exception raised by ${functionName}() whose definition is in the task worktree (stdin/exec call)` }
+      }
+    }
+    return null
+  }
+  // 4) NameError：仅调用文件内定义/本地导入，或 stdin 下的 worktree 定义。
+  const nameError = /NameError: name ['"](\w+)['"] is not defined/.exec(text)
+  if (nameError) {
+    const frame = worktreeFrames[worktreeFrames.length - 1]
+    if (frame) {
+      const defined = fileDefinesOrImportsLocal(frame.path, nameError[1], worktree, packageRoots)
+      return defined ? { reason: `NameError for ${nameError[1]} defined in ${defined.evidence}` } : null
+    }
+    if (index.functions.has(nameError[1]) || index.classes.has(nameError[1])) {
+      return { reason: `NameError for ${nameError[1]} whose definition is in the task worktree (stdin/exec call)` }
+    }
+    return null
+  }
+  // 5) 其它：只有异常指向 worktree 路径的缺文件才算目标。
   if (worktree && FILE_MISSING_PATTERN.test(text) && normalizePathForCompare(text).includes(normalizePathForCompare(worktree).replace(/\/+$/, ''))) {
     return { reason: 'FileNotFoundError/ENOENT on task checkout path (target file/symbol missing)' }
   }
@@ -1046,7 +1183,9 @@ function selfTest(asJson) {
     writeFileSync(join(classifyRepo, 'state.txt'), 'base\n', 'utf8')
     writeFileSync(join(classifyRepo, 'targetpkg', '__init__.py'), '', 'utf8')
     writeFileSync(join(classifyRepo, 'targetpkg', 'service.py'), 'def list_diagnoses(db_path, limit, offset):\n    return [], 0\n', 'utf8')
-    writeFileSync(join(classifyRepo, 'targetpkg', 'api.py'), 'def new_api():\n    return 1\n', 'utf8')
+    writeFileSync(join(classifyRepo, 'targetpkg', 'api.py'), 'from targetpkg.service import list_diagnoses\n\ndef new_api():\n    return 1\n', 'utf8')
+    writeFileSync(join(classifyRepo, 'caller.py'), 'import httpx\n\nclient = httpx.Client(proxies={})\n', 'utf8')
+    writeFileSync(join(classifyRepo, 'unrelated.py'), 'class Client:\n    def __init__(self):\n        pass\n', 'utf8')
     writeFileSync(join(classifyRepo, 'backend', 'app', 'domain', 'money.py'), 'def previous_window(start, end):\n    return start, end\n', 'utf8')
     git(classifyRepo, ['init', '--quiet'])
     git(classifyRepo, ['add', '-A'])
@@ -1102,7 +1241,7 @@ function selfTest(asJson) {
       '#!/bin/sh',
       fixedPass,
       "rid=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')",
-      'printf \'{"requestId": "%s", "loggedVia": "fixed"}\\n\' "$rid" >&2',
+      'printf \'[2026-11-09T00:00:00.000Z] [INFO] {"requestId": "%s", "loggedVia": "fixed"}\\n\' "$rid" >&2',
       'printf \'AssertionError: expected fixed\\n\' >&2',
       'exit 1',
     ]))
@@ -1162,6 +1301,37 @@ function selfTest(asJson) {
         && new Set(logPrefixMetadata.checks.base.outputSha256).size > 1
         && new Set(logPrefixMetadata.checks.base.normalizedSha256).size === 1,
       JSON.stringify({ ok: logPrefixMetadata.ok, rawHashes: logPrefixMetadata.checks.base?.outputSha256?.map((hash) => hash?.slice(0, 8)), normalizedHashes: logPrefixMetadata.checks.base?.normalizedSha256?.map((hash) => hash?.slice(0, 8)) }),
+    )
+
+    // N02 反例：普通 JSON 行（无日志前缀）的 requestId 变化必须保留。
+    const plainJsonRequestId = runClassify('plain-json-request-id', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      "rid=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \\n')",
+      'printf \'{"requestId": "%s"}\\n\' "$rid" >&2',
+      'printf \'AssertionError: expected fixed\\n\' >&2',
+      'exit 1',
+    ]))
+    record(
+      'N02 反例：普通 JSON 行 requestId 变化保留 → 三次不一致、判卡不合格',
+      plainJsonRequestId.checks.base.consistent === false
+        && plainJsonRequestId.ok === false,
+      JSON.stringify({ ok: plainJsonRequestId.ok, consistent: plainJsonRequestId.checks.base?.consistent }),
+    )
+
+    // N02 反例：多行 AssertionError 负载第二行（无关键字）的 requestId 变化必须保留。
+    const multilineAssertionRequestId = runClassify('multiline-assertion-request-id', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      "rid=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \\n')",
+      'printf \'AssertionError: actual={\\n  "requestId": "%s"\\n}\\n\' "$rid" >&2',
+      'exit 1',
+    ]))
+    record(
+      'N02 反例：多行 AssertionError 内 requestId 变化保留 → 三次不一致、判卡不合格',
+      multilineAssertionRequestId.checks.base.consistent === false
+        && multilineAssertionRequestId.ok === false,
+      JSON.stringify({ ok: multilineAssertionRequestId.ok, consistent: multilineAssertionRequestId.checks.base?.consistent }),
     )
 
     // C02 反例：同一时间戳格式下日志级别变化必须保留（INFO vs ERROR 不得归一成同一输出）。
@@ -1254,7 +1424,7 @@ function selfTest(asJson) {
     const targetCallSiteTypeError = runClassify('target-call-site-type-error', scriptLines([
       '#!/bin/sh',
       fixedPass,
-      'printf \'Traceback (most recent call last):\\n  File "%s/targetpkg/api.py", line 10, in <module>\\nTypeError: list_diagnoses() takes 3 positional arguments but 4 were given\\n\' "$TASK_CHECKOUT" >&2',
+      'printf \'Traceback (most recent call last):\\n  File "%s/targetpkg/api.py", line 10, in <module>\\n    list_diagnoses(db, 10, 0, "S01")\\nTypeError: list_diagnoses() takes 3 positional arguments but 4 were given\\n\' "$TASK_CHECKOUT" >&2',
       'exit 1',
     ]))
     record(
@@ -1304,6 +1474,30 @@ function selfTest(asJson) {
       thirdPartyBinding.ok === false
         && thirdPartyBinding.checks.base.failureClasses.every((entry) => entry.failureClass === 'environment-error'),
       JSON.stringify({ ok: thirdPartyBinding.ok, classes: thirdPartyBinding.checks.base?.failureClasses?.map((entry) => entry.failureClass) }),
+    )
+
+    // N01：真实 httpx 调用有帧后源码行「httpx.Client(...)」——限定调用模块不是本地包根；
+    // checkout 里存在未导入的同名 class Client 也不能作为归属证据。
+    const n01Dir = join(root, 'n01-httpx')
+    mkdirSync(n01Dir, { recursive: true })
+    writeFileSync(join(n01Dir, 'caller.py'), 'import httpx\n\nclient = httpx.Client(proxies={})\n', 'utf8')
+    const n01Traceback = [
+      'Traceback (most recent call last):',
+      `  File ${JSON.stringify(join(n01Dir, 'caller.py'))}, line 3, in <module>`,
+      '    client = httpx.Client(proxies={})',
+      "TypeError: Client.__init__() got an unexpected keyword argument 'proxies'",
+      '',
+    ].join('\n')
+    const n01Run = { code: 1, signal: null, stdout: '', stderr: n01Traceback }
+    const n01Before = classifyBaseFailure(n01Run, { worktree: n01Dir, packageRoots: [], sourceIndex: buildSourceIndex(n01Dir) })
+    writeFileSync(join(n01Dir, 'unrelated.py'), 'class Client:\n    def __init__(self):\n        pass\n', 'utf8')
+    const n01After = classifyBaseFailure(n01Run, { worktree: n01Dir, packageRoots: [], sourceIndex: buildSourceIndex(n01Dir) })
+    record(
+      'N01 反例：未导入的同名 class Client 不得把真实 httpx 参数错误判成 target（有无同名均 environment-error）',
+      n01Before.failureClass === 'environment-error'
+        && n01After.failureClass === 'environment-error'
+        && !String(n01After.reason ?? '').includes('unrelated.py'),
+      JSON.stringify({ withoutCollision: n01Before, withUnrelatedClass: n01After }),
     )
 
     const environmentError = runClassify('environment-error', scriptLines([
