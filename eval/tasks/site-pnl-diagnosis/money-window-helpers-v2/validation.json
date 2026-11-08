@@ -1,0 +1,99 @@
+{
+  "mode": "full",
+  "taskDir": "/Users/zm/repos/hephi-dev-base/eval/tasks/site-pnl-diagnosis/money-window-helpers-v2",
+  "structure": {
+    "ok": true,
+    "errors": [],
+    "warnings": [
+      "environment.offline=true：lockfile 未在任务目录/本地仓库找到（uv.lock）；完整模式会强制校验，dry-run 无法确认仓库锁文件"
+    ]
+  },
+  "checks": {
+    "environment": {
+      "offline": true,
+      "lockfile": "uv.lock",
+      "found": true,
+      "ok": true
+    },
+    "base": {
+      "expected": "fail",
+      "runs": [
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 6, in <module>\nAssertionError: missing window_months helper\n",
+          "outputSha256": "17649707be5ad9373bf3a1716b2433aebe526572a626e13853d29bd58fdfd03c"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 6, in <module>\nAssertionError: missing window_months helper\n",
+          "outputSha256": "17649707be5ad9373bf3a1716b2433aebe526572a626e13853d29bd58fdfd03c"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 6, in <module>\nAssertionError: missing window_months helper\n",
+          "outputSha256": "17649707be5ad9373bf3a1716b2433aebe526572a626e13853d29bd58fdfd03c"
+        }
+      ],
+      "codes": [
+        1,
+        1,
+        1
+      ],
+      "consistent": true,
+      "ok": true
+    },
+    "scope": {
+      "allowedFiles": [
+        "backend/app/domain/money.py"
+      ],
+      "changedFiles": [
+        "backend/app/domain/money.py"
+      ],
+      "outside": [],
+      "ok": true
+    },
+    "reference": {
+      "expected": "pass",
+      "runs": [
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: window_months helper\n",
+          "stderr": "",
+          "outputSha256": "4d4cecc33f4f2db81ff2a41ed1dd9e911a77a9dd8144b9c7af4b80e5e411a394"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: window_months helper\n",
+          "stderr": "",
+          "outputSha256": "4d4cecc33f4f2db81ff2a41ed1dd9e911a77a9dd8144b9c7af4b80e5e411a394"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: window_months helper\n",
+          "stderr": "",
+          "outputSha256": "4d4cecc33f4f2db81ff2a41ed1dd9e911a77a9dd8144b9c7af4b80e5e411a394"
+        }
+      ],
+      "codes": [
+        0,
+        0,
+        0
+      ],
+      "consistent": true,
+      "ok": true
+    }
+  },
+  "ok": true,
+  "baseSha": "8d2ec5858ed3071eae598e5afb30b069807ce598",
+  "repo": "/Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis",
+  "repeats": 3
+}

@@ -296,8 +296,9 @@ checks 结构、验收项引用存在的 **test** check、重复 id；`acceptanc
   有计划但目标不在计划内（精确路径或 glob）→ 拒绝 `plan.outside-plan`；
 - ready：无当前合同计划 → 拒绝 `plan.not-declared`；有计划 → 既有最终 diff 复核（越界为 `plan.outside-plan`）；
 - shadow：不注册工具、不实际拒绝，只记录 wouldDecision（`plan.recorded` / `plan.outside-plan` / `plan.not-declared`）；
-- 合同变更（re-prepare 产生新 `contractHash`）：旧计划不再生效，新合同下需重新声明；
-  `requirePlan=true` 且未重新声明时 write/edit 与 ready 均拒绝；
+- 合同生命周期（T11）：同一 ticket 的 re-prepare **复用**既有合同（`contractHash` 不变、不覆盖
+  `activation.json`），旧计划继续有效，不得把 re-prepare 当作换合同；只有新 ticket（或人工移除合同后重新激活）
+  才产生新合同。新合同下旧计划不生效、需重新声明；`requirePlan=true` 且未声明时 write/edit 与 ready 均拒绝；
 - 与 C1 共存：判定顺序 scope → plan → C1，拒绝原因可区分。
 
 ### 6.4 审计规则（已在 `decisions-format.md` 登记）
@@ -326,3 +327,81 @@ checks 结构、验收项引用存在的 **test** check、重复 id；`acceptanc
 > C1/C4.2/C4.6/C4.8 的机制级实现已落地（见上表）；C2 与运行时网络隔离仍为提议/待实现。
 > **C4.2 默认未启用（optional），不得写成已强制拦截**。当前插件行为仍以 `hephi/README.md` 与
 > `hephi/src/` 为准，不得把本文当已实现规则使用。
+
+## 8. A2 项目验收检查配置示例（acceptance / regression；T08 schema 部分）
+
+状态：**schema 已支持（本轮，机制级）**；`assertionFailureTypes` 目前只被校验并随 `verification`
+冻结进合同哈希，**没有任何判定逻辑消费它**——T18 才用它做离线红态判定；真实项目实例部署与端到端验收
+留待 T15/T20。旧配置（无该字段）解析结果与改动前逐字节一致，未知字段仍按 `.strict()` 拒绝。
+
+### 8.1 字段
+
+- `verification.checks[].assertionFailureTypes?: string[]`（可选，additive；verification 格式仍为 `version: 1`，无需升版）：
+  该检查判定“断言失败”时认可的失败类型清单（每个元素 trim 后非空），供 T18 离线红态判定使用。
+  不写该字段时行为与历史完全一致；写了也只影响 T18 的判定口径，不改变检查退出码或 ready 结论。
+
+### 8.2 示例（项目检查配置，`HEPHI_VERIFICATION_FILE` 指向的文件）
+
+说明：下面用 `jsonc` 展示以便写注释；真实配置文件必须是**严格 JSON**（注释需删除）。
+配置来源用 `HEPHI_VERIFICATION_FILE`（不能与 `HEPHI_VERIFICATION_CHECKS` 同时设置），prepare 时冻结进合同。
+两个检查都 `kind: "test"` 且 `required: true`：验收只认 test 类检查，required 是 ready 核验的前提。
+
+```jsonc
+{
+  "version": 1,
+  // 实验合同统一要求（不在本文件生效，是 prepare 时的环境变量）：
+  //   HEPHI_REQUIRE_PULL_REQUEST=1 → 合同 requirePullRequest:true，
+  //   ready 前必须有 PR 且 PR 的 base/head 与冻结合同一致；A2 实验会话一律按此准备。
+  "checks": [
+    {
+      "id": "acceptance",
+      "kind": "test",
+      "purpose": "只跑 acceptance/ 目录的验收测试；JUnit 报告写到本次运行目录",
+      "command": "sh",
+      "args": [
+        "-c",
+        "pnpm vitest run tests/acceptance --reporter=junit --outputFile=\"$HEPHI_RUN_DIR/junit.xml\""
+      ],
+      "cwd": ".",
+      "required": true,
+      "timeoutMs": 900000,
+      // T18 离线红态判定认可的失败类型（T08 仅接受并冻结该字段，尚未消费）
+      "assertionFailureTypes": ["AssertionError"]
+    },
+    {
+      "id": "regression",
+      "kind": "test",
+      "purpose": "整套回归；显式排除 acceptance/，避免与 acceptance 检查重复计数",
+      "command": "sh",
+      "args": [
+        "-c",
+        "pnpm vitest run tests --exclude 'tests/acceptance/**'"
+      ],
+      "cwd": ".",
+      "required": true,
+      "timeoutMs": 1800000,
+      "assertionFailureTypes": ["AssertionError"]
+    }
+  ]
+}
+```
+
+### 8.3 写法要点
+
+1. **独立验收检查只跑 `acceptance/`**：`acceptance` 检查的范围就是 `tests/acceptance/`，不要在其中混跑
+   其他目录的测试（其他模块用各自的聚焦检查或整包回归）。
+2. **回归检查排除 `acceptance/`**：`regression` 用 `--exclude 'tests/acceptance/**'` 显式排除，
+   保证同一测试不在两个检查里重复计数；回归仍必须覆盖 acceptance 以外的全部测试。
+3. **JUnit 报告位置**：`$HEPHI_RUN_DIR/junit.xml`。`HEPHI_RUN_DIR` 由 check-runner 在每次
+   `hephi_check` 运行时导出，指向 `<stateDir>/hephi/<ticketId>/checks/<runId>`；检查命令以**单条 argv**
+   启动，因此 `$HEPHI_RUN_DIR` 必须写在 `sh -c` 的 payload 里才会展开（示例已按此写）。
+   插件不解析 JUnit 报告（见 `stage-control.md`），报告由项目侧/后续实例侧读取。
+4. **两个检查都 `required: true` 且 `kind: "test"`**：`build` 类检查不能充当验收项；
+   `required` 决定 ready 是否核验该检查。
+5. **`assertionFailureTypes`**：示例值 `["AssertionError"]`；按项目测试框架实际抛出的失败类型填写
+   （如 pytest 的 `AssertionError`、JUnit 的 `java.lang.AssertionError` 等），多个用数组。
+   T18 实现之前该字段不会被任何逻辑使用，不得据此声称“红态已可判定”。
+6. **实验合同 `requirePullRequest: true`**：prepare 时设 `HEPHI_REQUIRE_PULL_REQUEST=1`（示例注释已标明），
+   这是 A2 实验会话的统一要求，与本节两个检查一起构成验收前置；缺 PR 或 PR base/head 不匹配会在 ready 被拒。
+7. 该配置由 prepare 冻结进合同并纳入 `contractHash`；T11 下同 ticket 的 re-prepare 复用既有合同，
+   修改检查配置不会自动生效，需要新合同（新 ticket，或人工移除合同后重新 prepare）。

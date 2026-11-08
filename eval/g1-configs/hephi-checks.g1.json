@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "requirePlan": true,
+  "protectedAssets": ["**/test/**", "**/tests/**"],
+  "checks": [
+    {
+      "id": "project-regression",
+      "kind": "test",
+      "purpose": "赫菲类型检查、单元及集成测试和干净构建（G1：排除 tests/acceptance/，与独立的 acceptance 检查互斥；原命令为 pnpm check，此处显式复刻为 typecheck + vitest --exclude + build）",
+      "command": "sh",
+      "args": [
+        "-c",
+        "cd hephi && pnpm install --frozen-lockfile && pnpm typecheck && pnpm exec vitest run --exclude 'tests/acceptance/**' && pnpm build"
+      ],
+      "required": true,
+      "timeoutMs": 900000
+    },
+    {
+      "id": "acceptance",
+      "kind": "test",
+      "purpose": "G1 acceptance check (T08 §8 pattern): run only hephi/tests/acceptance, JUnit report in this run directory. Assumes vitest's built-in junit reporter and acceptance tests under hephi/tests/acceptance/ (created by T15 tasks; not present at staging time). Installs dependencies first so this check can run before the regression check.",
+      "command": "sh",
+      "args": [
+        "-c",
+        "cd hephi && pnpm install --frozen-lockfile && pnpm exec vitest run tests/acceptance --reporter=junit --outputFile=\"$HEPHI_RUN_DIR/junit.xml\""
+      ],
+      "required": true,
+      "timeoutMs": 600000,
+      "assertionFailureTypes": ["AssertionError"]
+    }
+  ]
+}

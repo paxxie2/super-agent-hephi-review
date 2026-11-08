@@ -1,0 +1,58 @@
+diff --git a/backend/app/constants.py b/backend/app/constants.py
+index dc0d821..0e77f8a 100644
+--- a/backend/app/constants.py
++++ b/backend/app/constants.py
+@@ -43,3 +43,6 @@ RULE_IDS: tuple[str, ...] = (
+     "refund_anomaly",
+     "maintenance_burden",
+ )
++
++# 固定的健康检查服务标识（由 Health.service 描述对象暴露）。
++SERVICE_ID = "site-pnl-diagnosis"
+diff --git a/backend/app/main.py b/backend/app/main.py
+index bc6cbc8..53572d4 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -19,10 +19,10 @@ from fastapi.staticfiles import StaticFiles
+ from starlette.exceptions import HTTPException as StarletteHTTPException
+ 
+ from app import api
+-from app.constants import APP_VERSION
++from app.constants import APP_VERSION, SERVICE_ID
+ from app.db import DatabaseUnavailable, db_status, init_db, is_seeded
+ from app.errors import ApiError
+-from app.schemas import ErrorResponse, Health
++from app.schemas import ErrorResponse, Health, ServiceInfo
+ from app.settings import REPO_ROOT, Settings, masked_settings
+ 
+ logger = logging.getLogger("site_pnl")
+@@ -114,6 +114,7 @@ def create_app(settings: Settings | None = None, *, seed: bool = True) -> FastAP
+         status = db_status(settings.db_path)
+         payload = Health(
+             status="ok" if status["ok"] else "error",
++            service=ServiceInfo(id=SERVICE_ID, version=APP_VERSION),
+             db="ok" if status["ok"] else "error",
+             seeded=status["seeded"],
+             dataVersion=status["dataVersion"],
+diff --git a/backend/app/schemas.py b/backend/app/schemas.py
+index e7e91dc..cc5c02e 100644
+--- a/backend/app/schemas.py
++++ b/backend/app/schemas.py
+@@ -297,9 +297,17 @@ class Site(BaseModel):
+     dataVersion: str
+ 
+ 
++class ServiceInfo(BaseModel):
++    """固定服务描述：id 来自 constants.SERVICE_ID，version 来自 APP_VERSION。"""
++
++    id: str
++    version: str
++
++
+ class Health(BaseModel):
+     status: Literal["ok", "error"]
+     db: Literal["ok", "error"]
++    service: ServiceInfo
+     seeded: bool = False
+     dataVersion: str | None = None
+     modelConfigured: bool = False

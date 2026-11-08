@@ -1,0 +1,112 @@
+[
+  {
+    "taskId": "backend-input-validation-v2",
+    "repo": "site-pnl-diagnosis",
+    "category": "cross-module"
+  },
+  {
+    "taskId": "backend-input-validation-v3",
+    "repo": "site-pnl-diagnosis",
+    "category": "new-feature"
+  },
+  {
+    "taskId": "backend-validation-messages",
+    "repo": "site-pnl-diagnosis",
+    "category": "new-feature"
+  },
+  {
+    "taskId": "backend-validation-messages-v2",
+    "repo": "site-pnl-diagnosis",
+    "category": "new-feature"
+  },
+  {
+    "taskId": "backend-validation-messages-v3",
+    "repo": "site-pnl-diagnosis",
+    "category": "new-feature"
+  },
+  {
+    "taskId": "health-service-field-v2",
+    "repo": "site-pnl-diagnosis",
+    "category": "new-feature"
+  },
+  {
+    "taskId": "health-service-field-v3",
+    "repo": "site-pnl-diagnosis",
+    "category": "new-feature"
+  },
+  {
+    "taskId": "history-page-size-v2",
+    "repo": "site-pnl-diagnosis",
+    "category": "new-feature"
+  },
+  {
+    "taskId": "history-page-size-v3",
+    "repo": "site-pnl-diagnosis",
+    "category": "new-feature"
+  },
+  {
+    "taskId": "money-window-helpers-v2",
+    "repo": "site-pnl-diagnosis",
+    "category": "new-feature"
+  },
+  {
+    "taskId": "money-window-helpers-v3",
+    "repo": "site-pnl-diagnosis",
+    "category": "new-feature"
+  },
+  {
+    "taskId": "previous-window-order-v2",
+    "repo": "site-pnl-diagnosis",
+    "category": "new-feature"
+  },
+  {
+    "taskId": "previous-window-order-v3",
+    "repo": "site-pnl-diagnosis",
+    "category": "new-feature"
+  },
+  {
+    "taskId": "restore-data-package",
+    "repo": "site-pnl-diagnosis",
+    "category": "defect-fix"
+  },
+  {
+    "taskId": "restore-data-package-v2",
+    "repo": "site-pnl-diagnosis",
+    "category": "defect-fix"
+  },
+  {
+    "taskId": "restore-data-package-v3",
+    "repo": "site-pnl-diagnosis",
+    "category": "defect-fix"
+  },
+  {
+    "taskId": "restore-health-service-id",
+    "repo": "site-pnl-diagnosis",
+    "category": "defect-fix"
+  },
+  {
+    "taskId": "restore-health-service-id-v2",
+    "repo": "site-pnl-diagnosis",
+    "category": "defect-fix"
+  },
+  {
+    "taskId": "restore-health-service-id-v3",
+    "repo": "site-pnl-diagnosis",
+    "category": "defect-fix"
+  },
+  {
+    "taskId": "settings-dead-branches",
+    "repo": "site-pnl-diagnosis",
+    "category": "behavior-preserving-refactor"
+  },
+  {
+    "taskId": "settings-dead-branches-v2",
+    "repo": "site-pnl-diagnosis",
+    "category": "behavior-preserving-refactor"
+  },
+  {
+    "taskId": "settings-dead-branches-v3",
+    "repo": "site-pnl-diagnosis",
+    "category": "defect-fix"
+  }
+]

@@ -1,0 +1,38 @@
+=== off instance isolation snapshot (2026-11-08T16:12:58Z) ===
+DSH_HOME=/tmp/hephi-off-b5
+process pid (started): host.pid removed after stop
+port: 127.0.0.1:3093
+profile: b5off
+profile bundles:
+['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-superagent']
+profile cordis.patch.yml:
+- id: webserver
+  config:
+    host: 127.0.0.1
+    port: 3093
+- id: agent-default-model
+  config:
+    provider: deepseek-account
+    model: deepseek-flash
+- id: dsh-superagent
+  config:
+    stateDir: /tmp/hephi-off-b5/state
+- id: ui-settings-general
+  name: "@deepseek-ai/dsh-client-ui-settings-general"
+  config:
+    welcomeNoticeVersion: 2026-09-28.1
+--- hephi artifacts under state ---
+state/hephi exists: NO
+activation.json count: 0
+checks dir count: 0
+decisions.jsonl count: 0
+--- hephi-named paths under DSH_HOME (path-derived session dirs only) ---
+/tmp/hephi-off-b5/dsh-home/sessions/--private-tmp-hephi-off-b5-work-previous-window-order-7dfffe7ab3d6--
+/tmp/hephi-off-b5/dsh-home/sessions/--private-tmp-hephi-off-b5-state--
+--- hephi mentions in logs/host.log: 0
+0 ---
+--- worker environment variables (settings environment block) ---
+keys: ['DSH_SUPERAGENT_DIR', 'DSH_SUPERAGENT_NAME', 'DSH_SUPERAGENT_TICKET', 'DSH_SUPERAGENT_BLOCKED_COMMANDS', 'DSH_SUPERAGENT_GITHUB_REPOSITORY', 'DSH_SUPERAGENT_GITHUB_ACCOUNT', 'DSH_SUPERAGENT_GITHUB_COMMIT_EMAIL', 'DSH_SUPERAGENT_GITHUB_NUMBER', 'DSH_SUPERAGENT_GITHUB_PR_HEAD']
+HEPHI_* injected: []
+--- startup script HEPHI unset line ---
+10:unset HEPHI_ENABLED HEPHI_STATE_DIR HEPHI_REQUIRE_SESSION_BINDING HEPHI_KB_CONFIG HEPHI_ALLOW_OPERATOR_RESOLUTIONS 2>/dev/null || true

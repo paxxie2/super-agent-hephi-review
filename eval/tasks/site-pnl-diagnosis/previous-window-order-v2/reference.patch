@@ -1,0 +1,32 @@
+diff --git a/backend/app/domain/money.py b/backend/app/domain/money.py
+index 61bb903..e4a3305 100644
+--- a/backend/app/domain/money.py
++++ b/backend/app/domain/money.py
+@@ -98,3 +98,27 @@ def window_bounds(window: object) -> tuple[str, str]:
+ def datetime_with_tz(date_str: str, time_str: str = "00:00:00") -> datetime:
+     """构造 Asia/Shanghai 时区（+08:00）的 datetime，用于比较业务时间。"""
+     return datetime.fromisoformat(f"{date_str}T{time_str}+08:00")
++
++
++def previous_windows(start: str, end: str, count: int) -> list[tuple[str, str]]:
++    """向前返回 count 个紧邻当前窗口的等长自然日窗口（含首尾），最早在前。
++
++    ``start > end``（倒序窗口）或 ``count < 1`` 时抛 ``ValueError``；
++    ``count`` 必须是整数（布尔值不算整数）。返回值第一个元素是最早的窗口。
++    """
++    if isinstance(count, bool) or not isinstance(count, int):
++        raise ValueError("count must be an integer")
++    if count < 1:
++        raise ValueError("count must be at least 1")
++    start_date = parse_date(start)
++    end_date = parse_date(end)
++    if start_date > end_date:
++        raise ValueError("start must not be after end")
++    windows: list[tuple[str, str]] = []
++    current_start, current_end = start_date, end_date
++    for _ in range(count):
++        current = previous_window(current_start.isoformat(), current_end.isoformat())
++        windows.append(current)
++        current_start = parse_date(current[0])
++        current_end = parse_date(current[1])
++    return list(reversed(windows))

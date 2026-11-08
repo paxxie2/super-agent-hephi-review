@@ -1,0 +1,34 @@
+diff --git a/backend/app/domain/money.py b/backend/app/domain/money.py
+index 61bb903..82069bb 100644
+--- a/backend/app/domain/money.py
++++ b/backend/app/domain/money.py
+@@ -98,3 +98,29 @@ def window_bounds(window: object) -> tuple[str, str]:
+ def datetime_with_tz(date_str: str, time_str: str = "00:00:00") -> datetime:
+     """构造 Asia/Shanghai 时区（+08:00）的 datetime，用于比较业务时间。"""
+     return datetime.fromisoformat(f"{date_str}T{time_str}+08:00")
++
++
++def window_length_days(start: str, end: str) -> int:
++    """窗口内自然日数量（含首尾）；``start > end``（倒序窗口）时抛 ``ValueError``。"""
++    start_date = parse_date(start)
++    end_date = parse_date(end)
++    if start_date > end_date:
++        raise ValueError("start must not be after end")
++    return (end_date - start_date).days + 1
++
++
++def windows_adjacent(left: tuple[str, str], right: tuple[str, str]) -> bool:
++    """判断右窗口是否紧邻左窗口之后（右窗口首日等于左窗口末日的下一天）。
++
++    任一窗口倒序（start > end）时抛 ``ValueError``；参数不是两元素字符串元组时抛 ``TypeError``。
++    """
++    for window in (left, right):
++        if not isinstance(window, tuple) or len(window) != 2:
++            raise TypeError("window must be a (start, end) tuple")
++        start_date = parse_date(str(window[0]))
++        end_date = parse_date(str(window[1]))
++        if start_date > end_date:
++            raise ValueError("start must not be after end")
++    left_end = parse_date(str(left[1]))
++    right_start = parse_date(str(right[0]))
++    return right_start == left_end + timedelta(days=1)

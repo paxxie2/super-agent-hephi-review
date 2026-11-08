@@ -1,0 +1,44 @@
+diff --git a/backend/app/constants.py b/backend/app/constants.py
+index dc0d821..5eaa536 100644
+--- a/backend/app/constants.py
++++ b/backend/app/constants.py
+@@ -43,3 +43,6 @@ RULE_IDS: tuple[str, ...] = (
+     "refund_anomaly",
+     "maintenance_burden",
+ )
++
++# 固定的健康检查服务标识（200/503 使用同一个值）。
++SERVICE_ID = "site-pnl-diagnosis-api"
+diff --git a/backend/app/main.py b/backend/app/main.py
+index bc6cbc8..888c89b 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
+ from starlette.exceptions import HTTPException as StarletteHTTPException
+ 
+ from app import api
+-from app.constants import APP_VERSION
++from app.constants import APP_VERSION, SERVICE_ID
+ from app.db import DatabaseUnavailable, db_status, init_db, is_seeded
+ from app.errors import ApiError
+ from app.schemas import ErrorResponse, Health
+@@ -114,6 +114,7 @@ def create_app(settings: Settings | None = None, *, seed: bool = True) -> FastAP
+         status = db_status(settings.db_path)
+         payload = Health(
+             status="ok" if status["ok"] else "error",
++            serviceId=SERVICE_ID,
+             db="ok" if status["ok"] else "error",
+             seeded=status["seeded"],
+             dataVersion=status["dataVersion"],
+diff --git a/backend/app/schemas.py b/backend/app/schemas.py
+index e7e91dc..899f450 100644
+--- a/backend/app/schemas.py
++++ b/backend/app/schemas.py
+@@ -300,6 +300,7 @@ class Site(BaseModel):
+ class Health(BaseModel):
+     status: Literal["ok", "error"]
+     db: Literal["ok", "error"]
++    serviceId: str
+     seeded: bool = False
+     dataVersion: str | None = None
+     modelConfigured: bool = False

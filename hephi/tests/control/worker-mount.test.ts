@@ -115,6 +115,8 @@ describe('Worker mount', () => {
     expect(text).toContain('hephi_kb_search')
     expect(text).toContain('skill("hephi-superagent-control")')
     expect(text).toContain('hephi_get_contract')
+    // AT-70: the startup prompt states that checks run on committed source only.
+    expect(text).toContain('Commit your changes before running hephi_check')
     mounted!.dispose()
     expect(fake.callbacks().prompt).toBeUndefined()
   })
@@ -347,18 +349,22 @@ describe('Worker mount', () => {
     } finally { mounted!.dispose() }
   })
 
-  it('binds the mounted contract and mode so a runtime change cannot reuse native control', async () => {
+  it('re-prepare reuses the mounted contract instead of changing its mode under a worker', async () => {
     const stateDir = await mkdtemp(join(tmpdir(), 'hephi-worker-'))
     await prepareActivation(env(stateDir))
     const fake = fakeAgent()
     const mounted = mountWorkerGate({} as Context, fake.agent, { stateDir, verify: async () => ({ ok: true as const }) })
     try {
-      await prepareActivation(env(stateDir, 'staged'))
+      // T11: the contract is written once per ticket and re-prepare replays it, so a re-prepare
+      // with staged env cannot change the mode of the mounted worker.
+      const rerun = await prepareActivation(env(stateDir, 'staged'))
+      expect(rerun.enabled).toBe(true)
+      if (rerun.enabled) {
+        expect(rerun.reused).toBe(true)
+        expect(rerun.contract.executionMode).toBe('native')
+      }
       const write = { name: 'write', arguments: {}, token: Symbol() } as unknown as ToolExecution
-      expect(fake.callbacks().guard(write)).toContain('changed')
-      const ready = { name: 'orchestrator_report', arguments: { state: 'ready' }, token: Symbol() } as unknown as ToolExecution
-      const denied = await fake.callbacks().preExecute!(ready, async () => ({ kind: 'allow' }))
-      expect(denied.kind).toBe('deny')
+      expect(fake.callbacks().guard(write)).toBeUndefined()
     } finally { mounted!.dispose() }
   })
 

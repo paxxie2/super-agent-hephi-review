@@ -35,7 +35,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 export const PLAN_SCHEMA_VERSION = 1
-export const KNOWN_GROUPS = ['off', 'native', 'staged']
+export const KNOWN_GROUPS = ['legacy-system', 'full-package', 'off', 'native', 'staged']
+// PREREG v1.2: legacy-system=原系统组(含旧赫菲) / full-package=整包组；off/native 为旧 B5 历史值，新运行禁用
 export const TASK_CATEGORIES = ['defect-fix', 'new-feature', 'behavior-preserving-refactor', 'cross-module', 'staged-suitable']
 const SAFE_TASK_ID = /^[a-z0-9][a-z0-9._-]{1,63}$/
 
@@ -84,6 +85,9 @@ function parseGroups(value) {
   if (groups.length === 0) throw new UsageError('--groups must list at least one group')
   if (groups.length > 2) throw new UsageError('--groups supports at most two groups (off,native or native,staged)')
   for (const group of groups) if (!KNOWN_GROUPS.includes(group)) throw new UsageError(`unknown group "${group}"; allowed: ${KNOWN_GROUPS.join(', ')}`)
+  // PREREG v1.2：禁止混代（旧 B5 off/native 与现行 legacy-system/full-package 不得组合）
+  const OLD = new Set(['off', 'native']); const NEW = new Set(['legacy-system', 'full-package'])
+  if (groups.some((g) => OLD.has(g)) && groups.some((g) => NEW.has(g))) throw new UsageError('--groups 不得混代：off/native（旧 B5）与 legacy-system/full-package（PREREG v1.2）不能组合')
   if (new Set(groups).size !== groups.length) throw new UsageError(`--groups contains duplicates: ${groups.join(',')}`)
   if (groups.includes('staged') && groups.includes('off')) throw new UsageError('staged must not be mixed with off (staged is a separate Q3 experiment)')
   return groups
@@ -177,7 +181,7 @@ export function generatePlan({ tasks, groups, seed, repeatFraction, generatedAt 
 }
 
 export function parseArgs(argv) {
-  const options = { tasks: null, groups: ['off', 'native'], seed: null, repeatFraction: 0.2, out: null, dryRun: false, selfTest: false }
+  const options = { tasks: null, groups: ['legacy-system', 'full-package'], seed: null, repeatFraction: 0.2, out: null, dryRun: false, selfTest: false }
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index]
     if (arg === '--self-test') { options.selfTest = true; continue }

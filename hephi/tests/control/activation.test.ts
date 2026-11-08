@@ -1,6 +1,7 @@
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { spawnSync } from 'node:child_process'
+import { copyFile, mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ACTIVATION_VERSION, activationIntentPath, activationPath, canonicalPayload, contractHash, enforcementOf, evidenceOf, executionModeOf, legacyContractHash, loadActivation, migrateActivationIntentSync, parseEnforcement, parseIssueExecutionMode, prepareActivation, sessionBindingPolicy } from '../../src/control/activation.js'
 
@@ -533,5 +534,107 @@ describe('activation canonical hashing (R1)', () => {
       version: 2,
     }
     expect(contractHash(fixed as never)).toBe('sha256:14756a3ee1178fcbb8170983322ceb954c9661d8744af15a02ea9761fa1b5c50')
+  })
+})
+
+describe('T11 activation contract replay (AT-01..AT-06)', () => {
+  it('AT-01: the first prepare creates one contract whose stored content equals the returned contract', async () => {
+    const dir = await stateDir()
+    const result = await prepareActivation(enabledEnv(dir))
+    if (!result.enabled) throw new Error('activation was not enabled')
+    expect(result.reused).toBeUndefined()
+    const filePath = activationPath(dir, 'ticket-1')
+    expect(result.filePath).toBe(filePath)
+    expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(result.contract)
+    await expect(readFile(activationIntentPath(dir, 'ticket-1'), 'utf8')).resolves.toContain('ticket-1')
+  })
+
+  it('AT-02: re-prepare reuses the contract file, keeping its hash and mtime, and reports reused:true', async () => {
+    const dir = await stateDir()
+    const first = await prepareActivation(enabledEnv(dir))
+    if (!first.enabled) throw new Error('activation was not enabled')
+    const beforeBytes = await readFile(first.filePath, 'utf8')
+    const beforeStat = await stat(first.filePath)
+    const second = await prepareActivation(enabledEnv(dir))
+    if (!second.enabled) throw new Error('activation was not enabled')
+    expect(second.reused).toBe(true)
+    expect(second.filePath).toBe(first.filePath)
+    expect(second.contract.contractHash).toBe(first.contract.contractHash)
+    const afterStat = await stat(second.filePath)
+    expect(afterStat.mtimeMs).toBe(beforeStat.mtimeMs)
+    expect(await readFile(second.filePath, 'utf8')).toBe(beforeBytes)
+  })
+
+  it('AT-03: an interrupted prepare (contract present, intent missing) is reused and completes the intent marker', async () => {
+    const dir = await stateDir()
+    const first = await prepareActivation(enabledEnv(dir))
+    if (!first.enabled) throw new Error('activation was not enabled')
+    const beforeBytes = await readFile(first.filePath, 'utf8')
+    // Simulate a process that wrote the contract but died before the intent marker: remove the
+    // marker and leave a stray temporary file behind.
+    await import('node:fs/promises').then(({ unlink }) => unlink(activationIntentPath(dir, 'ticket-1')))
+    await writeFile(`${first.filePath}.tmp-stale`, 'partial')
+    const second = await prepareActivation(enabledEnv(dir))
+    if (!second.enabled) throw new Error('activation was not enabled')
+    expect(second.reused).toBe(true)
+    // The remaining step (activation intent) is completed on replay; the contract is untouched.
+    await expect(readFile(activationIntentPath(dir, 'ticket-1'), 'utf8')).resolves.toContain('ticket-1')
+    expect(await readFile(second.filePath, 'utf8')).toBe(beforeBytes)
+  })
+
+  it('AT-04: prepare-dubbo.sh with an existing contract performs zero GitHub reads', async () => {
+    const dir = await stateDir()
+    // A fake plugin layout so the shell script can exec a stub CLI standing in for lib/cli.mjs.
+    const plugin = join(dir, 'plugin')
+    await mkdir(join(plugin, 'scripts'), { recursive: true })
+    await mkdir(join(plugin, 'lib'), { recursive: true })
+    await copyFile(resolve('scripts/prepare-dubbo.sh'), join(plugin, 'scripts', 'prepare-dubbo.sh'))
+    const prepared = join(dir, 'prepared')
+    await writeFile(join(plugin, 'lib', 'cli.mjs'), `import { writeFileSync } from 'node:fs'\nwriteFileSync(${JSON.stringify(prepared)}, 'prepared\\n')\n`)
+    const gh = join(dir, 'gh')
+    const calls = join(dir, 'calls')
+    await writeFile(gh, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$PROBE_CALLS"\n', { mode: 0o755 })
+    const workspace = join(dir, 'worker')
+    await mkdir(join(workspace, '.git'), { recursive: true })
+    const state = join(dir, 'state')
+    const contract = join(state, 'hephi', 'test', 'activation.json')
+    await mkdir(dirname(contract), { recursive: true })
+    await writeFile(contract, 'ORIGINAL CONTRACT\n')
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DSH_SUPERAGENT_') && !key.startsWith('HEPHI_')))
+    const result = spawnSync('sh', [join(plugin, 'scripts', 'prepare-dubbo.sh')], {
+      cwd: dir, encoding: 'utf8',
+      env: { ...env, PATH: process.env.PATH ?? '', DSH_SUPERAGENT_GITHUB_REPOSITORY: 'paxxie2/dubbo', DSH_SUPERAGENT_GITHUB_NUMBER: '53',
+        DSH_SUPERAGENT_DIR: workspace, DSH_SUPERAGENT_NAME: 'test', HEPHI_STATE_DIR: state, HEPHI_GH_CLI: gh,
+        PROBE_CALLS: calls, PROBE_PREPARED: prepared },
+    })
+    expect(result.status).toBe(0)
+    // The existing contract short-circuits every `gh api` read: labels, title, body, branch and sha.
+    await expect(readFile(calls, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await readFile(prepared, 'utf8')).toBe('prepared\n')
+    expect(await readFile(contract, 'utf8')).toBe('ORIGINAL CONTRACT\n')
+  })
+
+  it('AT-05: two concurrent prepares create exactly one contract and the other reuses it', async () => {
+    const dir = await stateDir()
+    const results = await Promise.all([prepareActivation(enabledEnv(dir)), prepareActivation(enabledEnv(dir))])
+    const first = results[0]!, second = results[1]!
+    if (!first.enabled || !second.enabled) throw new Error('activation was not enabled')
+    // Exactly one create (reused undefined/false) and one replay (reused:true).
+    expect([first.reused, second.reused].filter(reused => reused === true)).toHaveLength(1)
+    expect(first.contract.contractHash).toBe(second.contract.contractHash)
+    expect(JSON.parse(await readFile(activationPath(dir, 'ticket-1'), 'utf8'))).toEqual(first.contract)
+  })
+
+  it('AT-06: a truncated contract is reported as an error and never overwritten', async () => {
+    const dir = await stateDir()
+    const filePath = activationPath(dir, 'ticket-1')
+    await mkdir(dirname(filePath), { recursive: true })
+    await writeFile(filePath, '{"version":5,"enabled":true')
+    const before = await readFile(filePath, 'utf8')
+    await expect(prepareActivation(enabledEnv(dir))).rejects.toThrow()
+    expect(await readFile(filePath, 'utf8')).toBe(before)
+    // It stays invalid on the next attempt: replay never rewrites a corrupt contract.
+    await expect(prepareActivation(enabledEnv(dir))).rejects.toThrow()
+    expect(await readFile(filePath, 'utf8')).toBe(before)
   })
 })

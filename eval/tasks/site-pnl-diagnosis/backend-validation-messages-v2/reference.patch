@@ -1,0 +1,74 @@
+diff --git a/backend/app/validation_i18n.py b/backend/app/validation_i18n.py
+new file mode 100644
+index 0000000..5df345d
+--- /dev/null
++++ b/backend/app/validation_i18n.py
+@@ -0,0 +1,68 @@
++"""把 FastAPI ``RequestValidationError.errors()`` 转成双语字段级提示。
++
++纯函数，仅标准库；不依赖 pydantic/FastAPI 的具体异常类型，只消费错误字典列表。
++每次调用返回新的 dict，字段顺序按错误出现顺序（重复字段保留第一次的错误）。
++"""
++
++from __future__ import annotations
++
++from typing import Any
++
++_ZH = {
++    "missing": "必填",
++    "int_type": "必须为整数",
++    "int_parsing": "必须为整数",
++    "float_finite": "必须为有限数，不能是 NaN 或 Infinity",
++    "finite_number": "必须为有限数，不能是 NaN 或 Infinity",
++    "extra_forbidden": "不支持字段",
++}
++
++
++def _field(error: dict[str, Any]) -> str:
++    loc = error.get("loc") or ()
++    parts = [str(part) for part in loc if part != "body"]
++    return ".".join(parts) or "body"
++
++
++def _bilingual(error: dict[str, Any]) -> dict[str, str]:
++    kind = str(error.get("type", ""))
++    ctx = error.get("ctx") or {}
++    if kind in _ZH:
++        zh = _ZH[kind]
++        en = {
++            "missing": "is required",
++            "int_type": "must be an integer",
++            "int_parsing": "must be an integer",
++            "float_finite": "must be a finite number",
++            "finite_number": "must be a finite number",
++            "extra_forbidden": "is not allowed",
++        }[kind]
++        return {"zh": zh, "en": en}
++    if kind == "greater_than_equal":
++        limit = ctx.get("ge")
++        return {"zh": f"必须大于等于 {limit}", "en": f"must be greater than or equal to {limit}"}
++    if kind == "less_than_equal":
++        limit = ctx.get("le")
++        return {"zh": f"必须小于等于 {limit}", "en": f"must be less than or equal to {limit}"}
++    if kind == "literal_error":
++        expected = ctx.get("expected")
++        return {"zh": f"必须是 {expected} 之一", "en": f"must be one of {expected}"}
++    message = str(error.get("msg") or "is invalid")
++    return {"zh": "参数不合法", "en": message}
++
++
++def bilingual_field_errors(errors: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
++    """返回 ``{字段: {"zh": 中文提示, "en": English message}}``；重复字段保留第一次。
++
++    输入必须是错误字典列表，否则抛 ``TypeError``。
++    """
++    if not isinstance(errors, list):
++        raise TypeError("errors must be a list of dicts")
++    result: dict[str, dict[str, str]] = {}
++    for error in errors:
++        if not isinstance(error, dict):
++            raise TypeError("each error must be a dict")
++        field = _field(error)
++        if field not in result:
++            result[field] = _bilingual(error)
++    return result

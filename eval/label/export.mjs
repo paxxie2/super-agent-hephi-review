@@ -35,14 +35,14 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync,
+  existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
-const ARMS = new Set(['off', 'native', 'staged'])
+const ARMS = new Set(['legacy-system', 'full-package', 'off', 'native', 'staged'])
 const DEFAULT_SEED = 20261107
 
 // 硬痕迹：命中即拒绝导出（fail-closed）。只匹配能直接暴露组别/赫菲的标记，
@@ -50,17 +50,28 @@ const DEFAULT_SEED = 20261107
 const HARD_TRACE_PATTERNS = [
   { id: 'hephi', re: /hephi/i },
   { id: 'hephi-zh', re: /赫菲/ },
+  { id: 'full-package-group', re: /full-package\s*(?:arm|group|组)/i },
+  { id: 'legacy-system-group', re: /legacy-system\s*(?:arm|group|组)/i },
   { id: 'native-group', re: /native\s*(?:arm|group|组)/i },
   { id: 'off-group', re: /\boff\s*(?:arm|group|组)/i },
   { id: 'staged-group', re: /staged\s*(?:arm|group|组)/i },
   { id: 'shadow-group', re: /shadow\s*(?:arm|group|组)/i },
-  { id: 'arm-equals', re: /\barm\s*[=:]\s*(?:off|native|staged|shadow)\b/i },
+  { id: 'arm-equals', re: /\barm\s*[=:]\s*(?:off|native|staged|shadow|legacy-system|full-package)\b/i },
   { id: 'plugin-commit', re: /pluginCommit|loadedShaReadback/i },
   { id: 'roadmap', re: /ROADMAP[-_ ]?95/i },
   { id: 'branch-ref', re: /\b(?:agent|docs|codex|fix|feat)\/[a-z0-9][a-z0-9._-]*/i },
   { id: 'pull-ref', re: /\bpull\/\d+\b|#\d{2,4}\b(?=[^\n]*(?:merge|pr\b))/i },
-  { id: 'run-id-arm', re: /\b[a-z0-9][a-z0-9._-]*[-_](?:off|native|staged)[-_][a-z0-9._-]+\b/i },
+  { id: 'run-id-arm', re: /\b[a-z0-9][a-z0-9._-]*[-_](?:off|native|staged|legacy-system|full-package)[-_][a-z0-9._-]+\b/i },
   { id: 'decision-log', re: /decisions\.jsonl/i },
+  // F06：已发现的漏配写法——当前 schema 的 JSON 形态、带引号/空格的赋值、现行中文组名，
+  // 以及裸 legacy-system/full-package。全部按硬痕迹 fail-closed（不静默删正文后放行）。
+  { id: 'arm-json', re: /"arm"\s*:\s*"(?:legacy-system|full-package|off|native|staged|shadow)"/i },
+  { id: 'arm-quoted', re: /\barm\b\s*(?:=+|:|：)\s*["'`]\s*(?:legacy-system|full-package|off|native|staged|shadow)\s*["'`]/i },
+  { id: 'arm-legacy-full', re: /\barm\b\s*(?:=+|:|：)\s*["'`]?\s*(?:legacy-system|full-package)\b/i },
+  { id: 'legacy-system-word', re: /legacy-system/i },
+  { id: 'full-package-word', re: /full-package/i },
+  { id: 'zh-group', re: /原系统组|整包组|原系统|整包/ },
+  { id: 'zh-group-json', re: /"(?:group|arm|组别|运行分组)"\s*:\s*"(?:原系统组|整包组|原系统|整包|legacy-system|full-package)"/i },
 ]
 
 // 软痕迹：只在 requirement/allowed-scope 正文里提示（不阻断），由材料作者人工判断。
@@ -99,9 +110,46 @@ function readJson(file) {
   return JSON.parse(readFileSync(file, 'utf8'))
 }
 
+// L02：仅比较词法路径会让 outside-alias（目录符号链接→公开材料目录）绕过隔离，
+// 私有 mapping 实际写进 blind 目录。这里解析真实路径（含父目录链接与悬空文件链接）后比较。
+function realpathLoose(target) {
+  const absolute = resolve(target)
+  try {
+    return realpathSync(absolute)
+  } catch {
+    // 路径不存在或悬空符号链接：若是链接则先解析链接目标，再继续按最深已存在祖先解析。
+  }
+  try {
+    if (lstatSync(absolute).isSymbolicLink()) {
+      const link = readlinkSync(absolute)
+      return realpathLoose(resolve(dirname(absolute), link))
+    }
+  } catch {
+    // 不存在：走已存在祖先解析。
+  }
+  let current = absolute
+  const suffix = []
+  while (true) {
+    const parent = dirname(current)
+    if (parent === current) break
+    suffix.unshift(basename(current))
+    current = parent
+    try {
+      return join(realpathSync(current), ...suffix)
+    } catch {
+      // 继续向上。
+    }
+  }
+  return absolute
+}
+
 function ensureOutside(target, dir) {
-  const t = resolve(target)
-  const d = resolve(dir)
+  // 词法路径在材料目录内一律拒绝（保持既有隔离语义），再按真实路径核对父目录/最终目标。
+  const lexicalTarget = resolve(target)
+  const lexicalDir = resolve(dir)
+  if (lexicalTarget === lexicalDir || lexicalTarget.startsWith(`${lexicalDir}${sep}`)) return false
+  const t = realpathLoose(target)
+  const d = realpathLoose(dir)
   return t !== d && !t.startsWith(`${d}${sep}`)
 }
 
@@ -319,14 +367,27 @@ function runExport(options) {
     rubric: 'eval/label/RUBRIC.md',
     note: '本清单不含组别、taskId、runId；盲评结束后用私有映射还原。',
   }
-  writeFileSync(join(out, 'manifest.json'), `${JSON.stringify(exportManifest, null, 2)}\n`, 'utf8')
-  writeFileSync(join(out, 'labels.template.json'), `${JSON.stringify({ batch: manifest.batch, labeler: null, cases: templateCases }, null, 2)}\n`, 'utf8')
+  const exportManifestText = `${JSON.stringify(exportManifest, null, 2)}\n`
+  const exportIdentity = { caseCount: manifestCases.length, manifestSha256: sha256(exportManifestText) }
+  writeFileSync(join(out, 'manifest.json'), exportManifestText, 'utf8')
+  // L01：标签模板也携带导出身份；import 用它核对 labels/manifest/mapping 三方一致，
+  // 同批新导出不会再接受旧 labels（旧格式默认拒绝，历史兼容需显式 --allow-legacy-mapping）。
+  writeFileSync(join(out, 'labels.template.json'), `${JSON.stringify({
+    batch: manifest.batch,
+    caseCount: exportIdentity.caseCount,
+    manifestSha256: exportIdentity.manifestSha256,
+    labeler: null,
+    cases: templateCases,
+  }, null, 2)}\n`, 'utf8')
 
   mkdirSync(dirname(mappingPath), { recursive: true })
   writeFileSync(mappingPath, `${JSON.stringify({
     schemaVersion: 1,
     batch: manifest.batch,
     seed,
+    // F05/L01：导出清单身份；labels 模板携带同一身份，import 做三方一致核对。
+    caseCount: exportIdentity.caseCount,
+    manifestSha256: exportIdentity.manifestSha256,
     note: '私有映射：只在盲评结束后打开；不得与材料一起分发。',
     mapping,
   }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
@@ -400,6 +461,55 @@ function selfTest(asJson) {
       : ['manifest 缺失']
     record('导出清单不含组别/taskId/runId 键', leakedKeys.length === 0, JSON.stringify(leakedKeys))
     record('私有映射与材料目录分离', existsSync(cleanMapping) && ensureOutside(cleanMapping, cleanOut), cleanMapping)
+
+    // L01：标签模板必须携带与 blind manifest / 私有 mapping 一致的导出身份。
+    const templateJson = existsSync(join(cleanOut, 'labels.template.json')) ? JSON.parse(readFileSync(join(cleanOut, 'labels.template.json'), 'utf8')) : null
+    const cleanMappingJson = existsSync(cleanMapping) ? JSON.parse(readFileSync(cleanMapping, 'utf8')) : null
+    const cleanManifestRaw = existsSync(join(cleanOut, 'manifest.json')) ? readFileSync(join(cleanOut, 'manifest.json'), 'utf8') : ''
+    record('L01 标签模板携带与 manifest/mapping 一致的导出身份',
+      Boolean(templateJson) && Boolean(cleanMappingJson)
+        && templateJson.caseCount === 1
+        && templateJson.manifestSha256 === sha256(cleanManifestRaw)
+        && templateJson.caseCount === cleanMappingJson.caseCount
+        && templateJson.manifestSha256 === cleanMappingJson.manifestSha256,
+      `template=${JSON.stringify({ caseCount: templateJson?.caseCount, manifestSha256: templateJson?.manifestSha256 })} mapping=${JSON.stringify({ caseCount: cleanMappingJson?.caseCount, manifestSha256: cleanMappingJson?.manifestSha256 })}`)
+
+    // L02：符号链接绕过隔离必须拒绝；正常（含指向外部的链接）路径仍通过。
+    const symlinkOut = join(root, 'out-symlink-l02')
+    mkdirSync(symlinkOut, { recursive: true })
+    const outsideAlias = join(root, 'outside-alias')
+    symlinkSync(symlinkOut, outsideAlias, 'dir')
+    const symlinkMappingRun = runCliSafe(['--manifest', manifest, '--out', symlinkOut, '--mapping', join(outsideAlias, 'private.json')])
+    record('L02 负例：--mapping 经目录符号链接实际落入材料目录 → 拒绝（exit 2，不写文件）',
+      symlinkMappingRun.status === 2 && !existsSync(join(symlinkOut, 'private.json')),
+      `exit=${symlinkMappingRun.status} leaked=${existsSync(join(symlinkOut, 'private.json'))}`)
+
+    const nestedOut = join(root, 'out-nested-l02')
+    mkdirSync(nestedOut, { recursive: true })
+    const nestedAlias = join(root, 'nested-alias-l02')
+    symlinkSync(nestedOut, nestedAlias, 'dir')
+    const nestedSymlinkRun = runCliSafe(['--manifest', manifest, '--out', nestedOut, '--mapping', join(nestedAlias, 'sub', 'private.json')])
+    record('L02 负例：--mapping 父目录链接（含不存在子目录）指向材料目录 → 拒绝（exit 2）',
+      nestedSymlinkRun.status === 2 && !existsSync(join(nestedOut, 'sub', 'private.json')),
+      `exit=${nestedSymlinkRun.status}`)
+
+    const danglingOut = join(root, 'out-dangling-l02')
+    mkdirSync(danglingOut, { recursive: true })
+    const danglingMapping = join(root, 'mapping-dangling.json')
+    symlinkSync(join(danglingOut, 'actual.json'), danglingMapping)
+    const danglingRun = runCliSafe(['--manifest', manifest, '--out', danglingOut, '--mapping', danglingMapping])
+    record('L02 负例：--mapping 是悬空符号链接且目标在材料目录内 → 拒绝（exit 2）',
+      danglingRun.status === 2 && !existsSync(join(danglingOut, 'actual.json')),
+      `exit=${danglingRun.status} leaked=${existsSync(join(danglingOut, 'actual.json'))}`)
+
+    const outsideTarget = join(root, 'outside-mapping-target')
+    mkdirSync(outsideTarget, { recursive: true })
+    const outsideOkAlias = join(root, 'outside-alias-ok')
+    symlinkSync(outsideTarget, outsideOkAlias, 'dir')
+    const outsideAliasRun = runCliSafe(['--manifest', manifest, '--out', join(root, 'out-alias-ok'), '--mapping', join(outsideOkAlias, 'private.json')])
+    record('L02 正例：--mapping 经符号链接指向材料目录之外 → 允许（exit 0）',
+      outsideAliasRun.status === 0 && existsSync(join(outsideTarget, 'private.json')),
+      `exit=${outsideAliasRun.status}`)
 
     const insideMapping = runCliSafe(['--manifest', manifest, '--out', join(root, 'out-inside'), '--mapping', join(root, 'out-inside', 'mapping.json')])
     record('负例：映射放进材料目录 → 拒绝（exit 2）', insideMapping.status === 2, `exit=${insideMapping.status}`)
@@ -494,6 +604,86 @@ function selfTest(asJson) {
       restoreDetail = `exit=${mappingRun.status} ${mappingRun.stderr.slice(0, 200)}`
     }
     record('B4-01 私有映射可按 blindId 还原 runId/arm/taskId 且不进入材料目录', restoreOk, restoreDetail)
+
+    // F06：现行实际写法的组别泄漏必须拒绝（fail-closed），且不静默删正文后放行。
+    const leakTaskDir = join(root, 'task-leak')
+    mkdirSync(leakTaskDir, { recursive: true })
+    writeFileSync(join(leakTaskDir, 'issue.md'), '任务：增加字段。\n运行分组：原系统组\n{"arm": "legacy-system"}\n', 'utf8')
+    writeFileSync(join(leakTaskDir, 'review.md'), '合法范围：src/**。\n', 'utf8')
+    const leakManifest = join(root, 'manifest-leak.json')
+    writeFileSync(leakManifest, JSON.stringify({
+      batch: 'selftest-b4-leak',
+      seed: 7,
+      tasks: { t1: { taskDir: leakTaskDir } },
+      runs: [{ runId: 'selftest-t1-off', taskId: 't1', arm: 'off', repo, base, head }],
+    }), 'utf8')
+    const leakOut = join(root, 'out-leak')
+    const leakRun = runCliSafe(['--manifest', leakManifest, '--out', leakOut, '--mapping', join(root, 'private', 'mapping-leak.json')])
+    record('F06 负例：requirement 含中文“原系统组”+ JSON "arm":"legacy-system" → 拒绝导出（exit 1）',
+      leakRun.status === 1
+        && /HARD [^\n]*requirement[^\n]*\[zh-group\]/.test(leakRun.stderr)
+        && /HARD [^\n]*requirement[^\n]*\[arm-json\]/.test(leakRun.stderr)
+        && !existsSync(leakOut),
+      `exit=${leakRun.status} outExists=${existsSync(leakOut)} stderr=${leakRun.stderr.slice(0, 500)}`)
+
+    const leakScanOnly = runCliSafe(['--manifest', leakManifest, '--out', join(root, 'out-leak-scan'), '--mapping', join(root, 'private', 'mapping-leak-scan.json'), '--scan-only'])
+    record('F06 负例：scan-only 遇到同样泄漏也拒绝（exit 1，不生成材料）',
+      leakScanOnly.status === 1 && !existsSync(join(root, 'out-leak-scan')),
+      `exit=${leakScanOnly.status} outExists=${existsSync(join(root, 'out-leak-scan'))}`)
+
+    const leakScopeDir = join(root, 'task-leak-scope')
+    mkdirSync(leakScopeDir, { recursive: true })
+    writeFileSync(join(leakScopeDir, 'issue.md'), '任务：增加字段。\n', 'utf8')
+    writeFileSync(join(leakScopeDir, 'review.md'), '合法范围：src/**。\n分组信息：{ "arm" : "full-package" }\n', 'utf8')
+    const leakScopeManifest = join(root, 'manifest-leak-scope.json')
+    writeFileSync(leakScopeManifest, JSON.stringify({
+      batch: 'selftest-b4-leak-scope',
+      seed: 7,
+      tasks: { t1: { taskDir: leakScopeDir } },
+      runs: [{ runId: 'selftest-t1-off', taskId: 't1', arm: 'off', repo, base, head }],
+    }), 'utf8')
+    const leakScopeOut = join(root, 'out-leak-scope')
+    const leakScopeRun = runCliSafe(['--manifest', leakScopeManifest, '--out', leakScopeOut, '--mapping', join(root, 'private', 'mapping-leak-scope.json')])
+    record('F06 负例：allowed-scope 含带空格 JSON `"arm" : "full-package"` → 拒绝（exit 1）',
+      leakScopeRun.status === 1
+        && /HARD [^\n]*allowed-scope[^\n]*\[arm-json\]/.test(leakScopeRun.stderr)
+        && !existsSync(leakScopeOut),
+      `exit=${leakScopeRun.status} stderr=${leakScopeRun.stderr.slice(0, 400)}`)
+
+    const leakDiffRepo = makeTracedRepo('repo-arm-json-trace', 'export const add = (a, b) => a + b\n// meta {"arm":"legacy-system"}\n')
+    const leakDiffManifest = join(root, 'manifest-leak-diff.json')
+    writeFileSync(leakDiffManifest, JSON.stringify({
+      batch: 'selftest-b4-leak-diff',
+      seed: 7,
+      tasks: { t1: { taskDir } },
+      runs: [{ runId: 'selftest-t1-native', taskId: 't1', arm: 'native', repo: leakDiffRepo.tracedRepo, base: leakDiffRepo.tracedBase, head: leakDiffRepo.tracedHead }],
+    }), 'utf8')
+    const leakDiffOut = join(root, 'out-leak-diff')
+    const leakDiffRun = runCliSafe(['--manifest', leakDiffManifest, '--out', leakDiffOut, '--mapping', join(root, 'private', 'mapping-leak-diff.json')])
+    record('F06 负例：diff 含 JSON `"arm":"legacy-system"` → 拒绝（exit 1，diff 层）',
+      leakDiffRun.status === 1
+        && /HARD [^\n]*diff[^\n]*\[arm-json\]/.test(leakDiffRun.stderr)
+        && !existsSync(leakDiffOut),
+      `exit=${leakDiffRun.status} stderr=${leakDiffRun.stderr.slice(0, 400)}`)
+
+    const leakAssignDir = join(root, 'task-leak-assign')
+    mkdirSync(leakAssignDir, { recursive: true })
+    writeFileSync(join(leakAssignDir, 'issue.md'), '任务：增加字段。\narm = "legacy-system"\narm=full-package\n', 'utf8')
+    writeFileSync(join(leakAssignDir, 'review.md'), '合法范围：src/**。\n', 'utf8')
+    const leakAssignManifest = join(root, 'manifest-leak-assign.json')
+    writeFileSync(leakAssignManifest, JSON.stringify({
+      batch: 'selftest-b4-leak-assign',
+      seed: 7,
+      tasks: { t1: { taskDir: leakAssignDir } },
+      runs: [{ runId: 'selftest-t1-off', taskId: 't1', arm: 'off', repo, base, head }],
+    }), 'utf8')
+    const leakAssignOut = join(root, 'out-leak-assign')
+    const leakAssignRun = runCliSafe(['--manifest', leakAssignManifest, '--out', leakAssignOut, '--mapping', join(root, 'private', 'mapping-leak-assign.json')])
+    record('F06 负例：requirement 含 `arm = "legacy-system"` / `arm=full-package` → 拒绝（exit 1）',
+      leakAssignRun.status === 1
+        && /\[arm-quoted\]|\[arm-legacy-full\]|\[legacy-system-word\]/.test(leakAssignRun.stderr)
+        && !existsSync(leakAssignOut),
+      `exit=${leakAssignRun.status} stderr=${leakAssignRun.stderr.slice(0, 400)}`)
 
     const ok = steps.every((step) => step.ok)
     if (asJson) console.log(JSON.stringify({ selfTest: ok, steps }, null, 2))

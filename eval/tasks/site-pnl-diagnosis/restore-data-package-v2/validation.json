@@ -1,0 +1,103 @@
+{
+  "mode": "full",
+  "taskDir": "/Users/zm/repos/hephi-dev-base/eval/tasks/site-pnl-diagnosis/restore-data-package-v2",
+  "structure": {
+    "ok": true,
+    "errors": [],
+    "warnings": [
+      "environment.offline=true：lockfile 未在任务目录/本地仓库找到（uv.lock）；完整模式会强制校验，dry-run 无法确认仓库锁文件"
+    ]
+  },
+  "checks": {
+    "environment": {
+      "offline": true,
+      "lockfile": "uv.lock",
+      "found": true,
+      "ok": true
+    },
+    "base": {
+      "expected": "fail",
+      "runs": [
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 11, in <module>\nAssertionError: missing restored source file backend/app/data/__init__.py\n",
+          "outputSha256": "7402877ee86f3b5ed76a2a1133a6a048b4ec90e050545550ccd7d97d5655ddc1"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 11, in <module>\nAssertionError: missing restored source file backend/app/data/__init__.py\n",
+          "outputSha256": "7402877ee86f3b5ed76a2a1133a6a048b4ec90e050545550ccd7d97d5655ddc1"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 11, in <module>\nAssertionError: missing restored source file backend/app/data/__init__.py\n",
+          "outputSha256": "7402877ee86f3b5ed76a2a1133a6a048b4ec90e050545550ccd7d97d5655ddc1"
+        }
+      ],
+      "codes": [
+        1,
+        1,
+        1
+      ],
+      "consistent": true,
+      "ok": true
+    },
+    "scope": {
+      "allowedFiles": [
+        ".gitignore",
+        "backend/app/data/__init__.py",
+        "backend/app/data/seed.py"
+      ],
+      "changedFiles": [
+        ".gitignore",
+        "backend/app/data/__init__.py",
+        "backend/app/data/seed.py"
+      ],
+      "outside": [],
+      "ok": true
+    },
+    "reference": {
+      "expected": "pass",
+      "runs": [
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: seed restores empty-db seeding and precise runtime-database ignore rules\n",
+          "stderr": "",
+          "outputSha256": "a06043990718cb65108d51b86bff2154ab48d57e0239f9a5a2a6c09553645e13"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: seed restores empty-db seeding and precise runtime-database ignore rules\n",
+          "stderr": "",
+          "outputSha256": "a06043990718cb65108d51b86bff2154ab48d57e0239f9a5a2a6c09553645e13"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: seed restores empty-db seeding and precise runtime-database ignore rules\n",
+          "stderr": "",
+          "outputSha256": "a06043990718cb65108d51b86bff2154ab48d57e0239f9a5a2a6c09553645e13"
+        }
+      ],
+      "codes": [
+        0,
+        0,
+        0
+      ],
+      "consistent": true,
+      "ok": true
+    }
+  },
+  "ok": true,
+  "baseSha": "e00f338b098546adc40156dc15b4b6559e19835d",
+  "repo": "/Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis",
+  "repeats": 3
+}

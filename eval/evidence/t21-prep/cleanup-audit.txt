@@ -1,0 +1,11 @@
+=== cleanup audit at 2026-11-08T16:13:35Z ===
+instance_dir=/tmp/hephi-off-b5
+credentials_deleted=YES (deepseek-account records only)
+instance_dir_removed=YES
+port3093_listen_count=0
+b5off_process_count=0
+hostB_3083_listen=1
+hostB_3083_pid=51558
+daily_3082_pid=96013
+hostB_pid51558_alive=YES
+daily_pid96013_alive=YES

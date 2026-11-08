@@ -3,11 +3,19 @@ import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { RepositoryFingerprint } from '../verification/fingerprint.js'
 
+/** T17: the red (before-implementation) phase. Ordinary runs carry no phase at all. */
+export type CheckRunPhase = 'red'
+
 export type CheckRunRecord = {
   version: 3; runId: string; sequence: number; ticketId: string; contractHash: string;
   /** Plugin build that produced this record; ready rejects a different build. */
   pluginCommit: string;
   checkId: string; sessionId: string; callId: string; innerCallId: string;
+  /**
+   * T17: optional `red` phase marker. Records written before T17 (and ordinary runs)
+   * have no `phase`; readers treat a missing value as an ordinary check.
+   */
+  phase?: CheckRunPhase;
   /** Native background Job id, persisted before waiting for its terminal state. */
   jobId?: string;
   argv: string[]; cwd: string; startedAt: string; finishedAt?: string;
@@ -25,7 +33,8 @@ function assertRecord(value: unknown, ticketId: string, expectedRunId: string): 
   const record = value as CheckRunRecord
   if (!record || typeof record !== 'object' || record.version !== 3 || typeof record.pluginCommit !== 'string'
     || typeof record.runId !== 'string' || record.runId !== expectedRunId || record.ticketId !== ticketId
-    || !Number.isSafeInteger(record.sequence) || !['running', 'passed', 'blocked', 'unknown'].includes(record.status)) {
+    || !Number.isSafeInteger(record.sequence) || !['running', 'passed', 'blocked', 'unknown'].includes(record.status)
+    || (record.phase !== undefined && record.phase !== 'red')) {
     throw new Error('unsupported or corrupt check evidence')
   }
   return record

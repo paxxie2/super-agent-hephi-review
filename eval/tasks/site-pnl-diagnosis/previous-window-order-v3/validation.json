@@ -1,0 +1,99 @@
+{
+  "mode": "full",
+  "taskDir": "/Users/zm/repos/hephi-dev-base/eval/tasks/site-pnl-diagnosis/previous-window-order-v3",
+  "structure": {
+    "ok": true,
+    "errors": [],
+    "warnings": [
+      "environment.offline=true：lockfile 未在任务目录/本地仓库找到（uv.lock）；完整模式会强制校验，dry-run 无法确认仓库锁文件"
+    ]
+  },
+  "checks": {
+    "environment": {
+      "offline": true,
+      "lockfile": "uv.lock",
+      "found": true,
+      "ok": true
+    },
+    "base": {
+      "expected": "fail",
+      "runs": [
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 6, in <module>\nAttributeError: module 'money' has no attribute 'window_length_days'\n",
+          "outputSha256": "6f7f69785368ad4a8530ede05663a5854e613dde11a3a1cbf11484c865b21c96"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 6, in <module>\nAttributeError: module 'money' has no attribute 'window_length_days'\n",
+          "outputSha256": "6f7f69785368ad4a8530ede05663a5854e613dde11a3a1cbf11484c865b21c96"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 6, in <module>\nAttributeError: module 'money' has no attribute 'window_length_days'\n",
+          "outputSha256": "6f7f69785368ad4a8530ede05663a5854e613dde11a3a1cbf11484c865b21c96"
+        }
+      ],
+      "codes": [
+        1,
+        1,
+        1
+      ],
+      "consistent": true,
+      "ok": true
+    },
+    "scope": {
+      "allowedFiles": [
+        "backend/app/domain/money.py"
+      ],
+      "changedFiles": [
+        "backend/app/domain/money.py"
+      ],
+      "outside": [],
+      "ok": true
+    },
+    "reference": {
+      "expected": "pass",
+      "runs": [
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "window length/adjacency checks PASS\n",
+          "stderr": "",
+          "outputSha256": "1e05e4e99ae811555a6805c56ee107d36ddc3bce8f252b982fd8a724b0679d6c"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "window length/adjacency checks PASS\n",
+          "stderr": "",
+          "outputSha256": "1e05e4e99ae811555a6805c56ee107d36ddc3bce8f252b982fd8a724b0679d6c"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "window length/adjacency checks PASS\n",
+          "stderr": "",
+          "outputSha256": "1e05e4e99ae811555a6805c56ee107d36ddc3bce8f252b982fd8a724b0679d6c"
+        }
+      ],
+      "codes": [
+        0,
+        0,
+        0
+      ],
+      "consistent": true,
+      "ok": true
+    }
+  },
+  "ok": true,
+  "baseSha": "1e166fbe2217ac378e5bb7062cd34a2da1e75e6f",
+  "repo": "/Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis",
+  "repeats": 3
+}

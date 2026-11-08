@@ -1,0 +1,23 @@
+=== D-9 window start: 2026-11-08T16:06:04Z ===
+canonical: f91d1b6afb6e1d97c6132c7537afd06b548c058886248b01405e0e095b0d3497  /Users/zm/repos/hephi-dev-base/eval/tasks/site-pnl-diagnosis/previous-window-order/issue.md bytes=     657
+API#1 native issue read exit=0 at 2026-11-08T16:06:05Z
+API#2 off issue create exit=0 at 2026-11-08T16:06:07Z
+waiting for off instance to receive the Issue (poll every 60s) ...
+=== stopping pid 33806 at 2026-11-08T16:11:25Z ===
+b5off stopped (pid 33806)
+port3093_listen=0
+off_pid_alive=NO
+hostB_3083_pid=51558
+daily_3082_pid=96013
+API#3 off issue verify exit=0 at 2026-11-08T16:12:27Z
+=== hephi-name matches in DSH_HOME (explain) ===
+/tmp/hephi-off-b5/dsh-home/sessions/--private-tmp-hephi-off-b5-work-previous-window-order-7dfffe7ab3d6--
+/tmp/hephi-off-b5/dsh-home/sessions/--private-tmp-hephi-off-b5-state--
+=== hephi mentions in host.log (expect 0) ===
+0
+=== profile bundles ===
+['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', 'dsh-superagent']
+environment.root: /tmp/hephi-off-b5/state/work
+environment variable keys: ['DSH_SUPERAGENT_DIR', 'DSH_SUPERAGENT_NAME', 'DSH_SUPERAGENT_TICKET', 'DSH_SUPERAGENT_BLOCKED_COMMANDS', 'DSH_SUPERAGENT_GITHUB_REPOSITORY', 'DSH_SUPERAGENT_GITHUB_ACCOUNT', 'DSH_SUPERAGENT_GITHUB_COMMIT_EMAIL', 'DSH_SUPERAGENT_GITHUB_NUMBER', 'DSH_SUPERAGENT_GITHUB_PR_HEAD']
+HEPHI_* injected: []
+API#4 PR16 read exit=0 at 2026-11-08T16:12:41Z

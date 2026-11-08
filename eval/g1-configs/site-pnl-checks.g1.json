@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "requirePlan": true,
+  "protectedAssets": ["**/test/**", "**/tests/**", "acceptance/**"],
+  "checks": [
+    {
+      "id": "project-regression",
+      "kind": "test",
+      "purpose": "项目已有后端测试、前端类型检查、组件测试与生产构建通过（先安装前端依赖，保证新 worktree 可自包含执行）(G1: unchanged; scripts/check.sh is an opaque project script, so acceptance staging lives at the repo-root acceptance/ directory outside backend/ and web/ to keep the two checks disjoint — assumed, see README)",
+      "command": "sh",
+      "args": [
+        "-c",
+        "npm --prefix web ci --no-audit --no-fund && bash scripts/check.sh"
+      ],
+      "timeoutMs": 900000
+    },
+    {
+      "id": "acceptance",
+      "kind": "test",
+      "purpose": "G1 acceptance check (T08 §8 pattern): run only the repo-root acceptance/ directory, JUnit report in this run directory. Assumes uv + pytest are available and acceptance tests live under acceptance/ (created by T15 tasks; not present at staging time; placed outside scripts/check.sh's backend/web scope so the regression check does not include them).",
+      "command": "sh",
+      "args": [
+        "-c",
+        "uv run pytest acceptance -q --junitxml=\"$HEPHI_RUN_DIR/junit.xml\""
+      ],
+      "required": true,
+      "timeoutMs": 600000,
+      "assertionFailureTypes": ["AssertionError"]
+    }
+  ]
+}

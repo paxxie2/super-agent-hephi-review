@@ -1,0 +1,13 @@
+=== audit at 2026-11-08T16:12:58Z ===
+--- ps -p 33806 ---
+  PID TTY           TIME CMD
+--- lsof -nP -iTCP:3093 -sTCP:LISTEN ---
+--- ps aux | grep 'profile b5off' (residual?) ---
+(none)
+--- host B 3083 ---
+node    51558   zm   14u  IPv4 0x6285209109308932      0t0  TCP 127.0.0.1:3083 (LISTEN)
+51558 /Users/zm/.nvm/versions/node/v26.1.0/bin/node
+--- daily A 3082 ---
+node    96013   zm   14u  IPv4 0x45e8f35b535e609      0t0  TCP 127.0.0.1:3082 (LISTEN)
+96013 /Users/zm/.nvm/versions/node/v26.1.0/bin/node
+--- port3093 listen count: 0 ---

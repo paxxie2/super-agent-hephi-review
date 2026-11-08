@@ -1,0 +1,33 @@
+diff --git a/backend/app/settings.py b/backend/app/settings.py
+index 3016530..1463e2f 100644
+--- a/backend/app/settings.py
++++ b/backend/app/settings.py
+@@ -11,9 +11,13 @@ from dotenv import load_dotenv
+ REPO_ROOT = Path(__file__).resolve().parents[2]
+ 
+ 
+-def _read_dotenv() -> None:
+-    """按优先级加载环境文件，且不覆盖已有环境变量。"""
+-    explicit = os.environ.get("SITE_PNL_ENV_FILE")
++def _read_dotenv(env_file: str | None = None) -> None:
++    """按优先级加载环境文件，且不覆盖已有环境变量。
++
++    ``env_file`` 允许调用方显式指定优先加载的文件；缺省时仍读取
++    ``SITE_PNL_ENV_FILE``，因此 dotenv 入口只剩这一个参数化函数。
++    """
++    explicit = env_file if env_file is not None else os.environ.get("SITE_PNL_ENV_FILE")
+     if explicit:
+         load_dotenv(explicit, override=False)
+     load_dotenv(REPO_ROOT / ".env", override=False)
+@@ -43,10 +47,7 @@ class Settings:
+ 
+     @classmethod
+     def from_env(cls) -> "Settings":
+-        if os.environ.get("SITE_PNL_ENV_FILE") or os.environ.get("SITE_PNL_LOAD_DOTENV") == "1":
+-            _read_dotenv()
+-        else:
+-            _read_dotenv()
++        _read_dotenv()
+ 
+         def _int(name: str, default: int) -> int:
+             try:

@@ -1,0 +1,428 @@
+diff --git a/.gitignore b/.gitignore
+index 44c73a2..b65ffb1 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -17,10 +17,10 @@ web/playwright-report/
+ web/e2e/.auth/
+ 
+ # Local runtime data and secrets
+-data/
+-*.db
+-*.db-wal
+-*.db-shm
++# 只忽略仓库根运行期数据库文件；源码包 backend/app/data/** 不得被忽略
++/data/*.db
++/data/*.db-wal
++/data/*.db-shm
+ .env
+ .env.*
+ !.env.example
+diff --git a/backend/app/data/__init__.py b/backend/app/data/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/backend/app/data/seed.py b/backend/app/data/seed.py
+new file mode 100644
+index 0000000..1abda8d
+--- /dev/null
++++ b/backend/app/data/seed.py
+@@ -0,0 +1,400 @@
++"""模拟数据播种（T1，固定种子、固定数据版本、幂等）。
++
++设计依据：设计第 5 节、INTERFACES 3.2。
++
++- 固定随机种子 ``constants.DATASET_SEED``；数据完全由确定性规则生成，稳定 ID。
++- 只在空库播种：``sites`` 非空直接返回，绝不重置。
++- 10 个点位 S01..S10 对应 ``正常盈利/租金偏高/分成偏高/设备离线/仓位故障/客流下降/
++  转化下降/退款异常/多因素亏损/数据缺失``；``case_label`` 仅供展示，绝不参与计算或规则。
++- 2026-07-01..2026-09-28 共 90 天，写入全部源表与 coverage 清单 + app_meta。
++- 覆盖清单缺行 = 缺记录；有行但源表 0 条 = 已知为 0。
++"""
++
++from __future__ import annotations
++
++import random
++import time
++from dataclasses import dataclass
++from datetime import date
++
++from app.constants import (
++    DATA_VERSION,
++    DATASET_END_DATE,
++    DATASET_SEED,
++    DATASET_START_DATE,
++)
++from app.db import connect, init_db
++from app.domain.models import SOURCE_TYPES
++from app.domain.money import date_range, parse_date, round_half_up_div
++
++BUSINESS_OPEN_MINUTE = 600  # 10:00
++BUSINESS_CLOSE_MINUTE = 1320  # 22:00
++BUSINESS_HOURS = tuple(range(10, 22))  # [10:00, 22:00)
++PAYMENT_FEE_BPS = 60  # 0.6%
++
++# 各案例的“异常”从默认诊断窗口（2026-08-30..2026-09-28）起点开始生效。
++SWITCH_DATE = "2026-08-30"
++
++
++@dataclass(frozen=True)
++class _DeviceSpec:
++    name: str
++    purchase_cost_cents: int
++    depreciation_months: int
++    in_service_date: str
++    planned_capacity: int = 6
++
++
++@dataclass(frozen=True)
++class _SiteSpec:
++    id: str
++    name: str
++    city: str
++    address: str
++    case_label: str
++    orders_before: int
++    orders_after: int
++    visitors_before: int
++    visitors_after: int
++    refund_percent: int  # 每 100 笔订单中整单退款的笔数
++    rent_segments: tuple[tuple[str, str, int, int], ...]  # (start, end, monthly_cents, version)
++    share_segments: tuple[tuple[str, str, int, int], ...]  # (start, end, rate_bps, version)
++    devices: tuple[_DeviceSpec, ...]
++    maintenance_events: tuple[tuple[str, int, str], ...] = ()
++    offline_device_index: int | None = None
++    offline_orders: int | None = None
++    fault_devices: tuple[int, ...] = ()
++    faulted_slots: int = 0
++    fault_hours: tuple[int, ...] = BUSINESS_HOURS  # 故障发生的营业小时；其余小时保持正常
++    missing: tuple[tuple[str, tuple[str, ...]], ...] = ()  # source_type -> 缺记录日期
++
++
++_COMMON_DEVICES: tuple[_DeviceSpec, ...] = (
++    # 2024-12 起计提 36 个月；默认窗口内仍在计提。
++    _DeviceSpec("柜机A", 1_200_000, 36, "2024-11-01"),
++    # 2025-03 起计提 18 个月 -> 2026-08 为最后一个计提月；2026-09 起折旧为 0（窗口内到期）。
++    _DeviceSpec("柜机B", 1_200_000, 18, "2025-02-15"),
++    # 2025-07 起计提 24 个月。
++    _DeviceSpec("柜机C", 1_200_000, 24, "2025-06-10"),
++    # 2026-06 起计提 24 个月（投入使用日次月开始）。
++    _DeviceSpec("柜机D", 1_200_000, 24, "2026-05-05"),
++)
++
++_RENT_FULL = (("2026-07-01", "2026-12-31", 600_000, 1),)
++_SHARE_20 = (("2026-07-01", "2026-12-31", 2000, 1),)
++
++
++def _site_specs() -> tuple[_SiteSpec, ...]:
++    return (
++        _SiteSpec(
++            "S01", "静安寺地铁店", "上海", "静安区南京西路 1788 号 1F", "正常盈利",
++            orders_before=30, orders_after=30, visitors_before=100, visitors_after=100,
++            refund_percent=1, rent_segments=_RENT_FULL, share_segments=_SHARE_20,
++            devices=_COMMON_DEVICES,
++            maintenance_events=(("2026-09-05", 15_000, "常规保养"), ("2026-09-20", 15_000, "零件更换")),
++        ),
++        _SiteSpec(
++            "S02", "陆家嘴商城店", "上海", "浦东新区世纪大道 8 号 B1", "租金偏高",
++            orders_before=30, orders_after=30, visitors_before=100, visitors_after=100,
++            refund_percent=1,
++            # 窗口内租金变更：2026-09-15 起 9000 元/月 -> 12000 元/月（区间不重叠）。
++            rent_segments=(
++                ("2026-07-01", "2026-09-14", 900_000, 1),
++                ("2026-09-15", "2026-12-31", 1_200_000, 2),
++            ),
++            share_segments=_SHARE_20, devices=_COMMON_DEVICES,
++            maintenance_events=(("2026-09-06", 15_000, "常规保养"), ("2026-09-21", 15_000, "零件更换")),
++        ),
++        _SiteSpec(
++            "S03", "五角场万达店", "上海", "杨浦区淞沪路 77 号 3F", "分成偏高",
++            orders_before=30, orders_after=30, visitors_before=100, visitors_after=100,
++            refund_percent=1, rent_segments=_RENT_FULL,
++            # 窗口内有生效分成比例 40% > 35%。
++            share_segments=(
++                ("2026-07-01", "2026-08-19", 2000, 1),
++                ("2026-08-20", "2026-12-31", 4000, 2),
++            ),
++            devices=_COMMON_DEVICES,
++            maintenance_events=(("2026-09-07", 15_000, "常规保养"), ("2026-09-22", 15_000, "零件更换")),
++        ),
++        _SiteSpec(
++            "S04", "徐家汇美罗城店", "上海", "徐汇区肇嘉浜路 1111 号 5F", "设备离线",
++            orders_before=30, orders_after=30, visitors_before=100, visitors_after=100,
++            refund_percent=1, rent_segments=_RENT_FULL, share_segments=_SHARE_20,
++            devices=_COMMON_DEVICES,
++            maintenance_events=(("2026-09-08", 15_000, "常规保养"), ("2026-09-23", 15_000, "零件更换")),
++            offline_device_index=0, offline_orders=24,
++        ),
++        _SiteSpec(
++            "S05", "人民广场店", "上海", "黄浦区南京东路 300 号 2F", "仓位故障",
++            orders_before=30, orders_after=30, visitors_before=100, visitors_after=100,
++            refund_percent=1, rent_segments=_RENT_FULL, share_segments=_SHARE_20,
++            devices=_COMMON_DEVICES,
++            maintenance_events=(("2026-09-09", 15_000, "常规保养"), ("2026-09-24", 15_000, "零件更换")),
++            # 故障只发生在营业时段的前 8 小时（10:00-18:00），18:00-22:00 保持正常，
++            # 为恢复测算提供可对齐的参考正常时段；故障比例仍 > 10%。
++            fault_devices=(0, 1), faulted_slots=2, fault_hours=tuple(range(10, 18)),
++        ),
++        _SiteSpec(
++            "S06", "虹桥天地店", "上海", "闵行区申长路 688 号 1F", "客流下降",
++            orders_before=36, orders_after=24, visitors_before=120, visitors_after=80,
++            refund_percent=1,
++            rent_segments=(("2026-07-01", "2026-12-31", 550_000, 1),),
++            share_segments=_SHARE_20, devices=_COMMON_DEVICES,
++            maintenance_events=(("2026-09-10", 15_000, "常规保养"), ("2026-09-25", 15_000, "零件更换")),
++        ),
++        _SiteSpec(
++            "S07", "中山公园龙之梦店", "上海", "长宁区长宁路 1018 号 4F", "转化下降",
++            orders_before=36, orders_after=24, visitors_before=100, visitors_after=100,
++            refund_percent=1,
++            rent_segments=(("2026-07-01", "2026-12-31", 550_000, 1),),
++            share_segments=_SHARE_20, devices=_COMMON_DEVICES,
++            maintenance_events=(("2026-09-11", 15_000, "常规保养"), ("2026-09-26", 15_000, "零件更换")),
++        ),
++        _SiteSpec(
++            "S08", "世纪公园店", "上海", "浦东新区花木路 1099 号 1F", "退款异常",
++            orders_before=30, orders_after=30, visitors_before=100, visitors_after=100,
++            refund_percent=15, rent_segments=_RENT_FULL, share_segments=_SHARE_20,
++            devices=_COMMON_DEVICES,
++            maintenance_events=(("2026-09-12", 15_000, "常规保养"), ("2026-09-27", 15_000, "零件更换")),
++        ),
++        _SiteSpec(
++            "S09", "南京西路旗舰店", "上海", "静安区南京西路 1266 号 2F", "多因素亏损",
++            orders_before=30, orders_after=30, visitors_before=100, visitors_after=100,
++            refund_percent=1,
++            rent_segments=(("2026-07-01", "2026-12-31", 1_000_000, 1),),
++            share_segments=(("2026-07-01", "2026-12-31", 4000, 1),),
++            devices=_COMMON_DEVICES,
++            # 维护费用/净收入 > 15%，与高租金/高分成叠加导致亏损。
++            maintenance_events=(
++                ("2026-09-04", 160_000, "压缩机大修"),
++                ("2026-09-14", 160_000, "电路板更换"),
++                ("2026-09-24", 160_000, "柜体结构维修"),
++            ),
++        ),
++        _SiteSpec(
++            "S10", "张江高科店", "上海", "浦东新区祖冲之路 899 号 1F", "数据缺失",
++            orders_before=30, orders_after=30, visitors_before=100, visitors_after=100,
++            refund_percent=0, rent_segments=_RENT_FULL, share_segments=_SHARE_20,
++            devices=_COMMON_DEVICES,
++            maintenance_events=(("2026-09-08", 15_000, "常规保养"), ("2026-09-15", 15_000, "零件更换")),
++            # 核心源（退款、维护）与设备小时故意缺若干日期：缺行=缺记录，不补 0。
++            missing=(
++                ("refunds", ("2026-09-11", "2026-09-12", "2026-09-13")),
++                ("maintenance_fees", ("2026-09-20", "2026-09-21")),
++                ("device_hours", ("2026-09-05", "2026-09-06")),
++            ),
++        ),
++    )
++
++
++def _missing_dates(spec: _SiteSpec) -> dict[str, set[str]]:
++    return {source: set(dates) for source, dates in spec.missing}
++
++
++def _is_offline_day(spec: _SiteSpec, day: date) -> bool:
++    if spec.offline_device_index is None:
++        return False
++    return day >= parse_date(SWITCH_DATE) and day.day % 2 == 0
++
++
++def _daily_orders(spec: _SiteSpec, day: date) -> int:
++    if day < parse_date(SWITCH_DATE):
++        return spec.orders_before
++    if _is_offline_day(spec, day) and spec.offline_orders is not None:
++        return spec.offline_orders
++    return spec.orders_after
++
++
++def _daily_visitors(spec: _SiteSpec, day: date) -> int:
++    base = spec.visitors_before if day < parse_date(SWITCH_DATE) else spec.visitors_after
++    # 小幅确定性波动（±2），不改变案例语义。
++    return base + (day.toordinal() * 11) % 5 - 2
++
++
++def _is_fault_day(day: date) -> bool:
++    return day >= parse_date(SWITCH_DATE)
++
++
++def _generate(conn: object) -> None:
++    random.Random(DATASET_SEED)  # 固定种子常量（生成规则为确定性，保留以便复现扩展）
++    specs = _site_specs()
++    days = date_range(DATASET_START_DATE, DATASET_END_DATE)
++    day_objs = [parse_date(d) for d in days]
++
++    sites_rows: list[tuple[object, ...]] = []
++    order_rows: list[tuple[object, ...]] = []
++    refund_rows: list[tuple[object, ...]] = []
++    traffic_rows: list[tuple[object, ...]] = []
++    business_hour_rows: list[tuple[object, ...]] = []
++    device_rows: list[tuple[object, ...]] = []
++    device_hour_rows: list[tuple[object, ...]] = []
++    slot_fault_rows: list[tuple[object, ...]] = []
++    maintenance_rows: list[tuple[object, ...]] = []
++    payment_fee_rows: list[tuple[object, ...]] = []
++    rent_rows: list[tuple[object, ...]] = []
++    share_rows: list[tuple[object, ...]] = []
++    coverage_rows: list[tuple[object, ...]] = []
++
++    for spec in specs:
++        missing = _missing_dates(spec)
++        sites_rows.append(
++            (spec.id, spec.name, spec.city, spec.address, spec.case_label,
++             sum(device.planned_capacity for device in spec.devices), DATA_VERSION)
++        )
++
++        for device_index, device in enumerate(spec.devices):
++            device_rows.append(
++                (f"DEV-{spec.id}-{device_index + 1:02d}", spec.id, device.name,
++                 device.purchase_cost_cents, device.depreciation_months,
++                 device.in_service_date, device.planned_capacity, DATA_VERSION)
++            )
++
++        for start, end, monthly_cents, version in spec.rent_segments:
++            rent_rows.append(
++                (f"RENT-{spec.id}-{version}", spec.id, start, end, monthly_cents, version, DATA_VERSION)
++            )
++        for start, end, rate_bps, version in spec.share_segments:
++            share_rows.append(
++                (f"SHARE-{spec.id}-{version}", spec.id, start, end, rate_bps, version, DATA_VERSION)
++            )
++
++        for event_index, (event_date, amount, description) in enumerate(spec.maintenance_events, start=1):
++            if event_date in missing.get("maintenance_fees", set()):
++                continue
++            maintenance_rows.append(
++                (f"MNT-{spec.id}-{event_index:03d}", spec.id,
++                 f"{event_date}T14:30:00+08:00", event_date, amount, description, DATA_VERSION)
++            )
++
++        order_seq = 0
++        refund_seq = 0
++        for day_str, day in zip(days, day_objs):
++            # ---- 订单 / 退款 / 手续费
++            order_count = _daily_orders(spec, day)
++            for _ in range(order_count):
++                order_seq += 1
++                amount = 3000 + ((order_seq * 37) % 7 - 3) * 100
++                hour = BUSINESS_HOURS[order_seq % len(BUSINESS_HOURS)]
++                minute = (order_seq * 17) % 60
++                business_time = f"{day_str}T{hour:02d}:{minute:02d}:00+08:00"
++                order_id = f"ORD-{spec.id}-{order_seq:05d}"
++                order_rows.append(
++                    (order_id, spec.id, business_time, day_str, amount, 1, DATA_VERSION)
++                )
++                fee_cents = round_half_up_div(amount * PAYMENT_FEE_BPS, 10000)
++                if day_str not in missing.get("payment_fees", set()):
++                    payment_fee_rows.append(
++                        (f"FEE-{spec.id}-{order_seq:05d}", spec.id, order_id, day_str, fee_cents, DATA_VERSION)
++                    )
++                if spec.refund_percent and (order_seq % 100) < spec.refund_percent:
++                    refund_date = day
++                    for _lag in range(order_seq % 3):
++                        if refund_date >= parse_date(DATASET_END_DATE):
++                            break
++                        refund_date = date.fromordinal(refund_date.toordinal() + 1)
++                    refund_date_str = refund_date.isoformat()
++                    if refund_date_str in missing.get("refunds", set()):
++                        continue
++                    refund_seq += 1
++                    refund_rows.append(
++                        (f"RFD-{spec.id}-{refund_seq:05d}", spec.id, order_id,
++                         f"{refund_date_str}T{hour:02d}:{minute:02d}:00+08:00",
++                         refund_date_str, amount, DATA_VERSION)
++                    )
++
++            # ---- 客流
++            if day_str not in missing.get("traffic_daily", set()):
++                traffic_rows.append(
++                    (f"TRF-{spec.id}-{day_str}", spec.id, day_str, _daily_visitors(spec, day), DATA_VERSION)
++                )
++
++            # ---- 营业时段
++            if day_str not in missing.get("business_hours", set()):
++                business_hour_rows.append(
++                    (f"BH-{spec.id}-{day_str}", spec.id, day_str,
++                     BUSINESS_OPEN_MINUTE, BUSINESS_CLOSE_MINUTE, DATA_VERSION)
++                )
++
++            # ---- 设备小时与仓位故障
++            if day_str not in missing.get("device_hours", set()):
++                for device_index, device in enumerate(spec.devices):
++                    offline = _is_offline_day(spec, day) and spec.offline_device_index == device_index
++                    for hour in BUSINESS_HOURS:
++                        device_hour_rows.append(
++                            (f"DH-{spec.id}-{device_index + 1:02d}-{day_str}-{hour:02d}",
++                             spec.id, f"DEV-{spec.id}-{device_index + 1:02d}", day_str, hour,
++                             "offline" if offline else "online", device.planned_capacity, DATA_VERSION)
++                        )
++            if day_str not in missing.get("slot_faults", set()) and _is_fault_day(day):
++                for device_index in spec.fault_devices:
++                    for hour in spec.fault_hours:
++                        slot_fault_rows.append(
++                            (f"SF-{spec.id}-{device_index + 1:02d}-{day_str}-{hour:02d}",
++                             spec.id, f"DEV-{spec.id}-{device_index + 1:02d}", day_str, hour,
++                             spec.faulted_slots, DATA_VERSION)
++                        )
++
++            # ---- 覆盖清单（expected=1）：缺行即缺记录
++            for source_type in SOURCE_TYPES:
++                if day_str in missing.get(source_type, set()):
++                    continue
++                coverage_rows.append((spec.id, source_type, day_str, 1, DATA_VERSION))
++
++    _insert(conn, "sites", sites_rows)
++    _insert(conn, "devices", device_rows)
++    _insert(conn, "orders", order_rows)
++    _insert(conn, "refunds", refund_rows)
++    _insert(conn, "traffic_daily", traffic_rows)
++    _insert(conn, "business_hours", business_hour_rows)
++    _insert(conn, "device_hours", device_hour_rows)
++    _insert(conn, "slot_faults", slot_fault_rows)
++    _insert(conn, "maintenance_fees", maintenance_rows)
++    _insert(conn, "payment_fees", payment_fee_rows)
++    _insert(conn, "rent_contracts", rent_rows)
++    _insert(conn, "share_contracts", share_rows)
++    _insert(conn, "coverage", coverage_rows)
++
++    meta_rows = [
++        ("data_version", DATA_VERSION),
++        ("seed", DATASET_SEED),
++        ("seeded_at", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
++        ("dataset_start", DATASET_START_DATE),
++        ("dataset_end", DATASET_END_DATE),
++    ]
++    conn.executemany(  # type: ignore[attr-defined]
++        "INSERT INTO app_meta (key, value) VALUES (?, ?) "
++        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
++        meta_rows,
++    )
++
++
++def _insert(conn: object, table: str, rows: list[tuple[object, ...]]) -> None:
++    if not rows:
++        return
++    placeholders = ", ".join("?" for _ in rows[0])
++    conn.executemany(  # type: ignore[attr-defined]
++        f"INSERT INTO {table} VALUES ({placeholders})", rows
++    )
++
++
++def seed_database(db_path: str) -> None:
++    """只在空库播种固定模拟数据；已有数据时直接返回（绝不重置）。"""
++    init_db(db_path)
++    conn = connect(db_path)
++    try:
++        existing = conn.execute("SELECT COUNT(*) AS c FROM sites").fetchone()
++        if existing and existing["c"] > 0:
++            return
++        try:
++            _generate(conn)
++            conn.commit()
++        except Exception:
++            conn.rollback()
++            raise
++        try:
++            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
++        except Exception:  # pragma: no cover - checkpoint 是尽力而为
++            pass
++    finally:
++        conn.close()

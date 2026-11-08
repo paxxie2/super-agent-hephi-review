@@ -150,9 +150,9 @@
 - **记录路径**：`e2e/<date>-E3.md`（写入 `hephi/docs/validation/e2e/`）。
 ### E4｜检查目录配置错误（check not started → 修正后重试）
 
-- **前置**：合同冻结检查的 cwd 校验（`contained`）；blocked 记录保留可重试；重试需重新 prepare（同一 Ticket 会生成新合同并覆盖 `activation.json`，不手工改旧合同/旧记录）。
+- **前置**：合同冻结检查的 cwd 校验（`contained`）；blocked 记录保留可重试；重试需重新 prepare——但 **T11：同一 Ticket 的 re-prepare 复用既有合同、不覆盖 `activation.json`**，因此“修正配置后重新 prepare”不会改变已冻结检查；要换合同需新 Ticket（或人工移除合同后重新激活），不得手工改旧合同/旧记录。
 - **执行顺序**：prepare 合同含错误 cwd → `hephi_check` 记 blocked（`check not started:`）→ 修正配置并重新 prepare → 重跑检查成功 → 核对历史记录保留。
-- **操作命令/入口**：`HEPHI_VERIFICATION_FILE` 中 `check.cwd` 指向不存在目录；修正后重新 prepare（生成新合同；不手工改旧合同/旧记录）。
+- **操作命令/入口**：`HEPHI_VERIFICATION_FILE` 中 `check.cwd` 指向不存在目录；修正后重新 prepare（同一 Ticket 复用旧合同，**不生成新合同**；换合同需新 Ticket，不手工改旧合同/旧记录）。
 - **必须采集的证据**：首个 `run.json`（blocked，reason 前缀）；修正后的新 contractHash/activation；重试 `run.json`（passed）；旧 `run.json/output.log` 未变。
 - **通过条件**：首次确定未启动记 blocked；修正后新合同重试通过；历史证据原样保留。
 - **失败/blocked**：错误记成 passed/unknown；历史证据被覆盖/删除；无法重试。

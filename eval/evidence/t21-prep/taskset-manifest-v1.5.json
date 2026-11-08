@@ -1,0 +1,418 @@
+{
+  "version": "v1.5",
+  "frozenAt": "2026-11-08T19:10:30.746Z",
+  "preregSha256": "b9f2070f1850c1a5159982817db1491c0c2d7b7712eb40728fe86641470eee87",
+  "note": "bi-v2 requirement revision approved by owner 2026-11-09; card frozen and dispatchable",
+  "roleCounts": {
+    "non-q1-tooling": 12,
+    "q1-devexposed-original": 5,
+    "q1-retention": 22,
+    "staged-only-q3": 1
+  },
+  "count": 40,
+  "tasks": [
+    {
+      "taskId": "ab-metrics-mechanical",
+      "dir": "eval/tasks/hephi/ab-metrics-mechanical",
+      "category": "defect-fix",
+      "group": "hephi",
+      "taskJsonSha256": "428499a4b83873c7a5bc7b272f5425d8e4823875213c0c4b689bc4d1ed52ea1d",
+      "issueSha256": "15642857765f4118597c7fe215c6bd5e92722b7302020ad2bfb7270b28bf5e9f",
+      "validationOk": null,
+      "role": "non-q1-tooling"
+    },
+    {
+      "taskId": "b5-task-key-whitelist",
+      "dir": "eval/tasks/hephi/b5-task-key-whitelist",
+      "category": "new-feature",
+      "group": "hephi",
+      "taskJsonSha256": "2500b82569e7f2dee654bf558f0b787663bf27286a2f59991c9a2f2c85ac4652",
+      "issueSha256": "2bf6cd814ccca5139b0ca77176d492bbab6046c9c8e3afe15f072082853c6e02",
+      "validationOk": true,
+      "role": "non-q1-tooling"
+    },
+    {
+      "taskId": "b7-matrix",
+      "dir": "eval/tasks/hephi/b7-matrix",
+      "category": "new-feature",
+      "group": "hephi",
+      "taskJsonSha256": "be8f7c5d722528839f949a1305507cf7563177f0bd074d5d7fdf18a282a89807",
+      "issueSha256": "047d3a4642bf184ebdb06966947862a0d4d366667af3ed35da533d4525790b51",
+      "validationOk": null,
+      "role": "non-q1-tooling"
+    },
+    {
+      "taskId": "daily-export-rework",
+      "dir": "eval/tasks/hephi/daily-export-rework",
+      "category": "cross-module",
+      "group": "hephi",
+      "taskJsonSha256": "2dea23cea69afc708c2c7c300f68b0d421cc2a4ef42fff418d9b89b881619ee7",
+      "issueSha256": "d1f27bed48372a46a7541e0d57ac05ebf66259b9862aea2758c83582e90da616",
+      "validationOk": null,
+      "role": "non-q1-tooling"
+    },
+    {
+      "taskId": "data-package-symlink",
+      "dir": "eval/tasks/hephi/data-package-symlink",
+      "category": "defect-fix",
+      "group": "hephi",
+      "taskJsonSha256": "eff475d40ffe90ce3414a2a3175e71f26253207eb6f61edb41c09b51ea2f393a",
+      "issueSha256": "d41a98ef178a77fbd5725a69c31e98f875274441cac965749e4b8c6bb8ff2ce7",
+      "validationOk": null,
+      "role": "non-q1-tooling"
+    },
+    {
+      "taskId": "effects-db-checker",
+      "dir": "eval/tasks/hephi/effects-db-checker",
+      "category": "cross-module",
+      "group": "hephi",
+      "taskJsonSha256": "b238f8dbad0a4ee34b1c70584daf758a7597f3b1f0f8e6cb80b817b41bae62b2",
+      "issueSha256": "bc2cca5366f8ab054e65c2a27886fd1a8d01e59286def7bdf623e1b02416f46a",
+      "validationOk": null,
+      "role": "non-q1-tooling"
+    },
+    {
+      "taskId": "prereg-lock-gate",
+      "dir": "eval/tasks/hephi/prereg-lock-gate",
+      "category": "new-feature",
+      "group": "hephi",
+      "taskJsonSha256": "001ce6925cf63df4a65a11a853f27172dad3930ee7555770a0b192343d44e578",
+      "issueSha256": "1e7ad6842721ae44a5d874fc9ce8803992f776c687ae3dac16f62a6f019178c2",
+      "validationOk": null,
+      "role": "non-q1-tooling"
+    },
+    {
+      "taskId": "prereg-lock-version",
+      "dir": "eval/tasks/hephi/prereg-lock-version",
+      "category": "defect-fix",
+      "group": "hephi",
+      "taskJsonSha256": "2875b0ea23465a8f571c8831d5a4904b244023ad8d0587d1d8f12b54fa795af3",
+      "issueSha256": "b65a1324949fea23e4ae103b2eee65bee4083d615658ec20303330a60cece60f",
+      "validationOk": null,
+      "role": "non-q1-tooling"
+    },
+    {
+      "taskId": "record-run",
+      "dir": "eval/tasks/hephi/record-run",
+      "category": "staged-suitable",
+      "group": "hephi",
+      "taskJsonSha256": "a86b5357e73110a11e081020dc517dfda13b49f61d1993b3151a758a8432b7d8",
+      "issueSha256": "10c302a72a4ab67c5387c82fa63d0abcdc9d5d7d6d018315760455c80a081fc3",
+      "validationOk": null,
+      "role": "non-q1-tooling"
+    },
+    {
+      "taskId": "repro-manifest",
+      "dir": "eval/tasks/hephi/repro-manifest",
+      "category": "new-feature",
+      "group": "hephi",
+      "taskJsonSha256": "b9edebd97b150bbe4808eb76841b295b5419018c522989f1350f4e5c5621fb78",
+      "issueSha256": "7ac0349f0e82c0332a7fcc25009dabc26c3847f60039265624cab394768812ef",
+      "validationOk": null,
+      "role": "non-q1-tooling"
+    },
+    {
+      "taskId": "test-layers",
+      "dir": "eval/tasks/hephi/test-layers",
+      "category": "behavior-preserving-refactor",
+      "group": "hephi",
+      "taskJsonSha256": "d61cb00cec3844c1097d189dc7958b098b9ddf7076b54d4d6741d1183ae8accd",
+      "issueSha256": "ad91c32a1dbf753027fb326e316ac9e4dec57160e3874eed530e4c6d0e77f1db",
+      "validationOk": null,
+      "role": "non-q1-tooling"
+    },
+    {
+      "taskId": "verify-export",
+      "dir": "eval/tasks/hephi/verify-export",
+      "category": "new-feature",
+      "group": "hephi",
+      "taskJsonSha256": "2dc99cd4c66e85053b3d6ee0e846fe609f7a21754e9e15d37c35c7314ded0201",
+      "issueSha256": "0cbf0a8860bc46b5287e5b752fa4540d82e5b643c04c8ccadf811901b78aa2bb",
+      "validationOk": null,
+      "role": "non-q1-tooling"
+    },
+    {
+      "taskId": "backend-input-validation",
+      "dir": "eval/tasks/site-pnl-diagnosis/backend-input-validation",
+      "category": "cross-module",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "c506b267710c2be316543b5161219a5cecbb13d4a1f5abe3e0efc6954169ed9b",
+      "issueSha256": "ac60c4c4e7026489007b7b29f80a15dbd16e7b70be0496165be30e38ad120cee",
+      "validationOk": null,
+      "role": "q1-devexposed-original"
+    },
+    {
+      "taskId": "backend-input-validation-v2",
+      "dir": "eval/tasks/site-pnl-diagnosis/backend-input-validation-v2",
+      "category": "cross-module",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "fb6804c7e3f546853fe60cc44ca1e1602bf91bf67bb477bfb9005bd3c03ece41",
+      "issueSha256": "82677e4b029adcc1e2cee95e6676e7c1321aa86c2dce41ade5a74542d5869f22",
+      "validationOk": true,
+      "role": "q1-retention",
+      "revision": "requirement revision APPROVED BY OWNER 2026-11-09 (code=VALIDATION_ERROR + unknown-field naming); frozen at this hash, dispatchable"
+    },
+    {
+      "taskId": "backend-input-validation-v3",
+      "dir": "eval/tasks/site-pnl-diagnosis/backend-input-validation-v3",
+      "category": "new-feature",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "4488a6d763868019075f6004570eaf98ab36ea14138998ad8aaebe463bd3b1e8",
+      "issueSha256": "c273cf5af35d29d38bef0b6f0dce65bddd8748da50c1d8ccd071d5c25de29cca",
+      "validationOk": true,
+      "role": "q1-retention",
+      "revision": "requirement revised in review-r2 F4 (Content-Type guard makes 415 reachable); frozen as task revision"
+    },
+    {
+      "taskId": "backend-validation-messages",
+      "dir": "eval/tasks/site-pnl-diagnosis/backend-validation-messages",
+      "category": "new-feature",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "cb02619259964b44c464f83789b98a85febe8a57243a5fb61d8ea75a7547e183",
+      "issueSha256": "8c71fb52cbee1efc4b8f1794b959abe1ddf8d7e737298ba1db96ae4da3bc7f25",
+      "validationOk": true,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "backend-validation-messages-v2",
+      "dir": "eval/tasks/site-pnl-diagnosis/backend-validation-messages-v2",
+      "category": "new-feature",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "df2bcbee3636516f9e24f38bb9f1ac2efe21e1a979fc1c6392261ba878ca9c26",
+      "issueSha256": "e756fe1d9bfb2c8542e0874e14846e887326949f8f609068cbbddb65a583a0c9",
+      "validationOk": true,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "backend-validation-messages-v3",
+      "dir": "eval/tasks/site-pnl-diagnosis/backend-validation-messages-v3",
+      "category": "new-feature",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "7d75a247c85fb14aa1c5797970b75c09e42b952d5cb658dc558b58178208a599",
+      "issueSha256": "6a571c5baa458eb9b62092ace6aaf6cc95c7c633aa0f78af09ff17868869687e",
+      "validationOk": true,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "frontend-form-feedback",
+      "dir": "eval/tasks/site-pnl-diagnosis/frontend-form-feedback",
+      "category": "staged-suitable",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "b412342636ddfe264b28461332e192245c5d1d74d56c1fbe6cd5915cd0c99309",
+      "issueSha256": "bbfccc47a12ceea04d5a951eaca7330f439a1ae618ef3fef351b724746032fba",
+      "validationOk": null,
+      "role": "staged-only-q3"
+    },
+    {
+      "taskId": "health-service-field",
+      "dir": "eval/tasks/site-pnl-diagnosis/health-service-field",
+      "category": "new-feature",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "66a45752a88a44243d5565598242ab435993d809132af93c1b738a5c3385debd",
+      "issueSha256": "2879684180684772657ae00ea41410a6f640f30219621985d032008beb54115e",
+      "validationOk": null,
+      "role": "q1-devexposed-original"
+    },
+    {
+      "taskId": "health-service-field-v2",
+      "dir": "eval/tasks/site-pnl-diagnosis/health-service-field-v2",
+      "category": "new-feature",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "c7da17d31119638917e1e86453132f897164573f214f5d1c6e63e782d9793c49",
+      "issueSha256": "6e85bc61256abab63886fad61ff4cde83e77b6bd270b399fd1f5e4185cc19c78",
+      "validationOk": true,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "health-service-field-v3",
+      "dir": "eval/tasks/site-pnl-diagnosis/health-service-field-v3",
+      "category": "new-feature",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "6062d50a2636a231e721ac272071d7d70e886865a9c1ed224a3e4a90f9e6a178",
+      "issueSha256": "7de077649fee0f12eb5c9b05c125e3d726c63385137d1a674fe4b0a3774e1c71",
+      "validationOk": true,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "history-page-size",
+      "dir": "eval/tasks/site-pnl-diagnosis/history-page-size",
+      "category": "defect-fix",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "cd0dfb73568da522355eaa8b5109e70927bc6f6093b944ff5c4cc571a0d85785",
+      "issueSha256": "752d2fb76a74c32c937fd018d86c1b00835e3703afb6e6e5f407bc1939d2193d",
+      "validationOk": null,
+      "role": "q1-devexposed-original"
+    },
+    {
+      "taskId": "history-page-size-v2",
+      "dir": "eval/tasks/site-pnl-diagnosis/history-page-size-v2",
+      "category": "new-feature",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "330899c93d8683e7c580a0918bf06bb3d8cbb992ceac9c89fd018778535d8ef5",
+      "issueSha256": "68e25f889a786a69881f4bfac7daf12a01229ec61e9256c4ddce8e701e964900",
+      "validationOk": true,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "history-page-size-v3",
+      "dir": "eval/tasks/site-pnl-diagnosis/history-page-size-v3",
+      "category": "new-feature",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "c7cef0441d5b4997c728e635013804d42707b16a0b871703c01866725263be4e",
+      "issueSha256": "26922e419d49c65e0688c26b3190609ced30ea8a7b9a87d180d670a5e7ccb916",
+      "validationOk": true,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "money-window-helpers",
+      "dir": "eval/tasks/site-pnl-diagnosis/money-window-helpers",
+      "category": "behavior-preserving-refactor",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "fadeb5bce7ec8552baa54fea05d710b7f6f7dd708bc34b4d1b55cd39e9f8a5b5",
+      "issueSha256": "c7362fcd5a12ad7adbdf24b4109e1f1c36eba6fcef84bc3113bad146b39f35f4",
+      "validationOk": null,
+      "role": "q1-devexposed-original"
+    },
+    {
+      "taskId": "money-window-helpers-v2",
+      "dir": "eval/tasks/site-pnl-diagnosis/money-window-helpers-v2",
+      "category": "new-feature",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "a4d0ef76e4741fc9b1d6a02ed591538dcaa8e85ecc6a63043d63afc5479778b1",
+      "issueSha256": "ece2412385eb165fe1aaed0d7f0e10990b7e10202d9571a02dcae82bd0df8665",
+      "validationOk": true,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "money-window-helpers-v3",
+      "dir": "eval/tasks/site-pnl-diagnosis/money-window-helpers-v3",
+      "category": "new-feature",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "1c3ebe3528465ef0d7bb1afb28cf4404e7e3576f05d1d8167bcc47eec4bc4bfc",
+      "issueSha256": "a2dc9c0799035ca1e9de6e404986a916a5c642cadd4e2bb2f44ad982e04b418e",
+      "validationOk": true,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "previous-window-order",
+      "dir": "eval/tasks/site-pnl-diagnosis/previous-window-order",
+      "category": "new-feature",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "d7ed91ce6aa039efcddba7db75d50bc9fdb29e3db9a1fec59b38a4632b5b3bf2",
+      "issueSha256": "f91d1b6afb6e1d97c6132c7537afd06b548c058886248b01405e0e095b0d3497",
+      "validationOk": true,
+      "role": "q1-devexposed-original",
+      "devExposure": "8 B5 dev trial runs + D-9 delivery (PR#16 off run)"
+    },
+    {
+      "taskId": "previous-window-order-v2",
+      "dir": "eval/tasks/site-pnl-diagnosis/previous-window-order-v2",
+      "category": "new-feature",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "7957a0c88c1c7419e64826418efd7344b0f7231fc8d08510ea1fc9e6be4f0ea9",
+      "issueSha256": "f51f16e359d689844727da63703d7df4539eb980db1f15f397529fcca60717c9",
+      "validationOk": true,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "previous-window-order-v3",
+      "dir": "eval/tasks/site-pnl-diagnosis/previous-window-order-v3",
+      "category": "new-feature",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "0221d1c70ada21d0bede4fdb51171103c7bacb28bf5fbfdcfe4b3a2da2a8d10b",
+      "issueSha256": "d8c6c4621ed19fe03467a58ceb1f8589a7a9c26815b7b69fa3722117230ee93d",
+      "validationOk": true,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "restore-data-package",
+      "dir": "eval/tasks/site-pnl-diagnosis/restore-data-package",
+      "category": "defect-fix",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "257a90d532ba4c2ac3162d6cd54d7e432b0403041a63bff5f4681980a8b5fdc5",
+      "issueSha256": "4f3192cd8202784932b66e53c7c3c35fb43d354a1dabf9421a1f13f5670220d5",
+      "validationOk": null,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "restore-data-package-v2",
+      "dir": "eval/tasks/site-pnl-diagnosis/restore-data-package-v2",
+      "category": "defect-fix",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "1cff576013e165586b8bd3178b3238eb808dbd37ace333a5ab9cdf2968903fec",
+      "issueSha256": "0f2b06631ffd2f70e698bdaf18c49f382a84893b9b331e9d4cbde1dccb561187",
+      "validationOk": true,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "restore-data-package-v3",
+      "dir": "eval/tasks/site-pnl-diagnosis/restore-data-package-v3",
+      "category": "defect-fix",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "5ab36b7bcc8935f1d45b20886b5e4e8042f978f8a7d57e0d214044e81169f295",
+      "issueSha256": "c2b826b3ea7078f60767f23c1a61ebb1d17133917376bda8dcec1b4ecb66cfe0",
+      "validationOk": null,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "restore-health-service-id",
+      "dir": "eval/tasks/site-pnl-diagnosis/restore-health-service-id",
+      "category": "defect-fix",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "233fb2606cb077c7e06993839cc447481ea876254bf38af39554643f14d9409a",
+      "issueSha256": "9ba3e7800a820b5f2a1384b3a71b1ebfc812051da6367873fe6f7d574b70ee49",
+      "validationOk": null,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "restore-health-service-id-v2",
+      "dir": "eval/tasks/site-pnl-diagnosis/restore-health-service-id-v2",
+      "category": "defect-fix",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "4108bf1efa67e1c6724a33814db1eadb7202cadf030f7d04daf61e94354cd5e6",
+      "issueSha256": "adacb0980a898921e643fa077d22b9b6671aedbd425a124ac3c3bee84dc104fd",
+      "validationOk": null,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "restore-health-service-id-v3",
+      "dir": "eval/tasks/site-pnl-diagnosis/restore-health-service-id-v3",
+      "category": "defect-fix",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "2d57396793797ddbb7102d0856fdf10eea8698cad8b34f4770b570541336c483",
+      "issueSha256": "d17ab4e3a37bf0b13fadc9e2d909f04bbb278931a82da2dcdde2e61fecd37fba",
+      "validationOk": null,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "settings-dead-branches",
+      "dir": "eval/tasks/site-pnl-diagnosis/settings-dead-branches",
+      "category": "behavior-preserving-refactor",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "11a15308b985e8f9db1225f11f7dbd01b32ab8c203f536c97667d9b72e07b80a",
+      "issueSha256": "9785c8f18430b54798d7d15228df28186e699795bcf30c934cfea3b9d69df7e6",
+      "validationOk": null,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "settings-dead-branches-v2",
+      "dir": "eval/tasks/site-pnl-diagnosis/settings-dead-branches-v2",
+      "category": "behavior-preserving-refactor",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "8ab6d3a8ac3c4f95e7025d3bc5b0c0205bf37af0b4070a0b32afe5dc4e9aad63",
+      "issueSha256": "e3143aad1941e4b83fbd25cdf31426a97a6ec554140314d48dd26cd23176c928",
+      "validationOk": true,
+      "role": "q1-retention"
+    },
+    {
+      "taskId": "settings-dead-branches-v3",
+      "dir": "eval/tasks/site-pnl-diagnosis/settings-dead-branches-v3",
+      "category": "defect-fix",
+      "group": "site-pnl-diagnosis",
+      "taskJsonSha256": "c83b075b9a30669075d2ef0353727c947407c4ad765330b08bc0973cb358a0ac",
+      "issueSha256": "8855ca2e56b4b43afe23f0209a4fb99771428f117394cdc267ab3ded6501f94f",
+      "validationOk": null,
+      "role": "q1-retention"
+    }
+  ]
+}

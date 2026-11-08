@@ -75,9 +75,31 @@ export function contract(r: RepoFixture, overrides: Partial<ActivationContract> 
   }
 }
 
+/**
+ * T07: the run directory lives under the fixture's temporary stateDir, which the
+ * contract does not carry. Register contract → stateDir in a WeakMap so the
+ * synthetic Session commands stay byte-identical to the ones runCheck emits,
+ * without changing any call site of `callEvent`/`boundSnapshot`.
+ *
+ * Some tests derive a new contract object by spreading the fixture contract
+ * (`{ ...f.c, … }`), which is a different identity; a secondary key on the
+ * throwaway repo path + ticket + base commit keeps those commands consistent too.
+ */
+const stateDirOf = new WeakMap<ActivationContract, string>()
+const stateDirByCheckout = new Map<string, string>()
+const checkoutKey = (c: ActivationContract) => `${c.workspace}\n${c.ticketId}\n${c.baseSha}`
+
+function runDirOf(c: ActivationContract, record: CheckRunRecord): string | undefined {
+  const stateDir = stateDirOf.get(c) ?? stateDirByCheckout.get(checkoutKey(c))
+  return stateDir === undefined ? undefined : join(stateDir, 'hephi', c.ticketId, 'checks', record.runId)
+}
+
 /** Contract with a frozen binding requirement (format v3). */
 export function bindingContract(c: ActivationContract, requireSessionBinding = true): ActivationContract {
-  return { ...c, version: 3, evidence: { requireSessionBinding } }
+  const bound = { ...c, version: 3, evidence: { requireSessionBinding } }
+  const stateDir = stateDirOf.get(c)
+  if (stateDir !== undefined) stateDirOf.set(bound, stateDir)
+  return bound
 }
 
 export type Fixture = { r: RepoFixture; stateDir: string; c: ActivationContract }
@@ -85,7 +107,10 @@ export type Fixture = { r: RepoFixture; stateDir: string; c: ActivationContract 
 export async function fixture(overrides: Partial<ActivationContract> = {}): Promise<Fixture> {
   const r = await repo()
   const sd = await stateDir()
-  return { r, stateDir: sd, c: contract(r, overrides) }
+  const c = contract(r, overrides)
+  stateDirOf.set(c, sd)
+  stateDirByCheckout.set(checkoutKey(c), sd)
+  return { r, stateDir: sd, c }
 }
 
 export function outer(checkId: string): ToolExecution {
@@ -161,12 +186,16 @@ export function foregroundValue(over: NativeValue = {}): NativeValue {
 export function callEvent(record: CheckRunRecord, c: ActivationContract, seq: number,
   over: { command?: string; workdir?: string; callId?: string; name?: string } = {}): SessionEvent {
   const definition = c.verification.checks.find(check => check.id === record.checkId)!
+  // T07: the frozen command now carries HEPHI_RUN_DIR; derive the same run dir the
+  // runner used (registered by `fixture()`), falling back to no prefix only for a
+  // contract that never belonged to a fixture (no state directory exists then).
+  const runDir = runDirOf(c, record)
   return {
     seq, type: 'tool/call',
     data: {
       name: over.name ?? 'bash', callId: over.callId ?? record.innerCallId,
       arguments: JSON.stringify({
-        command: over.command ?? checkCommand(c.baseSha, definition.command, definition.args),
+        command: over.command ?? checkCommand(c.baseSha, definition.command, definition.args, runDir),
         workdir: over.workdir ?? record.cwd,
       }),
     },

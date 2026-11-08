@@ -1,0 +1,11 @@
+{
+ "native_issue_url": "https://github.com/paxxie2/b5-native-site-pnl/issues/2",
+ "native_labels": [
+  "hephi/delivery"
+ ],
+ "native_body_bytes": 1336,
+ "native_body_sha256": "47eb70026a0cd4fa8f6ce1a65980d21385059e94586ff14ffdbf1c2bda02b772",
+ "native_card_portion_sha256": "f91d1b6afb6e1d97c6132c7537afd06b548c058886248b01405e0e095b0d3497",
+ "native_card_portion_bytes": 657,
+ "native_has_hephi_contract_suffix_bytes": 670
+}

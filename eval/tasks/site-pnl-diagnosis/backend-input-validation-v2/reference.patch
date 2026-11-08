@@ -1,0 +1,50 @@
+diff --git a/backend/app/schemas.py b/backend/app/schemas.py
+index e7e91dc..1874226 100644
+--- a/backend/app/schemas.py
++++ b/backend/app/schemas.py
+@@ -11,7 +11,7 @@ from __future__ import annotations
+ 
+ from typing import Any, Literal
+ 
+-from pydantic import BaseModel, Field
++from pydantic import BaseModel, ConfigDict, Field, model_validator
+ 
+ DateStr = str
+ MoneyStatus = Literal["known", "unknown"]
+@@ -201,7 +201,26 @@ class DiagnosisPage(BaseModel):
+     offset: int
+ 
+ 
+-class CreateDiagnosisRequest(BaseModel):
++class StrictRequestModel(BaseModel):
++    """请求体基类：拒绝未知字段，并把未知字段名写进可读的中文错误。
++
++    未知字段的 pydantic 默认错误不携带字段名（loc 只有 ``body``），调用方无法定位
++    拼错的字段；这里用 before-validator 显式列出未知字段，让 400 响应能指向字段。
++    """
++
++    model_config = ConfigDict(extra="forbid")
++
++    @model_validator(mode="before")
++    @classmethod
++    def _reject_unknown_fields(cls, data: Any) -> Any:
++        if isinstance(data, dict):
++            extras = sorted(set(data) - set(cls.model_fields))
++            if extras:
++                raise ValueError("不支持的字段: " + ", ".join(extras))
++        return data
++
++
++class CreateDiagnosisRequest(StrictRequestModel):
+     siteId: str
+     startDate: DateStr
+     endDate: DateStr
+@@ -213,7 +232,7 @@ class CreateDiagnosisRequest(BaseModel):
+ ScenarioKind = Literal["rent", "share", "recovery"]
+ 
+ 
+-class ScenarioRequest(BaseModel):
++class ScenarioRequest(StrictRequestModel):
+     kind: ScenarioKind
+     monthlyRentCents: int | None = None
+     shareBps: int | None = None

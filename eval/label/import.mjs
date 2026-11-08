@@ -27,12 +27,20 @@
 //   - 枚举值必须在 RUBRIC 规定的集合内；
 //   - 判定为 has-defect / unrelatedChanges.has / testWeakening.has 时 notes 必填；
 //   - has-defect 时 notes 必须写明缺陷位置（文件+行），见 RUBRIC §5；
-//   - unrelatedChanges.has / testWeakening.has 为 true 时 positions 至少一条（file + 行/块定位）。
+//   - unrelatedChanges.has / testWeakening.has 为 true 时 positions 至少一条（file + 行/块定位）；
+//   - 私有映射（--mapping）：mapping.batch 必须等于 labels.batch 与 manifest.batch；
+//     mapping 的 case 集必须与 labels/manifest 完整一一对应（不多不少），每个 case 的 runId 非空且唯一；
+//     默认要求 **labels 与 mapping 都**携带导出清单身份 caseCount + manifestSha256，并与本次 manifest
+//     及彼此完全一致（三方一致；同批新导出不会再接受旧 labels，见 L01）；
+//     缺失身份即视为不完整并 exit 1。仅历史只读兼容可用 --allow-legacy-mapping 显式进入，
+//     此时 normalized JSON 顶部带 warning 与 legacyMapping=true（不得无条件进入现行正式结论）。
+//     身份字段一旦提供必须匹配；跨批/错配/缺 case 一律 exit 1。
 //
 // 退出码：0=完整；1=不完整/非法；2=用法或环境缺失。
 // 本脚本不接触 git，不读材料内容，只校验标注 JSON 与清单。
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -63,7 +71,7 @@ function duplicateCaseKeys(rawText, manifestIds) {
 }
 
 const USAGE = `用法：
-  node eval/label/import.mjs --manifest <材料目录/manifest.json> --labels <labels.json> [--mapping <映射.json> --normalized-out <输出.json>] [--json]
+  node eval/label/import.mjs --manifest <材料目录/manifest.json> --labels <labels.json> [--mapping <映射.json> --normalized-out <输出.json> [--allow-legacy-mapping]] [--json]
 退出码：0=完整；1=不完整/非法；2=用法或环境缺失。`
 
 function usage(message) {
@@ -182,11 +190,112 @@ export function validateLabels(manifest, labels, rawLabelsText = null) {
   return { ok: errors.length === 0, errors, summary }
 }
 
-function normalize(manifest, labels, mapping) {
-  const normalized = { batch: manifest.batch, labeler: labels.labeler, runs: [] }
+function sha256Text(text) {
+  return createHash('sha256').update(text).digest('hex')
+}
+
+// F05：默认只校验 labels/manifest 的批次，normalize 又按可重复的 case-001 编号取映射，
+// 另一批次的 mapping 会被接受并污染分组。这里把 mapping 的身份作为一等校验：
+//   - mapping.batch 必须等于 manifest.batch（labels 批次已由 validateLabels 校验，这里再防御）；
+//   - mapping.mapping 的 case 集必须与 labels.cases / manifest.cases 完整一一对应（不多不少）；
+//   - 每条映射的 runId 必须是非空、唯一（一一对应；不允许两个 case 指向同一 run）；
+//   - 若 mapping 带导出清单身份（caseCount / manifestSha256），必须与本次 manifest 一致，
+//     避免同批多次导出时只凭重复的 case 编号错配。
+function normalize(manifest, labels, mapping, manifestRawText, options = {}) {
+  if (!isObject(mapping)) throw new Error('mapping 必须是对象')
+  const problems = []
+  const manifestIds = manifest.cases.map((item) => item.blindId)
+  if (labels.batch !== manifest.batch) problems.push(`labels.batch 不一致：labels=${labels.batch ?? '(缺失)'} manifest=${manifest.batch}`)
+  if (mapping.batch !== manifest.batch) problems.push(`mapping.batch 不一致：mapping=${mapping.batch ?? '(缺失)'} manifest=${manifest.batch}（跨批次映射会错绑任务，已拒绝）`)
+  if (!isObject(mapping.mapping)) problems.push('mapping.mapping 必须是对象')
+
+  const mappingCases = isObject(mapping.mapping) ? mapping.mapping : {}
+  const labelIds = Object.keys(labels.cases ?? {})
+  const mappingIds = Object.keys(mappingCases)
+  for (const blindId of mappingIds) {
+    if (!manifestIds.includes(blindId)) problems.push(`mapping 含未知 blindId：${blindId}（不在 manifest 中）`)
+  }
+  for (const blindId of manifestIds) {
+    if (!Object.hasOwn(mappingCases, blindId)) problems.push(`mapping 缺少 ${blindId}`)
+    if (!labelIds.includes(blindId)) problems.push(`labels 缺少 ${blindId}`)
+  }
+  for (const blindId of labelIds) {
+    if (!manifestIds.includes(blindId)) problems.push(`labels 含未知 blindId：${blindId}`)
+  }
+
+  const runIdOwner = new Map()
+  for (const blindId of manifestIds) {
+    const mapped = Object.hasOwn(mappingCases, blindId) ? mappingCases[blindId] : undefined
+    if (mapped === undefined) continue
+    if (!isObject(mapped)) {
+      problems.push(`mapping.${blindId} 必须是对象`)
+      continue
+    }
+    if (!nonEmptyString(mapped.runId)) {
+      problems.push(`mapping.${blindId}.runId 必须是非空字符串（不能只靠可重复的 ${blindId} 编号）`)
+    } else if (runIdOwner.has(mapped.runId)) {
+      problems.push(`mapping 的 runId 重复：${mapped.runId}（${runIdOwner.get(mapped.runId)} 与 ${blindId} 不能指向同一 run）`)
+    } else {
+      runIdOwner.set(mapped.runId, blindId)
+    }
+    if (!nonEmptyString(mapped.taskId)) problems.push(`mapping.${blindId}.taskId 必须是非空字符串`)
+    if (!nonEmptyString(mapped.arm)) problems.push(`mapping.${blindId}.arm 必须是非空字符串`)
+    if (mapped.repetition !== undefined && (!Number.isInteger(mapped.repetition) || mapped.repetition < 1)) {
+      problems.push(`mapping.${blindId}.repetition 必须是正整数（可选）`)
+    }
+  }
+
+  // L01/R4：默认要求 labels 与 mapping 都携带导出清单身份（caseCount + manifestSha256），
+  // 且与本次 manifest、彼此完全一致（三方核对）。缺失 = 不完整，直接拒绝；只有显式
+  // --allow-legacy-mapping 才允许历史兼容，且结果必须带可识别标记，不能无条件进入正式结论。
+  const actualManifestSha256 = sha256Text(manifestRawText ?? '')
+  const manifestCount = manifestIds.length
+  const mappingHasCaseCount = mapping.caseCount !== undefined
+  const mappingHasManifestSha256 = mapping.manifestSha256 !== undefined
+  const labelsHasCaseCount = labels.caseCount !== undefined
+  const labelsHasManifestSha256 = labels.manifestSha256 !== undefined
+  const missingIdentity = []
+  if (!labelsHasCaseCount) missingIdentity.push('labels.caseCount')
+  if (!labelsHasManifestSha256) missingIdentity.push('labels.manifestSha256')
+  if (!mappingHasCaseCount) missingIdentity.push('mapping.caseCount')
+  if (!mappingHasManifestSha256) missingIdentity.push('mapping.manifestSha256')
+  let legacyMapping = false
+  if (missingIdentity.length > 0) {
+    if (options.allowLegacyMapping !== true) {
+      problems.push(`labels/mapping 缺少导出清单身份字段（${missingIdentity.join('/')}）；旧格式标签/映射默认拒绝；历史兼容必须显式 --allow-legacy-mapping`)
+    } else {
+      legacyMapping = true
+    }
+  }
+  // 身份字段一旦提供，无论是否 legacy 模式都必须与本次 manifest 完全一致。
+  if (mappingHasCaseCount && mapping.caseCount !== manifestCount) {
+    problems.push(`mapping.caseCount 与 manifest 不一致：mapping=${mapping.caseCount} manifest=${manifestCount}`)
+  }
+  if (labelsHasCaseCount && labels.caseCount !== manifestCount) {
+    problems.push(`labels.caseCount 与 manifest 不一致：labels=${labels.caseCount} manifest=${manifestCount}（旧标签不能配新导出）`)
+  }
+  if (mappingHasManifestSha256 && mapping.manifestSha256 !== actualManifestSha256) {
+    problems.push(`mapping.manifestSha256 与本次 manifest 不一致：mapping=${mapping.manifestSha256} actual=${actualManifestSha256}`)
+  }
+  if (labelsHasManifestSha256 && labels.manifestSha256 !== actualManifestSha256) {
+    problems.push(`labels.manifestSha256 与本次 manifest 不一致：labels=${labels.manifestSha256} actual=${actualManifestSha256}（旧标签不能配新导出）`)
+  }
+  // 三方一致：两者都提供时必须彼此相等（各自与 manifest 比较已覆盖，这里显式诊断）。
+  if (labelsHasCaseCount && mappingHasCaseCount && labels.caseCount !== mapping.caseCount) {
+    problems.push(`labels.caseCount 与 mapping.caseCount 不一致：labels=${labels.caseCount} mapping=${mapping.caseCount}`)
+  }
+  if (labelsHasManifestSha256 && mappingHasManifestSha256 && labels.manifestSha256 !== mapping.manifestSha256) {
+    problems.push(`labels.manifestSha256 与 mapping.manifestSha256 不一致：labels=${labels.manifestSha256} mapping=${mapping.manifestSha256}`)
+  }
+
+  if (problems.length > 0) throw new Error(`映射校验失败：${problems.join('; ')}`)
+
+  const warning = 'legacyMapping=true：labels/mapping 缺少导出清单身份字段（caseCount/manifestSha256），仅按 batch/case 集合/runId 做了历史兼容校验；该结果不得作为现行正式结论的证据，需补齐身份字段或重新导出后再使用。'
+  const normalized = legacyMapping
+    ? { warning, legacyMapping: true, batch: manifest.batch, labeler: labels.labeler, runs: [] }
+    : { batch: manifest.batch, labeler: labels.labeler, runs: [] }
   for (const item of manifest.cases) {
-    const mapped = mapping.mapping?.[item.blindId]
-    if (!mapped) throw new Error(`映射缺少 ${item.blindId}`)
+    const mapped = mappingCases[item.blindId]
     const label = labels.cases[item.blindId]
     normalized.runs.push({
       runId: mapped.runId,
@@ -232,6 +341,8 @@ function selfTest(asJson) {
   }
   const good = {
     batch: 'selftest-b4',
+    caseCount: manifest.cases.length,
+    manifestSha256: sha256Text(`${JSON.stringify(manifest, null, 2)}\n`),
     labeler: 'rater-a',
     cases: {
       'case-001': goodCase,
@@ -297,6 +408,8 @@ function selfTest(asJson) {
     const mapping = {
       schemaVersion: 1,
       batch: 'selftest-b4',
+      caseCount: 2,
+      manifestSha256: sha256Text(`${JSON.stringify(manifest, null, 2)}\n`),
       mapping: {
         'case-001': { runId: 'selftest-t1-off', taskId: 't1', arm: 'off', repetition: 1 },
         'case-002': { runId: 'selftest-t1-native', taskId: 't1', arm: 'native', repetition: 1 },
@@ -307,6 +420,125 @@ function selfTest(asJson) {
     const normalizedRun = cli(['--manifest', manifestFile, '--labels', goodFile, '--mapping', mappingFile, '--normalized-out', normalizedFile, '--json'])
     const normalized = existsSync(normalizedFile) ? readJSON(normalizedFile) : null
     record('带私有映射 → 还原为 run 级标注', normalizedRun.status === 0 && normalized?.runs?.length === 2 && normalized.runs.some((run) => run.arm === 'native'), `exit=${normalizedRun.status}`)
+
+    // F05：私有映射必须带正确的批次/完整 case 集/一一对应 runId；跨批次或错配必须拒绝。
+    const cloneMapping = () => JSON.parse(JSON.stringify(mapping))
+    const wrongBatchMapping = cloneMapping()
+    wrongBatchMapping.batch = 'selftest-b4-other'
+    const wrongBatchRun = cli(['--manifest', manifestFile, '--labels', goodFile, '--mapping', write('mapping-wrong-batch.json', wrongBatchMapping), '--json'])
+    record('F05 负例：mapping.batch 与 labels/manifest 不一致 → exit 1', wrongBatchRun.status === 1 && wrongBatchRun.stdout.includes('mapping.batch'), `exit=${wrongBatchRun.status}`)
+
+    const extraCaseMapping = cloneMapping()
+    extraCaseMapping.mapping['case-999'] = { runId: 'selftest-t9-off', taskId: 't9', arm: 'off' }
+    const extraCaseRun = cli(['--manifest', manifestFile, '--labels', goodFile, '--mapping', write('mapping-extra-case.json', extraCaseMapping), '--json'])
+    record('F05 负例：mapping 含多余 case → exit 1', extraCaseRun.status === 1 && extraCaseRun.stdout.includes('未知 blindId'), `exit=${extraCaseRun.status}`)
+
+    const missingCaseMapping = cloneMapping()
+    delete missingCaseMapping.mapping['case-002']
+    const missingCaseRun = cli(['--manifest', manifestFile, '--labels', goodFile, '--mapping', write('mapping-missing-case.json', missingCaseMapping), '--json'])
+    record('F05 负例：mapping 缺 case → exit 1', missingCaseRun.status === 1 && missingCaseRun.stdout.includes('缺少 case-002'), `exit=${missingCaseRun.status}`)
+
+    const duplicateRunIdMapping = cloneMapping()
+    duplicateRunIdMapping.mapping['case-002'].runId = duplicateRunIdMapping.mapping['case-001'].runId
+    const duplicateRunIdRun = cli(['--manifest', manifestFile, '--labels', goodFile, '--mapping', write('mapping-duplicate-run.json', duplicateRunIdMapping), '--json'])
+    record('F05 负例：两个 case 映射到同一 runId → exit 1', duplicateRunIdRun.status === 1 && duplicateRunIdRun.stdout.includes('runId 重复'), `exit=${duplicateRunIdRun.status}`)
+
+    const wrongCaseCountMapping = cloneMapping()
+    wrongCaseCountMapping.caseCount = 3
+    wrongCaseCountMapping.manifestSha256 = '0'.repeat(64)
+    const wrongIdentityRun = cli(['--manifest', manifestFile, '--labels', goodFile, '--mapping', write('mapping-wrong-identity.json', wrongCaseCountMapping), '--json'])
+    record('F05 负例：导出清单身份（caseCount/manifestSha256）不匹配 → exit 1', wrongIdentityRun.status === 1 && wrongIdentityRun.stdout.includes('caseCount') && wrongIdentityRun.stdout.includes('manifestSha256'), `exit=${wrongIdentityRun.status}`)
+
+    // R4：默认要求清单身份存在且匹配；同 batch 同 case 编号但来自错误任务、无身份字段必须默认拒绝；
+    // 只有显式 --allow-legacy-mapping 才能进入历史兼容路径，并带 warning/legacyMapping=true。
+    const legacyMappingData = cloneMapping()
+    delete legacyMappingData.caseCount
+    delete legacyMappingData.manifestSha256
+    legacyMappingData.mapping['case-001'] = { runId: 'different-run', taskId: 'different-task', arm: 'full-package' }
+    const legacyMappingFile = write('mapping-legacy.json', legacyMappingData)
+    const incompleteOut = resolve(dir, 'normalized-incomplete.json')
+    const incompleteRun = cli(['--manifest', manifestFile, '--labels', goodFile, '--mapping', legacyMappingFile, '--normalized-out', incompleteOut, '--json'])
+    record('R4 负例：同 batch/case、错误任务且 mapping 缺身份字段 → 默认 exit 1（不写 normalized）',
+      incompleteRun.status === 1 && incompleteRun.stdout.includes('清单身份') && !existsSync(incompleteOut),
+      `exit=${incompleteRun.status} normalizedWritten=${existsSync(incompleteOut)}`)
+
+    const legacyOut = resolve(dir, 'normalized-legacy.json')
+    const legacyRun = cli(['--manifest', manifestFile, '--labels', goodFile, '--mapping', legacyMappingFile, '--normalized-out', legacyOut, '--allow-legacy-mapping', '--json'])
+    const legacyNormalized = existsSync(legacyOut) ? readJSON(legacyOut) : null
+    record('R4 正例：--allow-legacy-mapping → exit 0，normalized 顶部 warning 且 legacyMapping=true',
+      legacyRun.status === 0
+        && legacyNormalized?.legacyMapping === true
+        && typeof legacyNormalized?.warning === 'string'
+        && legacyNormalized.warning.includes('legacyMapping')
+        && Object.keys(legacyNormalized ?? {})[0] === 'warning'
+        && legacyNormalized?.runs?.[0]?.runId === 'different-run',
+      `exit=${legacyRun.status} keys=${Object.keys(legacyNormalized ?? {}).join(',')}`)
+
+    const partialIdentityMapping = cloneMapping()
+    delete partialIdentityMapping.manifestSha256
+    const partialIdentityRun = cli(['--manifest', manifestFile, '--labels', goodFile, '--mapping', write('mapping-partial-identity.json', partialIdentityMapping), '--json'])
+    record('R4 负例：只缺 manifestSha256（仍有 caseCount）→ 默认 exit 1',
+      partialIdentityRun.status === 1 && partialIdentityRun.stdout.includes('manifestSha256') && partialIdentityRun.stdout.includes('清单身份'),
+      `exit=${partialIdentityRun.status}`)
+
+    const flagWithCompleteIdentity = cli(['--manifest', manifestFile, '--labels', goodFile, '--mapping', mappingFile, '--allow-legacy-mapping', '--json'])
+    const completeIdentityReport = JSON.parse(flagWithCompleteIdentity.stdout || '{}')
+    record('R4 负例边界：--allow-legacy-mapping 不能把完整身份的映射标记为 legacy（正常路径）',
+      flagWithCompleteIdentity.status === 0 && completeIdentityReport.normalized?.legacyMapping === undefined && completeIdentityReport.normalized?.warning === undefined,
+      `exit=${flagWithCompleteIdentity.status} legacy=${completeIdentityReport.normalized?.legacyMapping}`)
+
+    const wrongIdentityLegacy = cloneMapping()
+    wrongIdentityLegacy.manifestSha256 = '0'.repeat(64)
+    const wrongIdentityLegacyRun = cli(['--manifest', manifestFile, '--labels', goodFile, '--mapping', write('mapping-wrong-identity-legacy.json', wrongIdentityLegacy), '--allow-legacy-mapping', '--json'])
+    record('R4 负例：--allow-legacy-mapping 也不能接受“身份存在但不匹配”的映射',
+      wrongIdentityLegacyRun.status === 1 && wrongIdentityLegacyRun.stdout.includes('manifestSha256'),
+      `exit=${wrongIdentityLegacyRun.status}`)
+
+    // L01：旧 labels（无导出身份）+ 新 manifest + 合法新 mapping 默认必须拒绝；legacy 兼容需显式标记。
+    const oldLabels = JSON.parse(JSON.stringify(good))
+    delete oldLabels.caseCount
+    delete oldLabels.manifestSha256
+    const oldLabelsFile = write('labels-old.json', oldLabels)
+    const staleLabelsDefault = cli(['--manifest', manifestFile, '--labels', oldLabelsFile, '--mapping', mappingFile, '--json'])
+    record('L01 负例：旧 labels + 新 manifest + 新 mapping → 默认 exit 1（不再把旧 case-001 标签绑到新导出）',
+      staleLabelsDefault.status === 1 && staleLabelsDefault.stdout.includes('labels') && staleLabelsDefault.stdout.includes('清单身份'),
+      `exit=${staleLabelsDefault.status}`)
+
+    const staleLegacyOut = resolve(dir, 'normalized-stale-legacy.json')
+    const staleLegacyRun = cli(['--manifest', manifestFile, '--labels', oldLabelsFile, '--mapping', mappingFile, '--normalized-out', staleLegacyOut, '--allow-legacy-mapping', '--json'])
+    const staleLegacyNormalized = existsSync(staleLegacyOut) ? readJSON(staleLegacyOut) : null
+    record('L01 正例：旧 labels 仅可在 --allow-legacy-mapping 下进入，normalized 带 warning/legacyMapping=true',
+      staleLegacyRun.status === 0
+        && staleLegacyNormalized?.legacyMapping === true
+        && typeof staleLegacyNormalized?.warning === 'string'
+        && staleLegacyNormalized.warning.includes('legacyMapping')
+        && Object.keys(staleLegacyNormalized ?? {})[0] === 'warning',
+      `exit=${staleLegacyRun.status} keys=${Object.keys(staleLegacyNormalized ?? {}).join(',')}`)
+
+    const mismatchedLabels = JSON.parse(JSON.stringify(good))
+    mismatchedLabels.manifestSha256 = '0'.repeat(64)
+    const mismatchedLabelsRun = cli(['--manifest', manifestFile, '--labels', write('labels-mismatch.json', mismatchedLabels), '--mapping', mappingFile, '--json'])
+    record('L01 负例：labels 身份存在但与 manifest/mapping 不一致 → exit 1',
+      mismatchedLabelsRun.status === 1 && mismatchedLabelsRun.stdout.includes('labels.manifestSha256'),
+      `exit=${mismatchedLabelsRun.status}`)
+
+    // L01：没有 --mapping 的完整性检查模式同样绑定 labels 身份（默认拒绝旧标签）。
+    const labelsOnlyDefault = cli(['--manifest', manifestFile, '--labels', oldLabelsFile, '--json'])
+    record('L01 负例：旧 labels 在仅标签完整性检查模式（无 mapping）→ 默认 exit 1',
+      labelsOnlyDefault.status === 1 && labelsOnlyDefault.stdout.includes('labels 缺少导出清单身份'),
+      `exit=${labelsOnlyDefault.status}`)
+
+    const labelsOnlyLegacy = cli(['--manifest', manifestFile, '--labels', oldLabelsFile, '--allow-legacy-mapping', '--json'])
+    const labelsOnlyLegacyReport = JSON.parse(labelsOnlyLegacy.stdout || '{}')
+    record('L01 正例：仅标签检查模式 + --allow-legacy-mapping → exit 0 且报告 legacyMapping=true/warning',
+      labelsOnlyLegacy.status === 0 && labelsOnlyLegacyReport.legacyMapping === true && typeof labelsOnlyLegacyReport.warning === 'string' && labelsOnlyLegacyReport.warning.includes('legacyMapping'),
+      `exit=${labelsOnlyLegacy.status} legacy=${labelsOnlyLegacyReport.legacyMapping}`)
+
+    const labelsOnlyNew = cli(['--manifest', manifestFile, '--labels', goodFile, '--json'])
+    const labelsOnlyNewReport = JSON.parse(labelsOnlyNew.stdout || '{}')
+    record('L01 正例：新 labels + 新 manifest 在仅标签检查模式 → exit 0（无 legacy 标记）',
+      labelsOnlyNew.status === 0 && labelsOnlyNewReport.legacyMapping === undefined,
+      `exit=${labelsOnlyNew.status}`)
 
     const ok = steps.every((step) => step.ok)
     if (asJson) console.log(JSON.stringify({ selfTest: ok, steps }, null, 2))
@@ -335,10 +567,12 @@ function main() {
   if (!existsSync(labelsPath)) usage(`labels 不存在：${labelsPath}`)
 
   let manifest
+  let manifestRawText
   let labels
   let labelsRawText
   try {
-    manifest = readJSON(manifestPath)
+    manifestRawText = readFileSync(manifestPath, 'utf8')
+    manifest = JSON.parse(manifestRawText)
   } catch (error) {
     usage(`manifest 不是合法 JSON：${error.message}`)
   }
@@ -354,7 +588,36 @@ function main() {
   const mappingPath = arg('mapping')
   const normalizedOut = arg('normalized-out')
   if (normalizedOut && !mappingPath) usage('--normalized-out 需要同时提供 --mapping（否则无法从 blindId 还原 runId/arm）')
+  const allowLegacyMapping = hasFlag('allow-legacy-mapping')
   const report = { manifest: manifestPath, labels: labelsPath, ...result }
+  // L01：labels 本身也必须绑定本次导出（即使没有 --mapping 的完整性检查模式）。
+  // 默认拒绝旧格式 labels；仅 --allow-legacy-mapping 可进入并显式标记。
+  if (result.ok) {
+    const labelsHasCaseCount = labels.caseCount !== undefined
+    const labelsHasManifestSha256 = labels.manifestSha256 !== undefined
+    const missing = []
+    if (!labelsHasCaseCount) missing.push('labels.caseCount')
+    if (!labelsHasManifestSha256) missing.push('labels.manifestSha256')
+    if (missing.length > 0) {
+      if (!allowLegacyMapping) {
+        report.ok = false
+        report.errors = [...report.errors, `labels 缺少导出清单身份字段（${missing.join('/')}）；旧格式 labels 默认拒绝；历史兼容必须显式 --allow-legacy-mapping`]
+      } else {
+        report.legacyMapping = true
+        report.warning = 'legacyMapping=true：labels 缺少导出清单身份字段（caseCount/manifestSha256）；该结果不得作为现行正式结论的证据，需重新导出并重新标注。'
+      }
+    } else {
+      const actualManifestSha256 = sha256Text(manifestRawText)
+      if (labels.caseCount !== manifest.cases.length) {
+        report.ok = false
+        report.errors = [...report.errors, `labels.caseCount 与 manifest 不一致：labels=${labels.caseCount} manifest=${manifest.cases.length}（旧标签不能配新导出）`]
+      }
+      if (labels.manifestSha256 !== actualManifestSha256) {
+        report.ok = false
+        report.errors = [...report.errors, `labels.manifestSha256 与本次 manifest 不一致：labels=${labels.manifestSha256} actual=${actualManifestSha256}（旧标签不能配新导出）`]
+      }
+    }
+  }
   if (result.ok && mappingPath) {
     if (!existsSync(mappingPath)) usage(`mapping 不存在：${mappingPath}`)
     let mapping
@@ -364,7 +627,7 @@ function main() {
       usage(`mapping 不是合法 JSON：${error.message}`)
     }
     try {
-      report.normalized = normalize(manifest, labels, mapping)
+      report.normalized = normalize(manifest, labels, mapping, manifestRawText, { allowLegacyMapping })
     } catch (error) {
       report.ok = false
       report.errors = [error.message]
@@ -381,6 +644,8 @@ function main() {
     console.log(`[label-import] labeled=${report.summary.labeled}/${report.summary.expected} complete=${report.summary.complete}`)
     if (report.summary.missing.length) console.log(`missing: ${report.summary.missing.join(', ')}`)
     if (report.normalizedOut) console.log(`normalized: ${report.normalizedOut}`)
+    const warning = report.warning ?? report.normalized?.warning
+    if (warning) console.warn(`[label-import] WARNING ${warning}`)
     console.log(`RESULT: ${report.ok ? 'PASS' : 'FAIL'}`)
   }
   process.exit(report.ok ? 0 : 1)

@@ -19,6 +19,12 @@ export type VerificationCheck = {
   cwd: string
   required: boolean
   timeoutMs: number
+  /**
+   * T08 (A2): failure types this check accepts as an assertion failure when T18 classifies an
+   * offline red state. Additive and optional: a config without it keeps its historical meaning,
+   * and the list is only frozen into the contract (nothing consumes it yet).
+   */
+  assertionFailureTypes?: string[]
 }
 
 /**
@@ -82,6 +88,8 @@ const checkSchema = z.object({
   cwd: relativePath.default('.'),
   required: z.boolean().default(true),
   timeoutMs: z.number().int().min(1).max(3_600_000).default(600_000),
+  /** T08 (A2): trimmed non-empty failure-type names (e.g. ["AssertionError"]); optional and additive. */
+  assertionFailureTypes: z.array(z.string().trim().min(1)).optional(),
 }).strict()
 
 const environmentSchema = z.object({

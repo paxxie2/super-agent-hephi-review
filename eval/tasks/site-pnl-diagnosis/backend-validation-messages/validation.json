@@ -1,0 +1,192 @@
+{
+  "mode": "full",
+  "taskDir": "/Users/zm/repos/hephi-dev-base/eval/tasks/site-pnl-diagnosis/backend-validation-messages",
+  "structure": {
+    "ok": true,
+    "errors": [],
+    "warnings": [
+      "environment.offline=true：lockfile 未在任务目录/本地仓库找到（uv.lock）；完整模式会强制校验，dry-run 无法确认仓库锁文件"
+    ]
+  },
+  "checks": {
+    "environment": {
+      "offline": true,
+      "lockfile": "uv.lock",
+      "found": true,
+      "ok": true
+    },
+    "base": {
+      "expected": "fail",
+      "runs": [
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 83, in <module>\nAssertionError: {'kind': 'Field required'}\n",
+          "outputSha256": "8fb7149c0ff3a3bad1c4bbf53d066c84f23baa4ea9bfac770ecb05fdbd222b26",
+          "normalizedSha256": "8fb7149c0ff3a3bad1c4bbf53d066c84f23baa4ea9bfac770ecb05fdbd222b26"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 83, in <module>\nAssertionError: {'kind': 'Field required'}\n",
+          "outputSha256": "8fb7149c0ff3a3bad1c4bbf53d066c84f23baa4ea9bfac770ecb05fdbd222b26",
+          "normalizedSha256": "8fb7149c0ff3a3bad1c4bbf53d066c84f23baa4ea9bfac770ecb05fdbd222b26"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 83, in <module>\nAssertionError: {'kind': 'Field required'}\n",
+          "outputSha256": "8fb7149c0ff3a3bad1c4bbf53d066c84f23baa4ea9bfac770ecb05fdbd222b26",
+          "normalizedSha256": "8fb7149c0ff3a3bad1c4bbf53d066c84f23baa4ea9bfac770ecb05fdbd222b26"
+        }
+      ],
+      "codes": [
+        1,
+        1,
+        1
+      ],
+      "outputSha256": [
+        "8fb7149c0ff3a3bad1c4bbf53d066c84f23baa4ea9bfac770ecb05fdbd222b26",
+        "8fb7149c0ff3a3bad1c4bbf53d066c84f23baa4ea9bfac770ecb05fdbd222b26",
+        "8fb7149c0ff3a3bad1c4bbf53d066c84f23baa4ea9bfac770ecb05fdbd222b26"
+      ],
+      "normalizedSha256": [
+        "8fb7149c0ff3a3bad1c4bbf53d066c84f23baa4ea9bfac770ecb05fdbd222b26",
+        "8fb7149c0ff3a3bad1c4bbf53d066c84f23baa4ea9bfac770ecb05fdbd222b26",
+        "8fb7149c0ff3a3bad1c4bbf53d066c84f23baa4ea9bfac770ecb05fdbd222b26"
+      ],
+      "consistent": true,
+      "failureClasses": [
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        },
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        },
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        }
+      ],
+      "validFailureClasses": [
+        "target-assertion-failed",
+        "target-symbol-missing"
+      ],
+      "normalization": {
+        "version": 1,
+        "scope": "stdout+stderr",
+        "rules": [
+          "CRLF/CR → LF",
+          "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+          "UUID → <uuid>",
+          "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+          "pid=数字 → pid=<pid>"
+        ],
+        "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
+      },
+      "ok": true
+    },
+    "scope": {
+      "allowedFiles": [
+        "backend/app/main.py",
+        "backend/app/schemas.py",
+        "backend/app/services/chat.py",
+        "backend/app/services/scenarios.py",
+        "backend/app/validation_messages.py",
+        "backend/tests/test_scenario_api.py"
+      ],
+      "changedFiles": [
+        "backend/app/main.py",
+        "backend/app/schemas.py",
+        "backend/app/services/chat.py",
+        "backend/app/services/scenarios.py",
+        "backend/tests/test_scenario_api.py",
+        "backend/app/validation_messages.py"
+      ],
+      "outside": [],
+      "ok": true
+    },
+    "reference": {
+      "expected": "pass",
+      "runs": [
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: Chinese field-level messages produced by the HTTP validation path (ASGI behavior)\n",
+          "stderr": "",
+          "outputSha256": "bb6f3d766dddb0624c8484ed4ab95f162af98a75718e971c6ad6ebc7cfc89598",
+          "normalizedSha256": "bb6f3d766dddb0624c8484ed4ab95f162af98a75718e971c6ad6ebc7cfc89598"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: Chinese field-level messages produced by the HTTP validation path (ASGI behavior)\n",
+          "stderr": "",
+          "outputSha256": "bb6f3d766dddb0624c8484ed4ab95f162af98a75718e971c6ad6ebc7cfc89598",
+          "normalizedSha256": "bb6f3d766dddb0624c8484ed4ab95f162af98a75718e971c6ad6ebc7cfc89598"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: Chinese field-level messages produced by the HTTP validation path (ASGI behavior)\n",
+          "stderr": "",
+          "outputSha256": "bb6f3d766dddb0624c8484ed4ab95f162af98a75718e971c6ad6ebc7cfc89598",
+          "normalizedSha256": "bb6f3d766dddb0624c8484ed4ab95f162af98a75718e971c6ad6ebc7cfc89598"
+        }
+      ],
+      "codes": [
+        0,
+        0,
+        0
+      ],
+      "outputSha256": [
+        "bb6f3d766dddb0624c8484ed4ab95f162af98a75718e971c6ad6ebc7cfc89598",
+        "bb6f3d766dddb0624c8484ed4ab95f162af98a75718e971c6ad6ebc7cfc89598",
+        "bb6f3d766dddb0624c8484ed4ab95f162af98a75718e971c6ad6ebc7cfc89598"
+      ],
+      "normalizedSha256": [
+        "bb6f3d766dddb0624c8484ed4ab95f162af98a75718e971c6ad6ebc7cfc89598",
+        "bb6f3d766dddb0624c8484ed4ab95f162af98a75718e971c6ad6ebc7cfc89598",
+        "bb6f3d766dddb0624c8484ed4ab95f162af98a75718e971c6ad6ebc7cfc89598"
+      ],
+      "consistent": true,
+      "normalization": {
+        "version": 1,
+        "scope": "stdout+stderr",
+        "rules": [
+          "CRLF/CR → LF",
+          "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+          "UUID → <uuid>",
+          "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+          "pid=数字 → pid=<pid>"
+        ],
+        "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
+      },
+      "ok": true
+    }
+  },
+  "normalization": {
+    "version": 1,
+    "scope": "stdout+stderr",
+    "rules": [
+      "CRLF/CR → LF",
+      "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+      "UUID → <uuid>",
+      "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+      "pid=数字 → pid=<pid>"
+    ],
+    "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
+  },
+  "ok": true,
+  "baseSha": "e00f338b098546adc40156dc15b4b6559e19835d",
+  "repo": "/Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis",
+  "repeats": 3
+}

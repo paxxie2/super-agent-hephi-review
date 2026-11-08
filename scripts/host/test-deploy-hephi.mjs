@@ -509,6 +509,12 @@ process.stdout.write(JSON.stringify({ commit: index.describePlugin().commit, dep
   const t13 = await deploy(['--target', B, '--allow-open-tickets'])
   check('R3-T13 --allow-open-tickets is an unknown argument', t13.code === 2 && /unknown argument/.test(t13.out), t13.out)
 
+  // R3-T13b T20 事故回归：--skip-tests 分支曾漏掉 shift，参数解析 while 循环对其永不消耗，
+  // 纯内建空转（无子进程/无 sleep/高 CPU）。回归判据：带 --skip-tests 的调用必须快速到达
+  // 正常校验并 exit 2（这里给不存在的 instance 目录），而不是挂死到超时。
+  const t13b = run('sh', [script, '--instance', join(tmpdir(), 'hephi-missing-instance'), '--host', base, '--host-version', 'probe', '--skip-tests'], { timeout: 20_000 })
+  check('R3-T13b --skip-tests is consumed by the argument loop (no infinite spin)', t13b.code === 2 && /instance directory not found/.test(t13b.out) && t13b.status === 2, `code=${t13b.code} status=${t13b.status} signal=${t13b.signal} ${t13b.out.slice(0, 120)}`)
+
   // R3-T14 hostVersion 必填
   const t14a = run('sh', [script, '--instance', instance, '--host', base, '--repo', repo, '--hephi', join(instance, 'hephi'), '--releases', releases, '--target', B], { timeout: 120_000 })
   const t14b = run('sh', [script, '--instance', instance, '--host', base, '--host-version', '', '--repo', repo, '--hephi', join(instance, 'hephi'), '--releases', releases, '--target', B], { timeout: 120_000 })

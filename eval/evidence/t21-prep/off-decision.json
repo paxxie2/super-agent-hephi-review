@@ -1,0 +1,45 @@
+[
+ {
+  "id": "5720be34cfa990ec9989ce77ee5ae449",
+  "value": {
+   "id": "5720be34cfa990ec9989ce77ee5ae449",
+   "evalId": "d1004dea5ee8225b33bd0e492638aa58",
+   "threadKey": "github:15",
+   "triggerIds": [
+    "e14fae7ac6141be7354aef089c602228"
+   ],
+   "policyVersion": "5b6f3978967903808e1335e1818e3a1b",
+   "at": "2026-11-08T16:06:59.873Z",
+   "kind": "accept",
+   "reason": [
+    {
+     "code": "explicitRouted"
+    }
+   ],
+   "strength": "explicit",
+   "ticketId": "7dfffe7ab3d6b2aaf7404bbbbea833e2",
+   "mandate": {
+    "strength": "explicit",
+    "policyVersion": "5b6f3978967903808e1335e1818e3a1b",
+    "basis": {
+     "source": "github",
+     "scope": {
+      "number": 15,
+      "isPr": false,
+      "kind": "issue",
+      "repository": "paxxie2/b5-off-site-pnl"
+     },
+     "row": "issues",
+     "sender": "paxxie2",
+     "via": "addressed",
+     "addressed": "mention"
+    },
+    "actor": {
+     "source": "github",
+     "id": "paxxie2"
+    },
+    "scope": "[B5] previous_window 倒序窗口显式 ValueError"
+   }
+  }
+ }
+]

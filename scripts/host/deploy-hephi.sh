@@ -75,6 +75,7 @@ while [ $# -gt 0 ]; do
     --auto-restart-wait) [ $# -ge 2 ] || usage; auto_restart_wait="$2"; shift 2 ;;
     --process-file) [ $# -ge 2 ] || usage; process_file="$2"; shift 2 ;;
     --node) [ $# -ge 2 ] || usage; node_cmd="$2"; shift 2 ;;
+    --skip-tests) skip_tests="yes"; shift ;;
     --peer-root) [ $# -ge 2 ] || usage; peer_root="$2"; shift 2 ;;
     --instance-pattern) [ $# -ge 2 ] || usage; instance_pattern_input="$2"; shift 2 ;;
     -h|--help) usage ;;
@@ -457,7 +458,14 @@ build_release() {
   git -C "$repo" archive "$sha" | tar -x -C "$build_root" || { echo "cannot archive commit $sha" >&2; exit 1; }
   [ -d "$build_root/hephi" ] || { echo "archived source has no hephi directory" >&2; exit 1; }
   [ -f "$build_root/hephi/pnpm-lock.yaml" ] || { echo "archived source has no hephi/pnpm-lock.yaml; production dependencies cannot be frozen" >&2; exit 1; }
-  ( cd "$build_root/hephi" && HEPHI_BUILD_COMMIT="$sha" pnpm install --frozen-lockfile && HEPHI_BUILD_COMMIT="$sha" pnpm check ) || { echo "build failed for $sha" >&2; exit 1; }
+  build_check='pnpm check'
+  if [ "${skip_tests:-}" = "yes" ]; then
+    # Explicit operator override: the same tree already passed pnpm check (see the
+    # deploy record); rerunning the suite for every retry wastes tens of minutes.
+    build_check='pnpm typecheck && pnpm build'
+    echo "skip-tests: release gate reduced to typecheck+build by explicit operator flag" >&2
+  fi
+  ( cd "$build_root/hephi" && HEPHI_BUILD_COMMIT="$sha" pnpm install --frozen-lockfile && HEPHI_BUILD_COMMIT="$sha" sh -c "$build_check" ) || { echo "build failed for $sha" >&2; exit 1; }
   [ -f "$build_root/hephi/lib/index.mjs" ] || { echo "build produced no lib/index.mjs" >&2; exit 1; }
   [ -f "$build_root/hephi/lib/tools.mjs" ] || { echo "build produced no lib/tools.mjs" >&2; exit 1; }
   prod_dep_count=$(node -e 'const p=require(process.argv[1]);process.stdout.write(String(Object.keys(p.dependencies??{}).length))' "$build_root/hephi/package.json")

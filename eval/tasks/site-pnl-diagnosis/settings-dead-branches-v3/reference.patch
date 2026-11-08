@@ -1,0 +1,31 @@
+diff --git a/backend/app/settings.py b/backend/app/settings.py
+index 3016530..2fdf834 100644
+--- a/backend/app/settings.py
++++ b/backend/app/settings.py
+@@ -12,8 +12,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
+ 
+ 
+ def _read_dotenv() -> None:
+-    """按优先级加载环境文件，且不覆盖已有环境变量。"""
+-    explicit = os.environ.get("SITE_PNL_ENV_FILE")
++    """按优先级加载环境文件，且不覆盖已有环境变量。
++
++    ``SITE_PNL_ENV_FILE`` 视为路径配置：去除首尾空白；空/纯空白视为未设置，
++    回退到仓库根 ``.env``。
++    """
++    explicit = (os.environ.get("SITE_PNL_ENV_FILE") or "").strip()
+     if explicit:
+         load_dotenv(explicit, override=False)
+     load_dotenv(REPO_ROOT / ".env", override=False)
+@@ -43,10 +47,7 @@ class Settings:
+ 
+     @classmethod
+     def from_env(cls) -> "Settings":
+-        if os.environ.get("SITE_PNL_ENV_FILE") or os.environ.get("SITE_PNL_LOAD_DOTENV") == "1":
+-            _read_dotenv()
+-        else:
+-            _read_dotenv()
++        _read_dotenv()
+ 
+         def _int(name: str, default: int) -> int:
+             try:

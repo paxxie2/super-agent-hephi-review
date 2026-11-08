@@ -46,22 +46,36 @@ SEED = 20261107
 
 
 def make_record(task: str, arm: str, **overrides) -> dict:
-    """构造一条符合 report.parse_run 要求的最小运行记录（合成数据）。"""
+    """构造一条符合 report.parse_run 严格契约的运行记录（合成数据；含冻结条件与标注证据）。"""
+    condition = report._default_condition_fields(arm)
+    condition["label"] = {"batchId": f"{BATCH}-labels", "labelers": ["reviewer-a", "reviewer-b"], "kappa": 0.9}
     record = {
+        "schemaVersion": 1,
         "runId": f"{task}-{arm}",
         "batch": BATCH,
         "taskId": task,
         "repo": overrides.pop("repo", "synthetic/repo"),
         "category": overrides.pop("category", "new-feature"),
+        "base": "a" * 40,
+        "head": "b" * 40,
         "arm": arm,
+        "executionMode": "normal",
         "repetition": overrides.pop("repetition", 1),
+        "seed": SEED,
+        "startedAt": "2026-11-09T00:00:00Z",
+        "endedAt": "2026-11-09T00:00:10Z",
+        "model": condition["model"],
+        "host": condition["host"],
+        "plugin": condition["plugin"],
+        "decisionLog": None,
+        "label": condition["label"],
         "validationEnvironment": {
             "status": overrides.pop("env", "available"),
             "reason": overrides.pop("env_reason", None),
         },
         "taskCard": {"sha256": "0" * 64, "deliveryMechanism": "issue-body", "verifiedEqual": overrides.pop("task_card_ok", True)},
         "outOfScopeChanges": {"has": overrides.pop("out_of_scope", False)},
-        "unrelatedChanges": {"has": overrides.pop("unrelated", None)},
+        "unrelatedChanges": {"has": overrides.pop("unrelated", False)},
         "objectiveChanged": overrides.pop("objective", "unchanged"),
         "requiredFunctionImplemented": overrides.pop("required", "complete"),
         "implementationDefect": {"verdict": overrides.pop("defect", "none")},
@@ -70,6 +84,7 @@ def make_record(task: str, arm: str, **overrides) -> dict:
         "timeout": overrides.pop("timeout", False),
         "tokens": {"total": overrides.pop("tokens", 1000)},
         "humanIntervention": {"count": overrides.pop("human", 0)},
+        "testWeakening": {"has": False},
     }
     if overrides:
         raise AssertionError(f"未使用的覆盖字段：{sorted(overrides)}")
@@ -170,7 +185,7 @@ def b6_04(record) -> None:
         runs.append(make_run(task, "off", tokens=50))
         runs.append(make_run(task, "native", tokens=(100 if index == 0 else 200)))
     pairs = report.paired_tasks(runs, 1)
-    cost = report.evaluate_cost(pairs, runs, report.DEFAULT_COST_CAPS)
+    cost = report.evaluate_cost(runs, report.DEFAULT_COST_CAPS)
     record(
         "B6-04",
         "部分 token 缺失 → 中位数只用已知值（1 个 100 + 1 个 200 → 150，而非按 0 混入）",
@@ -183,7 +198,7 @@ def b6_04(record) -> None:
         task = f"c{index + 1:02d}"
         missing_runs.append(make_run(task, "off", tokens=50))
         missing_runs.append(make_run(task, "native", tokens=None))
-    missing_cost = report.evaluate_cost(report.paired_tasks(missing_runs, 1), missing_runs, report.DEFAULT_COST_CAPS)
+    missing_cost = report.evaluate_cost(missing_runs, report.DEFAULT_COST_CAPS)
     record(
         "B6-04",
         "全部 token 缺失 → 中位数 N/A、成本检查不通过（缺失不等于 0）",
@@ -237,11 +252,11 @@ def b6_05(record) -> None:
 def b6_06(record) -> None:
     # 环境不可用：排除出效果指标，但成本（tokens/耗时）仍保留并计入成本统计。
     runs = [
-        make_run("e01", "off", minutes=10.0, tokens=50),
-        make_run("e01", "native", minutes=10.0, tokens=100),
-        make_run("e02", "off", minutes=20.0, tokens=50),
-        make_run("e02", "native", minutes=20.0, tokens=200),
-        make_run("e03", "native", minutes=1000.0, tokens=1000, env="unavailable", env_reason="构建失败"),
+        make_run("e01", "off", minutes=600.0, tokens=50),
+        make_run("e01", "native", minutes=600.0, tokens=100),
+        make_run("e02", "off", minutes=1200.0, tokens=50),
+        make_run("e02", "native", minutes=1200.0, tokens=200),
+        make_run("e03", "native", minutes=3600.0, tokens=1000, env="unavailable", env_reason="构建失败"),
     ]
     analyzed = report.analyze(runs, {"seed": SEED, "n_boot": 500, "min_pairs": 1})
     cost_values = analyzed["cost"]["values"]

@@ -1,0 +1,184 @@
+{
+  "mode": "full",
+  "taskDir": "/Users/zm/repos/hephi-dev-base/eval/tasks/site-pnl-diagnosis/history-page-size-v2",
+  "structure": {
+    "ok": true,
+    "errors": [],
+    "warnings": [
+      "environment.offline=true：lockfile 未在任务目录/本地仓库找到（uv.lock）；完整模式会强制校验，dry-run 无法确认仓库锁文件"
+    ]
+  },
+  "checks": {
+    "environment": {
+      "offline": true,
+      "lockfile": "uv.lock",
+      "found": true,
+      "ok": true
+    },
+    "base": {
+      "expected": "fail",
+      "runs": [
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 104, in <module>\n  File \"<stdin>\", line 96, in fetch\nAssertionError: response must expose hasMore, got keys ['items', 'limit', 'offset', 'total']\n",
+          "outputSha256": "b49f6e0040dc76886de8819b0ece35b119c03d7c39a111949414fb67de791409",
+          "normalizedSha256": "b49f6e0040dc76886de8819b0ece35b119c03d7c39a111949414fb67de791409"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 104, in <module>\n  File \"<stdin>\", line 96, in fetch\nAssertionError: response must expose hasMore, got keys ['items', 'limit', 'offset', 'total']\n",
+          "outputSha256": "b49f6e0040dc76886de8819b0ece35b119c03d7c39a111949414fb67de791409",
+          "normalizedSha256": "b49f6e0040dc76886de8819b0ece35b119c03d7c39a111949414fb67de791409"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 104, in <module>\n  File \"<stdin>\", line 96, in fetch\nAssertionError: response must expose hasMore, got keys ['items', 'limit', 'offset', 'total']\n",
+          "outputSha256": "b49f6e0040dc76886de8819b0ece35b119c03d7c39a111949414fb67de791409",
+          "normalizedSha256": "b49f6e0040dc76886de8819b0ece35b119c03d7c39a111949414fb67de791409"
+        }
+      ],
+      "codes": [
+        1,
+        1,
+        1
+      ],
+      "outputSha256": [
+        "b49f6e0040dc76886de8819b0ece35b119c03d7c39a111949414fb67de791409",
+        "b49f6e0040dc76886de8819b0ece35b119c03d7c39a111949414fb67de791409",
+        "b49f6e0040dc76886de8819b0ece35b119c03d7c39a111949414fb67de791409"
+      ],
+      "normalizedSha256": [
+        "b49f6e0040dc76886de8819b0ece35b119c03d7c39a111949414fb67de791409",
+        "b49f6e0040dc76886de8819b0ece35b119c03d7c39a111949414fb67de791409",
+        "b49f6e0040dc76886de8819b0ece35b119c03d7c39a111949414fb67de791409"
+      ],
+      "consistent": true,
+      "failureClasses": [
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        },
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        },
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        }
+      ],
+      "validFailureClasses": [
+        "target-assertion-failed",
+        "target-symbol-missing"
+      ],
+      "normalization": {
+        "version": 1,
+        "scope": "stdout+stderr",
+        "rules": [
+          "CRLF/CR → LF",
+          "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+          "UUID → <uuid>",
+          "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+          "pid=数字 → pid=<pid>"
+        ],
+        "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
+      },
+      "ok": true
+    },
+    "scope": {
+      "allowedFiles": [
+        "backend/app/schemas.py",
+        "backend/app/services/diagnoses.py"
+      ],
+      "changedFiles": [
+        "backend/app/schemas.py",
+        "backend/app/services/diagnoses.py"
+      ],
+      "outside": [],
+      "ok": true
+    },
+    "reference": {
+      "expected": "pass",
+      "runs": [
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: hasMore pagination behavior over HTTP (ASGI behavior)\n",
+          "stderr": "",
+          "outputSha256": "8ee96d095a0962b0bbdfdd6fc5635eaad8129af079a6e5e47a49dc68f014bf76",
+          "normalizedSha256": "8ee96d095a0962b0bbdfdd6fc5635eaad8129af079a6e5e47a49dc68f014bf76"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: hasMore pagination behavior over HTTP (ASGI behavior)\n",
+          "stderr": "",
+          "outputSha256": "8ee96d095a0962b0bbdfdd6fc5635eaad8129af079a6e5e47a49dc68f014bf76",
+          "normalizedSha256": "8ee96d095a0962b0bbdfdd6fc5635eaad8129af079a6e5e47a49dc68f014bf76"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: hasMore pagination behavior over HTTP (ASGI behavior)\n",
+          "stderr": "",
+          "outputSha256": "8ee96d095a0962b0bbdfdd6fc5635eaad8129af079a6e5e47a49dc68f014bf76",
+          "normalizedSha256": "8ee96d095a0962b0bbdfdd6fc5635eaad8129af079a6e5e47a49dc68f014bf76"
+        }
+      ],
+      "codes": [
+        0,
+        0,
+        0
+      ],
+      "outputSha256": [
+        "8ee96d095a0962b0bbdfdd6fc5635eaad8129af079a6e5e47a49dc68f014bf76",
+        "8ee96d095a0962b0bbdfdd6fc5635eaad8129af079a6e5e47a49dc68f014bf76",
+        "8ee96d095a0962b0bbdfdd6fc5635eaad8129af079a6e5e47a49dc68f014bf76"
+      ],
+      "normalizedSha256": [
+        "8ee96d095a0962b0bbdfdd6fc5635eaad8129af079a6e5e47a49dc68f014bf76",
+        "8ee96d095a0962b0bbdfdd6fc5635eaad8129af079a6e5e47a49dc68f014bf76",
+        "8ee96d095a0962b0bbdfdd6fc5635eaad8129af079a6e5e47a49dc68f014bf76"
+      ],
+      "consistent": true,
+      "normalization": {
+        "version": 1,
+        "scope": "stdout+stderr",
+        "rules": [
+          "CRLF/CR → LF",
+          "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+          "UUID → <uuid>",
+          "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+          "pid=数字 → pid=<pid>"
+        ],
+        "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
+      },
+      "ok": true
+    }
+  },
+  "normalization": {
+    "version": 1,
+    "scope": "stdout+stderr",
+    "rules": [
+      "CRLF/CR → LF",
+      "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+      "UUID → <uuid>",
+      "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+      "pid=数字 → pid=<pid>"
+    ],
+    "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
+  },
+  "ok": true,
+  "baseSha": "bd816e9eb019b0520b98dbc1bd53bdf0c85010d4",
+  "repo": "/Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis",
+  "repeats": 3
+}

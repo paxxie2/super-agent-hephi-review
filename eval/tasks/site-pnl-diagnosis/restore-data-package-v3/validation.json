@@ -1,0 +1,150 @@
+{
+  "schemaVersion": 1,
+  "taskId": "restore-data-package-v3",
+  "checkedAt": "2026-11-08T18:47:37Z",
+  "f14Strengthened": true,
+  "checker": "agent-assisted (not an independent human reviewer)",
+  "repoPathUsed": "/Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis",
+  "command": "node eval/check-task.mjs eval/tasks/site-pnl-diagnosis/restore-data-package-v3 --repo /Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis --json",
+  "mode": "full (not dry-run)",
+  "repeats": 3,
+  "base": {
+    "sha": "e00f338b098546adc40156dc15b4b6559e19835d",
+    "resolvedCommit": "e00f338b098546adc40156dc15b4b6559e19835d",
+    "gitCatFileType": "commit",
+    "existsInLocalClone": true,
+    "expected": "fail",
+    "exitCodes": [
+      1,
+      1,
+      1
+    ],
+    "failureClasses": [
+      {
+        "code": 1,
+        "failureClass": "target-assertion-failed",
+        "reason": "assertion marker: /AssertionError/"
+      },
+      {
+        "code": 1,
+        "failureClass": "target-assertion-failed",
+        "reason": "assertion marker: /AssertionError/"
+      },
+      {
+        "code": 1,
+        "failureClass": "target-assertion-failed",
+        "reason": "assertion marker: /AssertionError/"
+      }
+    ],
+    "validFailureClasses": [
+      "target-assertion-failed",
+      "target-symbol-missing"
+    ],
+    "consistent": true,
+    "normalizedSha256": [
+      "f3e954b04b47601fa5078aa18e2e0a510ab91256ce1dcbca70701a9647715dd8",
+      "f3e954b04b47601fa5078aa18e2e0a510ab91256ce1dcbca70701a9647715dd8",
+      "f3e954b04b47601fa5078aa18e2e0a510ab91256ce1dcbca70701a9647715dd8"
+    ],
+    "ok": true,
+    "runs": [
+      {
+        "code": 1,
+        "signal": null,
+        "outputSha256": "f3e954b04b47601fa5078aa18e2e0a510ab91256ce1dcbca70701a9647715dd8",
+        "stdoutTail": "",
+        "stderrTail": "Traceback (most recent call last):\n  File \"<stdin>\", line 16, in <module>\nAssertionError: missing restored source file: backend/app/data/loader.py\n"
+      },
+      {
+        "code": 1,
+        "signal": null,
+        "outputSha256": "f3e954b04b47601fa5078aa18e2e0a510ab91256ce1dcbca70701a9647715dd8",
+        "stdoutTail": "",
+        "stderrTail": "Traceback (most recent call last):\n  File \"<stdin>\", line 16, in <module>\nAssertionError: missing restored source file: backend/app/data/loader.py\n"
+      },
+      {
+        "code": 1,
+        "signal": null,
+        "outputSha256": "f3e954b04b47601fa5078aa18e2e0a510ab91256ce1dcbca70701a9647715dd8",
+        "stdoutTail": "",
+        "stderrTail": "Traceback (most recent call last):\n  File \"<stdin>\", line 16, in <module>\nAssertionError: missing restored source file: backend/app/data/loader.py\n"
+      }
+    ]
+  },
+  "reference": {
+    "expected": "pass",
+    "exitCodes": [
+      0,
+      0,
+      0
+    ],
+    "consistent": true,
+    "normalizedSha256": [
+      "6f39c56de0616132ae8f3e5d4d089061e6d9db7611a153d1db7816d5b8f230ea",
+      "6f39c56de0616132ae8f3e5d4d089061e6d9db7611a153d1db7816d5b8f230ea",
+      "6f39c56de0616132ae8f3e5d4d089061e6d9db7611a153d1db7816d5b8f230ea"
+    ],
+    "ok": true,
+    "runs": [
+      {
+        "code": 0,
+        "signal": null,
+        "outputSha256": "6f39c56de0616132ae8f3e5d4d089061e6d9db7611a153d1db7816d5b8f230ea",
+        "stdoutTail": "PASS: loader read/error paths behave on a real database\n"
+      },
+      {
+        "code": 0,
+        "signal": null,
+        "outputSha256": "6f39c56de0616132ae8f3e5d4d089061e6d9db7611a153d1db7816d5b8f230ea",
+        "stdoutTail": "PASS: loader read/error paths behave on a real database\n"
+      },
+      {
+        "code": 0,
+        "signal": null,
+        "outputSha256": "6f39c56de0616132ae8f3e5d4d089061e6d9db7611a153d1db7816d5b8f230ea",
+        "stdoutTail": "PASS: loader read/error paths behave on a real database\n"
+      }
+    ]
+  },
+  "scope": {
+    "allowedFiles": [
+      ".gitignore",
+      "backend/app/data/__init__.py",
+      "backend/app/data/loader.py"
+    ],
+    "changedFiles": [
+      ".gitignore",
+      "backend/app/data/__init__.py",
+      "backend/app/data/loader.py"
+    ],
+    "outside": [],
+    "ok": true
+  },
+  "environment": {
+    "declared": {
+      "offline": true,
+      "lockfile": "uv.lock",
+      "found": true,
+      "ok": true
+    },
+    "offline": true,
+    "hiddenTestStdlibOnly": true,
+    "hiddenTestSha256": "2b8b6d54c26c4c6e66b268a2bc96a1e0fd75769b1e368e4bf5870414769c6d41",
+    "note": "隐藏测试只使用 Python 标准库与仓库自身已安装依赖（ASGI 直驱，不联网、不安装、不起实例）；check-task 完整模式在临时 git worktree 中执行。"
+  },
+  "f14": {
+    "coreProof": [
+      "真实空库：init_db 后 load_sites()==[]、dataset_bounds() 返回默认数据集窗口",
+      "未知点位真实错误分支：get_site_info('S99') is None；load_site_data('S99',窗口) 抛 ValueError('unknown site: S99')",
+      "可用加载路径：插入最小站点后 load_sites/get_site_info/load_site_data 真实返回该站点",
+      "loader SHA256 与参考修复一致、git-ignore 否定规则、AST IfExp/Raise 断言降为辅助"
+    ],
+    "auxiliaryAssertionsNote": "AST/哈希/git-ignore/stub 断言只作为辅助，不单独作为核心需求证明。",
+    "referencePatchChanged": "未修改"
+  },
+  "overallOk": true,
+  "limitations": [
+    "评审为 agent 辅助，没有第二名独立人类评审。",
+    "隐藏测试在临时 worktree 中真实执行 SQLite/文件/ASGI，但不是真实服务实例或真实网络 HTTP。"
+  ]
+}

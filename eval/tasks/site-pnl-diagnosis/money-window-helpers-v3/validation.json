@@ -1,0 +1,99 @@
+{
+  "mode": "full",
+  "taskDir": "/Users/zm/repos/hephi-dev-base/eval/tasks/site-pnl-diagnosis/money-window-helpers-v3",
+  "structure": {
+    "ok": true,
+    "errors": [],
+    "warnings": [
+      "environment.offline=true：lockfile 未在任务目录/本地仓库找到（uv.lock）；完整模式会强制校验，dry-run 无法确认仓库锁文件"
+    ]
+  },
+  "checks": {
+    "environment": {
+      "offline": true,
+      "lockfile": "uv.lock",
+      "found": true,
+      "ok": true
+    },
+    "base": {
+      "expected": "fail",
+      "runs": [
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 6, in <module>\nAssertionError: missing clamp_window helper\n",
+          "outputSha256": "1514377c61b0f059f3dc757813870fded661a99ac3782ac6f1b181ac606b09e5"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 6, in <module>\nAssertionError: missing clamp_window helper\n",
+          "outputSha256": "1514377c61b0f059f3dc757813870fded661a99ac3782ac6f1b181ac606b09e5"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 6, in <module>\nAssertionError: missing clamp_window helper\n",
+          "outputSha256": "1514377c61b0f059f3dc757813870fded661a99ac3782ac6f1b181ac606b09e5"
+        }
+      ],
+      "codes": [
+        1,
+        1,
+        1
+      ],
+      "consistent": true,
+      "ok": true
+    },
+    "scope": {
+      "allowedFiles": [
+        "backend/app/domain/money.py"
+      ],
+      "changedFiles": [
+        "backend/app/domain/money.py"
+      ],
+      "outside": [],
+      "ok": true
+    },
+    "reference": {
+      "expected": "pass",
+      "runs": [
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: clamp_window helper\n",
+          "stderr": "",
+          "outputSha256": "cb96136632adc0c309de10110c0e7dcd51f4f5ca2d1980f911a04f6825d5b234"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: clamp_window helper\n",
+          "stderr": "",
+          "outputSha256": "cb96136632adc0c309de10110c0e7dcd51f4f5ca2d1980f911a04f6825d5b234"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: clamp_window helper\n",
+          "stderr": "",
+          "outputSha256": "cb96136632adc0c309de10110c0e7dcd51f4f5ca2d1980f911a04f6825d5b234"
+        }
+      ],
+      "codes": [
+        0,
+        0,
+        0
+      ],
+      "consistent": true,
+      "ok": true
+    }
+  },
+  "ok": true,
+  "baseSha": "8d2ec5858ed3071eae598e5afb30b069807ce598",
+  "repo": "/Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis",
+  "repeats": 3
+}

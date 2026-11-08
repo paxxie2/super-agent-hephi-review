@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "taskId": "history-page-size-v2",
+  "repo": "site-pnl-diagnosis",
+  "base": "bd816e9eb019b0520b98dbc1bd53bdf0c85010d4",
+  "category": "new-feature",
+  "referenceFix": "reference.patch",
+  "allowedFiles": [
+    "backend/app/schemas.py",
+    "backend/app/services/diagnoses.py"
+  ],
+  "issue": "issue.md",
+  "hiddenTest": "hidden-test.sh",
+  "review": "review.md",
+  "stagedSuitable": false,
+  "contamination": {
+    "mergedAfterTrainingCutoff": false,
+    "private": true,
+    "cutoff": null,
+    "notes": "变体批次 3 新定义的需求点（非历史提交派生），无可验证的提交时间/训练截止信息，保守记 false，不作去污染声明。 来源仓库 paxxie2/site-pnl-diagnosis 为 GitHub 私有仓库，计入 B2 的“私有来源”比例。"
+  },
+  "checks": {
+    "baseMustFail": true,
+    "referenceMustPass": true
+  },
+  "environment": {
+    "offline": true,
+    "lockfile": "uv.lock",
+    "commandsMustMatchOffline": true
+  }
+}

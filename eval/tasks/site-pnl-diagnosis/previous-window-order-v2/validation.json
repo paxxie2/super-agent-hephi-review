@@ -1,0 +1,99 @@
+{
+  "mode": "full",
+  "taskDir": "/Users/zm/repos/hephi-dev-base/eval/tasks/site-pnl-diagnosis/previous-window-order-v2",
+  "structure": {
+    "ok": true,
+    "errors": [],
+    "warnings": [
+      "environment.offline=true：lockfile 未在任务目录/本地仓库找到（uv.lock）；完整模式会强制校验，dry-run 无法确认仓库锁文件"
+    ]
+  },
+  "checks": {
+    "environment": {
+      "offline": true,
+      "lockfile": "uv.lock",
+      "found": true,
+      "ok": true
+    },
+    "base": {
+      "expected": "fail",
+      "runs": [
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 7, in <module>\nAttributeError: module 'money' has no attribute 'previous_windows'. Did you mean: 'previous_window'?\n",
+          "outputSha256": "919f74ec6410cde2fe1697d491c2a7c10623cddd6d564799b17aef158d7286d4"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 7, in <module>\nAttributeError: module 'money' has no attribute 'previous_windows'. Did you mean: 'previous_window'?\n",
+          "outputSha256": "919f74ec6410cde2fe1697d491c2a7c10623cddd6d564799b17aef158d7286d4"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 7, in <module>\nAttributeError: module 'money' has no attribute 'previous_windows'. Did you mean: 'previous_window'?\n",
+          "outputSha256": "919f74ec6410cde2fe1697d491c2a7c10623cddd6d564799b17aef158d7286d4"
+        }
+      ],
+      "codes": [
+        1,
+        1,
+        1
+      ],
+      "consistent": true,
+      "ok": true
+    },
+    "scope": {
+      "allowedFiles": [
+        "backend/app/domain/money.py"
+      ],
+      "changedFiles": [
+        "backend/app/domain/money.py"
+      ],
+      "outside": [],
+      "ok": true
+    },
+    "reference": {
+      "expected": "pass",
+      "runs": [
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "previous_windows sequence checks PASS\n",
+          "stderr": "",
+          "outputSha256": "6d3177d291c51928cfc464a7204f811ffe9bb30ba51433484fe6c25e11002f62"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "previous_windows sequence checks PASS\n",
+          "stderr": "",
+          "outputSha256": "6d3177d291c51928cfc464a7204f811ffe9bb30ba51433484fe6c25e11002f62"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "previous_windows sequence checks PASS\n",
+          "stderr": "",
+          "outputSha256": "6d3177d291c51928cfc464a7204f811ffe9bb30ba51433484fe6c25e11002f62"
+        }
+      ],
+      "codes": [
+        0,
+        0,
+        0
+      ],
+      "consistent": true,
+      "ok": true
+    }
+  },
+  "ok": true,
+  "baseSha": "1e166fbe2217ac378e5bb7062cd34a2da1e75e6f",
+  "repo": "/Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis",
+  "repeats": 3
+}

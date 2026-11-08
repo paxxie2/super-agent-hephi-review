@@ -1,0 +1,26 @@
+# q1-retention 22 卡 full-mode（第十一轮整改后最终复验）
+
+backend-input-validation-v2 ok:true
+backend-input-validation-v3 ok:true
+backend-validation-messages ok:true
+backend-validation-messages-v2 ok:true
+backend-validation-messages-v3 ok:true
+health-service-field-v2 ok:true
+health-service-field-v3 ok:true
+history-page-size-v2 ok:true
+history-page-size-v3 ok:true
+money-window-helpers-v2 ok:true
+money-window-helpers-v3 ok:true
+previous-window-order-v2 ok:true
+previous-window-order-v3 ok:true
+restore-data-package ok:true
+restore-data-package-v2 ok:true
+restore-data-package-v3 ok:true
+restore-health-service-id ok:true
+restore-health-service-id-v2 ok:true
+restore-health-service-id-v3 ok:true
+settings-dead-branches ok:true
+settings-dead-branches-v2 ok:true
+settings-dead-branches-v3 ok:true
+
+汇总：22/22 ok:true，0 失败（工具含 C01-C04/C02 全部新标准）

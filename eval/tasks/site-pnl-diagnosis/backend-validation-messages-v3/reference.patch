@@ -1,0 +1,39 @@
+diff --git a/backend/app/validation_summary.py b/backend/app/validation_summary.py
+new file mode 100644
+index 0000000..0fae68b
+--- /dev/null
++++ b/backend/app/validation_summary.py
+@@ -0,0 +1,33 @@
++"""把 FastAPI ``RequestValidationError.errors()`` 转成稳定的单行审计摘要。
++
++纯函数，仅标准库；字段名去重并排序，重复错误仍计入错误总数。
++"""
++
++from __future__ import annotations
++
++from typing import Any
++
++
++def _field(error: dict[str, Any]) -> str:
++    loc = error.get("loc") or ()
++    parts = [str(part) for part in loc if part != "body"]
++    return ".".join(parts) or "body"
++
++
++def summarize_validation_errors(errors: list[dict[str, Any]]) -> str:
++    """返回 ``"<总数> validation error(s): <字段1>, <字段2>"``；无错误时返回 ``"0 validation errors"``。
++
++    总数按错误条目计（重复字段重复计数），字段名去重后按字典序排列。
++    输入不是错误字典列表时抛 ``TypeError``。
++    """
++    if not isinstance(errors, list):
++        raise TypeError("errors must be a list of dicts")
++    fields = set()
++    for error in errors:
++        if not isinstance(error, dict):
++            raise TypeError("each error must be a dict")
++        fields.add(_field(error))
++    if not errors:
++        return "0 validation errors"
++    suffix = "" if len(errors) == 1 else "s"
++    return f"{len(errors)} validation error{suffix}: {', '.join(sorted(fields))}"

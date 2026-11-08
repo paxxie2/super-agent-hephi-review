@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "requirePlan": true,
+  "protectedAssets": ["**/test/**", "**/tests/**"],
+  "checks": [
+    {
+      "id": "project-regression",
+      "kind": "test",
+      "purpose": "B5 narrowed project check: the pinned base 1e166fb has a broken full suite (test_db/test_seed import app.data, missing at this snapshot); run money-focused tests that pass at base. Same check id as project-regression for task-card compatibility; command narrowed and documented as environment adaptation. (G1: unchanged; it runs one file and never scans the acceptance directory, so regression and acceptance cannot overlap)",
+      "command": "sh",
+      "args": [
+        "-c",
+        "uv run pytest backend/tests/test_money.py -q"
+      ],
+      "timeoutMs": 300000
+    },
+    {
+      "id": "acceptance",
+      "kind": "test",
+      "purpose": "G1 acceptance check (T08 §8 pattern): run only acceptance tests, JUnit report in this run directory. Assumes uv + pytest are available and acceptance tests live under backend/tests/acceptance/ (created by T15 tasks; the directory does not exist at staging time).",
+      "command": "sh",
+      "args": [
+        "-c",
+        "uv run pytest backend/tests/acceptance -q --junitxml=\"$HEPHI_RUN_DIR/junit.xml\""
+      ],
+      "required": true,
+      "timeoutMs": 600000,
+      "assertionFailureTypes": ["AssertionError"]
+    }
+  ]
+}

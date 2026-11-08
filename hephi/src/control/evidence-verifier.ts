@@ -1,5 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { sessionBindingPolicy, verificationOf, type ActivationContract } from './activation.js'
 import type { ReadyVerifier } from './ready-gate.js'
 import { gitFingerprint, sha256 } from '../verification/fingerprint.js'
@@ -12,6 +14,14 @@ import { checkDiscipline } from './discipline.js'
 import { pluginCommit } from '../version.js'
 import { logDecision } from './decision-log.js'
 import { readPlan } from './plan-store.js'
+
+const exec = promisify(execFile)
+
+/** T17: changed files in one commit range, NUL-separated so spaces/Unicode survive. */
+async function diffFiles(workspace: string, from: string, to: string): Promise<string[]> {
+  const { stdout } = await exec('git', ['diff', '--name-only', '-z', from, to, '--'], { cwd: workspace, maxBuffer: 20 * 1024 * 1024 })
+  return stdout.split('\0').filter(Boolean)
+}
 
 /**
  * The host's Session snapshot, in the shape stage recovery already reads
@@ -268,7 +278,7 @@ function jobEventEvidence(
  */
 async function analyzeNativeEvidence(
   snapshot: SessionSnapshot, sessionId: string, contract: ActivationContract, record: CheckRunRecord,
-  workspace: string, jobs: NativeJobs | undefined,
+  stateDir: string, workspace: string, jobs: NativeJobs | undefined,
 ): Promise<NativeEvidence> {
   if (snapshot.session?.id !== sessionId) return { bindingProblem: 'Session snapshot belongs to a different Session' }
   const own = snapshot.events.filter(event => event.seq >= snapshot.inheritedEventCount)
@@ -278,7 +288,7 @@ async function analyzeNativeEvidence(
   let expectedCommand: string
   let expectedCwd: string
   try {
-    expectedCommand = checkCommand(contract.baseSha, definition.command, definition.args)
+    expectedCommand = checkCommand(contract.baseSha, definition.command, definition.args, checkRunDir(stateDir, contract.ticketId, record.runId))
     expectedCwd = await contained(workspace, definition.cwd)
   } catch (error) {
     return { bindingProblem: `${record.checkId}: cannot resolve the frozen check command or directory: ${error instanceof Error ? error.message : String(error)}` }
@@ -303,9 +313,9 @@ async function analyzeNativeEvidence(
  */
 export async function sessionBindingProblem(
   snapshot: SessionSnapshot, sessionId: string, contract: ActivationContract, record: CheckRunRecord,
-  context: { workspace: string; jobs?: NativeJobs },
+  context: { stateDir: string; workspace: string; jobs?: NativeJobs },
 ): Promise<string | undefined> {
-  const evidence = await analyzeNativeEvidence(snapshot, sessionId, contract, record, context.workspace, context.jobs)
+  const evidence = await analyzeNativeEvidence(snapshot, sessionId, contract, record, context.stateDir, context.workspace, context.jobs)
   return evidence.bindingProblem ?? evidence.jobUnavailable
 }
 
@@ -409,7 +419,9 @@ export function createEvidenceVerifier(options: {
       for (const item of contract.task?.acceptance ?? []) needed.add(item.check)
       const used: CheckRunRecord[] = []
       for (const id of needed) {
-        const r = records.filter(r => r.checkId === id).at(-1)
+        // T17: green evidence is the latest ordinary run for this check; red runs are
+        // never green evidence even when they are the most recent record.
+        const r = records.filter(record => record.checkId === id && record.phase !== 'red').at(-1)
         if (!r || r.status !== 'passed' || r.exitCode !== 0 || r.contractHash !== contract.contractHash
           || !r.sessionId || !r.callId || !r.innerCallId || !r.finishedAt
           || !sameSource(r.before, before) || !sameSource(r.after, before)) throw new Error(`missing, failed or stale evidence: ${id}`)
@@ -418,6 +430,40 @@ export function createEvidenceVerifier(options: {
         if (frozen) throw new Error(`evidence does not match the frozen check: ${frozen}`)
         if (r.pluginCommit !== pluginCommit()) throw new Error(`check evidence was produced by another plugin build (${r.pluginCommit}); rerun checks with ${pluginCommit()}`)
         used.push(r)
+      }
+      // T17: red-before-green gate. Only version 3 `code` task cards carry it; version 1/2
+      // cards and `refactor`/`doc` kinds keep the historical green-only behavior unchanged.
+      const taskCard = contract.task
+      if (taskCard?.version === 3 && taskCard.kind === 'code') {
+        const red = records.filter(record => record.phase === 'red').at(-1)
+        if (red === undefined) {
+          throw new Error('ready.red-missing: this code task has no red-phase check run; run hephi_check with phase="red" on the failing acceptance checks before implementing')
+        }
+        const redUsable = red.contractHash === contract.contractHash && red.status === 'blocked'
+          && Number.isInteger(red.exitCode) && red.exitCode !== 0
+          && red.after !== undefined && sameSource(red.before, red.after)
+        if (!redUsable) {
+          throw new Error('ready.red-missing: the latest red-phase check run is not red evidence (it must fail with a non-zero exit code without changing the source tree); rerun hephi_check with phase="red"')
+        }
+        const redCommit = red.before.headCommit
+        if (redCommit === undefined) {
+          throw new Error('ready.red-missing: the latest red-phase check record has no commit identity; rerun hephi_check with phase="red"')
+        }
+        const testFiles = [...new Set(taskCard.acceptance.flatMap(item => item.tests ?? []))]
+        // (a) the red commit may only contain the acceptance tests; implementation code in
+        // it means the "red" state was not actually failing before the implementation.
+        const redFiles = await diffFiles(workspace, contract.baseSha, redCommit)
+        const outsideTests = redFiles.filter(file => !allowedPath(file, testFiles))
+        if (outsideTests.length > 0) {
+          throw new Error(`ready.red-impl-files: the red commit changes files outside the acceptance tests: ${outsideTests.join(', ')}; the red phase must only introduce the failing acceptance tests`)
+        }
+        // (b) the acceptance tests must not move after the red run, or the red evidence no
+        // longer covers the tests the green state is judged by.
+        const changedSinceRed = await diffFiles(workspace, redCommit, 'HEAD')
+        const testsChanged = changedSinceRed.filter(file => allowedPath(file, testFiles))
+        if (testsChanged.length > 0) {
+          throw new Error(`ready.red-tests-changed: acceptance tests changed after the red run: ${testsChanged.join(', ')}; re-run hephi_check with phase="red" on the current tests`)
+        }
       }
       // A1-K4: the evidence must name this Worker Session, not merely a non-empty id.
       // This runs regardless of the binding switch (the defect was that the binding-off
@@ -440,7 +486,7 @@ export function createEvidenceVerifier(options: {
         // the ownership check keeps a missing sessionQuery from masking a foreign record.
         const snapshot = await options.readSession(sessionId)
         for (const r of used) {
-          const evidence = await analyzeNativeEvidence(snapshot, sessionId, contract, r, workspace, options.jobs)
+          const evidence = await analyzeNativeEvidence(snapshot, sessionId, contract, r, options.stateDir, workspace, options.jobs)
           // Non-fatal shape facts (for example `workdir: absent` on the job-event path) are kept
           // in the denial reason so the operator can see what could not be compared.
           const notes = evidence.notes && evidence.notes.length > 0 ? ` (${evidence.notes.join('; ')})` : ''
@@ -527,6 +573,9 @@ export function createEvidenceVerifier(options: {
 
 /** Stable rule ids for ready denials; P3 aggregates by rule. */
 function readyRule(reason: string): string {
+  // T14/AT-43: a GitHub rate-limit failure is environment unavailability, not a failed
+  // check; give it its own rule so P3 does not count it as an evidence/check failure.
+  if (/rate limit|API rate limit exceeded/i.test(reason)) return 'ready.github-unavailable'
   // C3: waiting for a human approval is its own denial class (a wait state, not a failed check).
   if (reason.includes('ready.awaiting-approval')) return 'ready.awaiting-approval'
   // A1-BIND/A1-OUT: an unreadable Job terminal state or unverifiable output is not a
@@ -535,6 +584,10 @@ function readyRule(reason: string): string {
   if (reason.includes('authoritative check output is unavailable') || reason.includes('authoritative check output differs')) return 'ready.output-unverified'
   if (reason.includes('not bound to a native execution')) return 'ready.binding'
   if (reason.includes('PR/base/HEAD mismatch')) return 'ready.pr-mismatch'
+  // T17: the red-before-green gate has its own denial classes for P3 aggregation.
+  if (reason.includes('ready.red-missing')) return 'ready.red-missing'
+  if (reason.includes('ready.red-impl-files')) return 'ready.red-impl-files'
+  if (reason.includes('ready.red-tests-changed')) return 'ready.red-tests-changed'
   if (reason.includes('missing, failed or stale evidence')) return 'ready.evidence-missing'
   if (reason.includes('contract was prepared by another plugin build')) return 'ready.plugin-build'
   // C4.2: plan denials are their own denial classes (owner can see why).

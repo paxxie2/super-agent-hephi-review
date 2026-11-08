@@ -866,7 +866,7 @@ const LINT_TASK_USAGE = `usage: hephi lint-task <task.json> [--json]
 输入是任务 bundle（JSON）：task（hephi-task 任务卡）、ticketId、allowedPaths、
 checks（或 verification.checks）。也可以把任务卡字段平铺在顶层，与 ticketId/allowedPaths/checks 并列。`
 
-const TASK_CARD_KEYS = ['version', 'goal', 'outOfScope', 'acceptance', 'budget', 'protect', 'protectedAssets'] as const
+const TASK_CARD_KEYS = ['version', 'kind', 'goal', 'outOfScope', 'acceptance', 'budget', 'protect', 'protectedAssets'] as const
 const LINT_BUNDLE_KEYS = new Set([
   ...TASK_CARD_KEYS, 'task', 'ticketId', 'allowedPaths', 'checks', 'verification',
 ])

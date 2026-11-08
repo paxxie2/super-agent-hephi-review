@@ -49,7 +49,7 @@ function editedPath(args: unknown): string | undefined {
 }
 
 export function hephiStartupPrompt(filePath: string, mode?: ExecutionMode, contractProblem?: string): string {
-  const instructions = 'HEPHI is enabled for this Ticket. Before creating an implementation todo/plan or modifying code, load skill("hephi-superagent-control") and call hephi_get_contract; read the rules, allowed scope and acceptance checks. Create or update the PR and bind it with orchestrator_report progress and the real pr_number, then run every required hephi_check, then call orchestrator_report with state ready. Do not report ready before those checks pass, and do not wait for merge. On resuming, use the current contract and actual Session evidence rather than pretending earlier work followed these instructions.'
+  const instructions = 'HEPHI is enabled for this Ticket. Before creating an implementation todo/plan or modifying code, load skill("hephi-superagent-control") and call hephi_get_contract; read the rules, allowed scope and acceptance checks. Commit your changes before running hephi_check: the check requires a clean workspace and uncommitted changes are rejected as workspace-dirty; after review feedback, add new commits and rerun the required checks. Create or update the PR and bind it with orchestrator_report progress and the real pr_number, then run every required hephi_check, then call orchestrator_report with state ready. Do not report ready before those checks pass, and do not wait for merge. On resuming, use the current contract and actual Session evidence rather than pretending earlier work followed these instructions.'
   if (!mode) {
     return `${instructions} The activation contract could not be read or resolved${contractProblem ? `: ${contractProblem}` : ''}. Implementation, delegation, stage control, and ready are blocked until an operator fixes the contract and remounts this Worker; do not treat this as an ordinary non-HEPHI task.`
   }
@@ -178,7 +178,13 @@ export function mountWorkerGate(
   })
   const removeCheck = scopeOnly || shadow ? () => {} : agent.ctx.tools.register(defineTool({
     name: 'hephi_check', description: 'Run a frozen required check by checkId before ready.',
-    parameters: { checkId: { type: 'string', required: true } },
+    parameters: {
+      checkId: { type: 'string', required: true },
+      phase: {
+        type: 'string', enum: ['red'],
+        description: 'Set to "red" for the failing before-implementation run required by version 3 code task cards.',
+      },
+    },
     output: { schema: { type: 'json' as const }, render: (_a, value) => [{ type: 'text' as const, text: JSON.stringify(value) }] },
     execute: async (args, execution) => {
       const sessionId = String(agent.session.header.id)
@@ -191,7 +197,8 @@ export function mountWorkerGate(
       }
       checking = true
       try {
-        const record = await runCheck({ stateDir, contract: await loadBoundActivation(), checkId: args.checkId,
+        const phase = (args as { phase?: unknown }).phase === 'red' ? 'red' as const : undefined
+        const record = await runCheck({ stateDir, contract: await loadBoundActivation(), checkId: args.checkId, phase,
           outer: execution, tools: agent.ctx.tools as unknown as CheckTools, jobs: nativeJobs(ctx), sessionCwd: agent.session.header.cwd,
           allowOperatorResolutions: options.allowOperatorResolutions === true, retryLimit: options.retryLimit,
           internal: id => { internalCall = id } })

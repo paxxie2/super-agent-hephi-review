@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "taskId": "restore-data-package-v2",
+  "repo": "site-pnl-diagnosis",
+  "base": "e00f338b098546adc40156dc15b4b6559e19835d",
+  "category": "defect-fix",
+  "referenceFix": "reference.patch",
+  "allowedFiles": [
+    ".gitignore",
+    "backend/app/data/__init__.py",
+    "backend/app/data/seed.py"
+  ],
+  "issue": "issue.md",
+  "hiddenTest": "hidden-test.sh",
+  "review": "review.md",
+  "stagedSuitable": false,
+  "contamination": {
+    "mergedAfterTrainingCutoff": false,
+    "private": true,
+    "cutoff": null,
+    "notes": "变体卡为 B5 边界增强 fixture，需求点为本次新设计（非历史提交）。变体 base 使用 site-pnl-diagnosis 本地 clone 中真实存在的历史提交；训练截止时间未验证，为避免伪造 >=1/3 污染门槛，mergedAfterTrainingCutoff 保守记为 false，不作任何去污染声明。来源仓库 paxxie2/site-pnl-diagnosis 为私有仓库。"
+  },
+  "checks": {
+    "baseMustFail": true,
+    "referenceMustPass": true
+  },
+  "environment": {
+    "offline": true,
+    "lockfile": "uv.lock",
+    "commandsMustMatchOffline": true
+  }
+}

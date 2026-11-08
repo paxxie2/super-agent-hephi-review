@@ -1,6 +1,6 @@
 # B 线决策草案（待负责人批准）
 
-基线：`9fa8598f2beabe179b28733e484275c3775279d3`。仅准备决策，不锁定参数，不启动试跑或正式实验。各项目 `status` 见条目；2026-11-08 负责人口头批准“乙包的，我全部批准”（Lead 转述）后，推荐值明确且无占位/未决的项改为 `approved-by-owner`，需要试跑或仍未决的项保持 `pending-trial`/`pending-approval`；批准记录见 `eval/approvals/2026-11-08-owner-approval.md`。现有文档、源码仅证明当前状态，不代表真实实验已通过。
+基线：`9fa8598f2beabe179b28733e484275c3775279d3`。本文件记录决策过程；**终态：PREREG v1.0 已于 2026-11-08 锁定**（`eval/PREREG.lock`），全部 D-1..D-10 已决，锁定值以 `eval/PREREG.md` §10 为准。历史过程条目保留下文，其中出现的"待批准/未决"字样仅描述当时状态，均已被 2026-11-08 锁定取代。
 
 ## 编号与批准规则
 
@@ -42,7 +42,7 @@
 ## D-4 整体和分层样本量
 
 - status: `approved-by-owner (delegated budget)`
-- 当前状态：N_TODO；min_pairs=5 只是脚手架占位。
+- 当前状态：锁定前为草稿；锁定值 = 67 配对（预算口径），见 PREREG §6。
 - 选项：试跑后按配对效能估计；预先预算限定可行样本并标证据限制；缩小首轮范围后重新估计。
 - 对样本量、成本和可比性的影响：直接决定总成本与统计精度，各分层不能以整体数量替代。
 - 推荐及依据：推荐试跑后按现有 §6 方法给出计算输入和输出，再审批 N；不填凭空数字。
@@ -53,7 +53,7 @@
 ## D-5 环境不可用停止阈值
 
 - status: `approved-by-owner (delegated)`
-- 当前状态：PREREG §8 为 ENV_TODO，批次窗口口径也需确认。
+- 当前状态：锁定前为待定；锁定值 = 每 10 次失败 >20% 或连败 3 次（PREREG §8.3）。
 - 选项：固定批次比例阈值；连续批次阈值；预先规定比例及绝对事件数联合条件。
 - 对样本量、成本和可比性的影响：提前停止影响样本量与成本；分组或窗口不一致会破坏可比性。
 - 推荐及依据：推荐负责人同时确定阈值、分母和观察窗口，沿用保留失败记录的规则；本次不指定数值。
@@ -119,7 +119,7 @@
 ## 2026-11-08 负责人口头批准（更新）
 
 - 负责人原话：“乙包的，我全部批准”（2026-11-08 06:36 Asia/Shanghai，经 Lead 转述；完整范围与边界见 `eval/approvals/2026-11-08-owner-approval.md`）。
-- 本文件 status 变更：D-1、D-2、D-6、D-10 → `approved-by-owner`；D-3、D-4 → `pending-trial`；D-5、D-8 保持 `pending-approval`。
+- 本文件 status 变更（历史时点记录）：D-1、D-2、D-6、D-10 → `approved-by-owner`；D-3、D-4 → `pending-trial`；D-5、D-8 当时仍未批准——该历史状态已被后续委托代定与 v1.0 锁定全部取代。
 - 同日稍后：负责人选择 A（单人+agent）并授权搭 off profile 试跑，D-7、D-9 改为 `approved-by-owner`（仅限本轮开发试跑范围，见 `eval/approvals/2026-11-08-b5-trial-authorization.md`）。
 - 2026-11-08 委托 AI 代定参数后：D-3/D-4/D-5/D-8 已有 delegated 决策（见 `eval/approvals/2026-11-08-delegated-b5-parameters.md`）；仍未完成：PREREG §9 锁定、D-9 真实投递一致性校验、D-4 任务池/合格任务数核对、成本 100 元预算与 token 上限的可行性预检、真人评审者为 1 人+agent 降级。
 - 本节不改变 `eval/PREREG.md` 的任何数值/占位；PREREG 仍未锁定，`prereg-lock --check` 仍应失败。

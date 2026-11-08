@@ -33,6 +33,11 @@
 - `plan.not-declared`（deny）：`verification.requirePlan` 启用时，当前合同尚无计划即拒绝 write/edit 或 ready（计划存在但目标不在计划内走 `plan.outside-plan`）；shadow 下记录 `wouldDecision=deny`、`effectiveDecision=allow`。规则名 `plan.not-declared` 已在 `worker-mount.ts`/`evidence-verifier.ts` 实现。未启用 `requirePlan`（默认）时该规则不触发，无计划不拦截（C4.2 默认 optional，见 `project-config.md` §6）。
 - `check.retry-limit`：C4.5 检查重试达到上限（默认 3，按键 ticketId+contractHash+checkId 从已有记录推导）时拒绝启动；`reason` 含固定 blocked 报告格式（卡住的验收项/每次改了什么/输出要点/原因/需谁决定什么）。`version` 与字段不变，仅新增规则编号。
 - `ready.job-unavailable` / `ready.output-unverified`：A1-BIND/A1-OUT 专用拒绝——后台 Job 终态在 ready 时不可读或无 Job 接口；权威输出（Session 前台 stdout/stderr 或 Job `readAt`）不可得、`lossy`、被截断或与记录不一致。`version` 与字段不变，仅新增规则编号。
+- `repository-mismatch` / `base-missing` / `workspace-dirty` / `path-out-of-contract`（deny）：T14 `hephi_check` 启动前拒绝的四类稳定类别——工作区 origin 与冻结合同仓库不一致／冻结 base commit 不在工作区／工作树有已跟踪、暂存或未跟踪改动／变更文件超出合同 `allowedPaths`（一次 `git status --porcelain --untracked-files=all` 列全，含未跟踪文件）。`reason` 以类别码开头并附一行下一步建议；每次拒绝先写本日志再抛错，不创建检查记录。`version` 与字段不变，仅新增规则编号。
+- `ready.github-unavailable`（deny）：T14 ready 判定中 GitHub 不可用（`reason` 匹配 rate limit，如 `API rate limit exceeded`）——属于环境等待状态，不是检查失败，不计入 C4.5 重试计数。`version` 与字段不变，仅新增规则编号。
+- `ready.red-missing`（deny）：T17 红态门禁——version 3 且 `kind: "code"` 的任务合同缺少可用红态检查记录（无红态运行、最新红态退出码为 0、超时/取消/unknown、红态期间源码变化或记录不属于当前合同）时拒绝 ready；提示用 `hephi_check phase="red"` 先跑验收检查。`version` 与字段不变，仅新增规则编号。
+- `ready.red-impl-files`（deny）：T17 红态门禁——最新红态记录的 `before.headCommit` 与冻结合同 `baseSha` 之间的变更文件必须全部落在所有验收项 `tests` 并集内；红态 commit 混入实现代码即拒绝并列出文件。`version` 与字段不变，仅新增规则编号。
+- `ready.red-tests-changed`（deny）：T17 红态门禁——红态 commit 之后验收 `tests` 文件又被修改/删除/新增时红态证据失效，拒绝并列出文件。`version` 与字段不变，仅新增规则编号。
 - `asset.authorized`（allow，审计）：C1 授权命中的受保护验收资产变更——`reason` 记录验收项 id、文件与操作（`modify`/`delete`）；仅记录，不放宽其他判定。
 - `asset.modified`（allow，仅记录）：C1 清单外的已有测试被修改（受旧 `protect` 清单约束的文件）——只记录、不拦截；清单外删除仍按旧规则拒绝。
 - `asset.unauthorized-modify` / `asset.unauthorized-delete`（deny）：C1 受保护验收资产在缺少“同一验收项 + 精确文件 + 对应操作”授权时被修改/删除（write/edit 当场拒绝；shell/git 绕过由 ready 的最终 diff 复核拒绝）。`version` 与字段不变，仅新增规则编号。

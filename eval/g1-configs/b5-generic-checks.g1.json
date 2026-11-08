@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "requirePlan": true,
+  "protectedAssets": ["**/test/**", "**/tests/**"],
+  "checks": [
+    {
+      "id": "project-regression",
+      "kind": "test",
+      "purpose": "B5 generic narrowed check: pinned task bases cannot run the full project-regression suite (baseline data/package issues vary per base). Compile the backend app as a deterministic gate; behavioral correctness is evaluated by the task hidden test on the delivered head. (G1: unchanged; compileall never scans test directories, so it never includes acceptance/)",
+      "command": "sh",
+      "args": ["-c", "python3 -m compileall -q backend/app"],
+      "timeoutMs": 120000
+    },
+    {
+      "id": "acceptance",
+      "kind": "test",
+      "purpose": "G1 acceptance check (T08 §8 pattern): run only acceptance tests, JUnit report in this run directory. Assumes pytest is available and acceptance tests live under backend/tests/acceptance/ (created by T15 tasks; the directory does not exist at staging time).",
+      "command": "sh",
+      "args": ["-c", "python3 -m pytest backend/tests/acceptance -q --junitxml=\"$HEPHI_RUN_DIR/junit.xml\""],
+      "required": true,
+      "timeoutMs": 600000,
+      "assertionFailureTypes": ["AssertionError"]
+    }
+  ]
+}

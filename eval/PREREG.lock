@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "kind": "b1-prereg-lock",
+  "generator": "eval/prereg-lock.mjs",
+  "generatorVersion": "1.0.0",
+  "createdAt": "2026-11-08T19:10:30.685Z",
+  "lockStatus": "markers-cleared",
+  "ownerApproval": "not-verified-by-tool",
+  "note": "本锁只证明扫描时未发现未决标记；负责人书面批准仍以 eval/decisions-draft.md 与 PREREG §9 的记录为准。",
+  "inputOrder": [
+    "eval/PREREG.md",
+    "eval/decisions-draft.md"
+  ],
+  "inputs": [
+    {
+      "path": "eval/PREREG.md",
+      "sha256": "d14c8909c835a4a0df942dea5ad40531912e69d9203359e3263e89eec7956478",
+      "bytes": 14580
+    },
+    {
+      "path": "eval/decisions-draft.md",
+      "sha256": "627f99b6b71b9424029e84114d804cf457689133fde37b5e37bada2756d11c4e",
+      "bytes": 13903
+    }
+  ],
+  "preregSha256": "b9f2070f1850c1a5159982817db1491c0c2d7b7712eb40728fe86641470eee87",
+  "markerScan": {
+    "tokens": [
+      "N_TODO",
+      "ENV_TODO",
+      "pending-approval",
+      "PLACEHOLDER",
+      "TODO"
+    ],
+    "unresolvedCount": 0,
+    "filesScanned": [
+      "eval/PREREG.md",
+      "eval/decisions-draft.md"
+    ]
+  },
+  "decisions": {
+    "source": "eval/decisions-draft.md",
+    "count": 10,
+    "pendingApprovalCount": 0,
+    "entries": [
+      {
+        "decisionId": "D-1",
+        "title": "非劣效界值",
+        "status": "approved-by-owner"
+      },
+      {
+        "decisionId": "D-2",
+        "title": "主指标联合规则",
+        "status": "approved-by-owner"
+      },
+      {
+        "decisionId": "D-3",
+        "title": "成本上限",
+        "status": "approved-by-owner"
+      },
+      {
+        "decisionId": "D-4",
+        "title": "整体和分层样本量",
+        "status": "approved-by-owner"
+      },
+      {
+        "decisionId": "D-5",
+        "title": "环境不可用停止阈值",
+        "status": "approved-by-owner"
+      },
+      {
+        "decisionId": "D-6",
+        "title": "成本硬门槛或辅助",
+        "status": "approved-by-owner"
+      },
+      {
+        "decisionId": "D-7",
+        "title": "首轮仓库与模型范围",
+        "status": "approved-by-owner"
+      },
+      {
+        "decisionId": "D-8",
+        "title": "P4 shadow 可用性",
+        "status": "approved-by-owner"
+      },
+      {
+        "decisionId": "D-9",
+        "title": "off 任务卡投递",
+        "status": "approved-by-owner"
+      },
+      {
+        "decisionId": "D-10",
+        "title": "机械指标中的估算字段",
+        "status": "approved-by-owner"
+      }
+    ]
+  },
+  "warnings": [
+    "非 `approved` 的 decisions 状态：D-1=approved-by-owner, D-2=approved-by-owner, D-3=approved-by-owner, D-4=approved-by-owner, D-5=approved-by-owner, D-6=approved-by-owner, D-7=approved-by-owner, D-8=approved-by-owner, D-9=approved-by-owner, D-10=approved-by-owner（本工具不验证其含义，只记录）"
+  ],
+  "forcedOverwrite": true
+}

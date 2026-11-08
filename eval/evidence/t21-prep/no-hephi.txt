@@ -1,0 +1,6 @@
+=== hephi artifacts in off DSH_HOME state (expect none) ===
+ls: /tmp/hephi-off-b5/state/hephi: No such file or directory
+activation.json count:        0
+checks dirs count:        0
+decisions.jsonl count:        0
+hephi-name files in DSH_HOME:        2

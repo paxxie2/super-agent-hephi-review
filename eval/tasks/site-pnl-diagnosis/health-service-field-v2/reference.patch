@@ -1,0 +1,25 @@
+diff --git a/backend/app/main.py b/backend/app/main.py
+index bc6cbc8..fb772cb 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -112,6 +112,11 @@ def create_app(settings: Settings | None = None, *, seed: bool = True) -> FastAP
+     @app.get("/api/health", response_model=Health, tags=["health"])
+     def health() -> Any:
+         status = db_status(settings.db_path)
++        detail = None
++        if not status["ok"]:
++            # 对外固定文案，不泄露数据库内部错误；原始错误只写日志。
++            logger.warning("数据库不可用: %s", status["error"])
++            detail = "database unavailable"
+         payload = Health(
+             status="ok" if status["ok"] else "error",
+             db="ok" if status["ok"] else "error",
+@@ -119,7 +124,7 @@ def create_app(settings: Settings | None = None, *, seed: bool = True) -> FastAP
+             dataVersion=status["dataVersion"],
+             modelConfigured=settings.model_configured,
+             appVersion=APP_VERSION,
+-            detail=status["error"],
++            detail=detail,
+         )
+         if not status["ok"]:
+             return JSONResponse(status_code=503, content=payload.model_dump())

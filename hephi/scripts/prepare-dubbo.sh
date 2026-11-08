@@ -7,6 +7,22 @@ number=${DSH_SUPERAGENT_GITHUB_NUMBER:-}
 repo=${DSH_SUPERAGENT_GITHUB_REPOSITORY:?}
 workspace=${DSH_SUPERAGENT_DIR:?}
 ticket_name=${DSH_SUPERAGENT_NAME:?}
+contract=${HEPHI_STATE_DIR:?use the same stateDir as the mounted plugin}/hephi/$ticket_name/activation.json
+if [ -f "$contract" ]; then
+  # T11 replay: the frozen contract for this ticket already exists. Re-prepare must reuse it
+  # (never overwrite), so GitHub is not read again: no label, title, body, default-branch or
+  # base-sha query. The workspace check stays, but a missing checkout is an error here because
+  # recreating it would need the very GitHub reads this branch must skip.
+  [ -e "$workspace/.git" ] || {
+    echo "HEPHI contract exists but the workspace is missing: $workspace (re-prepare does not create it from GitHub; restore the workspace or remove the contract for a fresh activation)" >&2
+    exit 1
+  }
+  export HEPHI_ENABLED=1 HEPHI_REQUIRE_PULL_REQUEST=1
+  export HEPHI_REQUIRE_TASK=${HEPHI_REQUIRE_TASK:-1}
+  plugin_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+  exec node "$plugin_dir/lib/cli.mjs" prepare
+fi
+
 gh_cli=${HEPHI_GH_CLI:-gh}
 labels=$("$gh_cli" api "repos/$repo/issues/$number" --jq '.labels[].name')
 printf '%s\n' "$labels" | grep -Fxq 'hephi/delivery' || exit 0

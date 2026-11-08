@@ -267,21 +267,25 @@ describe('C4.2 write/edit interception against the plan', () => {
     } finally { mounted.dispose() }
   })
 
-  it('PT-09: re-prepare (new contract) makes the old plan ineffective for edits', async () => {
+  it('PT-09: re-prepare reuses the same contract, so the old plan stays effective for edits', async () => {
     const r = await repo()
     const stateDir = await mkdtemp(join(tmpdir(), 'hephi-plan-tool-state-'))
     cleanup.push(stateDir)
     await prepareActivation(env(stateDir, r.dir, r.baseSha))
     const before = await loadActivation(activationPath(stateDir, TICKET))
     await appendPlan(stateDir, TICKET, { contractHash: before.contractHash, files: ['src/app.js'] })
-    // Authorized re-prepare with a different baseRef => new contractHash.
-    await prepareActivation(env(stateDir, r.dir, r.baseSha, { baseRef: 'release' }))
+    // T11: re-prepare (even with different env) replays the frozen contract; the contractHash
+    // and the plan bound to it do not change.
+    const rerun = await prepareActivation(env(stateDir, r.dir, r.baseSha, { baseRef: 'release' }))
+    expect(rerun.enabled).toBe(true)
+    if (rerun.enabled) expect(rerun.reused).toBe(true)
     const after = await loadActivation(activationPath(stateDir, TICKET))
-    expect(after.contractHash).not.toBe(before.contractHash)
+    expect(after.contractHash).toBe(before.contractHash)
     const { fake, mounted } = await mount(stateDir, r.dir)
     try {
-      // Old plan does not include tests/keep.test.js and is for another contract: edit allowed.
-      expect(await fake.callbacks().preExecute!(editCall('tests/keep.test.js'), async () => ({ kind: 'allow' as const }))).toEqual({ kind: 'allow' })
+      // The reused contract still has the old plan, which does not include this file: denied.
+      expect(await fake.callbacks().preExecute!(editCall('tests/keep.test.js'), async () => ({ kind: 'allow' as const })))
+        .toMatchObject({ kind: 'deny', reason: expect.stringContaining('does not include tests/keep.test.js') })
     } finally { mounted.dispose() }
   })
 
@@ -377,7 +381,7 @@ describe('C4.2 write/edit interception against the plan', () => {
     } finally { mounted.dispose() }
   })
 
-  it('PT-16: requirePlan=true after re-prepare: the old contract plan is not effective, so edits need a new plan', async () => {
+  it('PT-16: re-prepare reuses the contract, so a declared plan stays effective (requirePlan=true)', async () => {
     const r = await repo()
     const stateDir = await mkdtemp(join(tmpdir(), 'hephi-plan-tool-state-'))
     cleanup.push(stateDir)
@@ -386,28 +390,32 @@ describe('C4.2 write/edit interception against the plan', () => {
     try {
       await planToolOf(fake)!.execute({ files: ['src/app.js'] }, planCall(['src/app.js']))
       expect(await fake.callbacks().preExecute!(editCall('src/app.js'), async () => ({ kind: 'allow' as const }))).toEqual({ kind: 'allow' })
-      // Authorized re-prepare with a different baseRef => new contractHash. A freshly mounted
-      // Worker binds the new contract and the old plan is stale for it (requirePlan stays on).
-      await prepareActivation(env(stateDir, r.dir, r.baseSha, { requirePlan: true, baseRef: 'release' }))
+      // T11: re-prepare replays the same contract; a freshly mounted Worker binds the same
+      // hash and the plan declared for it stays effective (no plan.not-declared).
+      const rerun = await prepareActivation(env(stateDir, r.dir, r.baseSha, { requirePlan: true, baseRef: 'release' }))
+      expect(rerun.enabled).toBe(true)
+      if (rerun.enabled) expect(rerun.reused).toBe(true)
       const remounted = await mount(stateDir, r.dir)
       try {
-        await expect(remounted.fake.callbacks().preExecute!(editCall('src/app.js'), async () => ({ kind: 'allow' as const })))
-          .resolves.toMatchObject({ kind: 'deny', reason: expect.stringContaining('plan.not-declared') })
-        expect((await decisions(stateDir)).filter(item => item.rule === 'plan.not-declared')).not.toHaveLength(0)
+        expect(await remounted.fake.callbacks().preExecute!(editCall('src/app.js'), async () => ({ kind: 'allow' as const }))).toEqual({ kind: 'allow' })
+        expect((await decisions(stateDir)).filter(item => item.rule === 'plan.not-declared')).toHaveLength(0)
       } finally { remounted.mounted.dispose() }
     } finally { mounted.dispose() }
   })
 
-  it('PT-12: the tool revalidates the mounted contract hash before recording', async () => {
+  it('PT-12: re-prepare reuses the contract, so the mounted plan tool keeps recording', async () => {
     const r = await repo()
     const stateDir = await mkdtemp(join(tmpdir(), 'hephi-plan-tool-state-'))
     cleanup.push(stateDir)
     await prepareActivation(env(stateDir, r.dir, r.baseSha))
     const { fake, mounted } = await mount(stateDir, r.dir)
     try {
-      // Authorized re-prepare behind the Worker's back: the mounted tool must stop.
-      await prepareActivation(env(stateDir, r.dir, r.baseSha, { baseRef: 'release' }))
-      await expect(planToolOf(fake)!.execute({ files: ['src/app.js'] }, planCall(['src/app.js']))).rejects.toThrow(/changed during this Worker/)
+      // T11: re-prepare behind the Worker's back does not change the contract hash, so the
+      // mounted tool (which revalidates the hash before recording) still works.
+      const rerun = await prepareActivation(env(stateDir, r.dir, r.baseSha, { baseRef: 'release' }))
+      expect(rerun.enabled).toBe(true)
+      if (rerun.enabled) expect(rerun.reused).toBe(true)
+      await expect(planToolOf(fake)!.execute({ files: ['src/app.js'] }, planCall(['src/app.js']))).resolves.toMatchObject({ files: ['src/app.js'] })
     } finally { mounted.dispose() }
   })
 })

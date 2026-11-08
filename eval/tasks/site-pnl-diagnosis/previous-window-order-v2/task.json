@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "taskId": "previous-window-order-v2",
+  "repo": "site-pnl-diagnosis",
+  "base": "1e166fbe2217ac378e5bb7062cd34a2da1e75e6f",
+  "category": "new-feature",
+  "referenceFix": "reference.patch",
+  "allowedFiles": [
+    "backend/app/domain/money.py"
+  ],
+  "issue": "issue.md",
+  "hiddenTest": "hidden-test.sh",
+  "review": "review.md",
+  "stagedSuitable": false,
+  "contamination": {
+    "mergedAfterTrainingCutoff": false,
+    "private": true,
+    "cutoff": null,
+    "notes": "B5 边界增强 fixture（非历史故障宣称）；训练截止未验证，保守记 false，不作去污染声明。来源仓库 paxxie2/site-pnl-diagnosis 为 GitHub 私有仓库。"
+  },
+  "checks": {
+    "baseMustFail": true,
+    "referenceMustPass": true
+  },
+  "environment": {
+    "offline": true,
+    "lockfile": "uv.lock",
+    "commandsMustMatchOffline": true
+  }
+}

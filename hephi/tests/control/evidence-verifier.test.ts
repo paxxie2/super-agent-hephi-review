@@ -50,6 +50,26 @@ function contract(dir: string, baseSha: string, allowedPaths = ['**'], requirePu
   }
 }
 
+/**
+ * T07: the frozen check command now carries HEPHI_RUN_DIR=<stateDir>/hephi/<ticketId>/checks/<runId>,
+ * so a synthetic Session command must be rebuilt with the same run directory. `setup()` registers its
+ * temporary state directory here; the contract identity is primary and the base commit is the fallback
+ * for contracts derived with `{ ...c }` (which lose the identity but keep workspace/ticket/base).
+ */
+const stateDirOf = new WeakMap<ActivationContract, string>()
+const stateDirByBase = new Map<string, string>()
+
+function registerStateDir(c: ActivationContract, stateDir: string): void {
+  stateDirOf.set(c, stateDir)
+  stateDirByBase.set(c.baseSha, stateDir)
+}
+
+/** The run directory the runner used for this record, or undefined for an unregistered base commit. */
+function runDirOf(c: ActivationContract, record: CheckRunRecord): string | undefined {
+  const stateDir = stateDirOf.get(c) ?? stateDirByBase.get(c.baseSha)
+  return stateDir === undefined ? undefined : checkRunDir(stateDir, c.ticketId, record.runId)
+}
+
 function outer(checkId: string): ToolExecution {
   return {
     callId: `outer-${checkId}` as never, rootCallId: `outer-${checkId}` as never, name: 'hephi_check',
@@ -75,7 +95,9 @@ function ready(workspace: string, prNumber?: number, sessionId: string = 'worker
 function boundSnapshot(sessionId: string, records: CheckRunRecord[], baseSha: string): SessionSnapshot {
   const events: SessionSnapshot['events'] = []
   for (const record of records) {
-    const command = checkCommand(baseSha, record.argv[0]!, record.argv.slice(1))
+    const stateDir = stateDirByBase.get(baseSha)
+    const command = checkCommand(baseSha, record.argv[0]!, record.argv.slice(1),
+      stateDir === undefined ? undefined : checkRunDir(stateDir, record.ticketId, record.runId))
     events.push({ seq: events.length, type: 'tool/call', data: { name: 'bash', callId: record.innerCallId, arguments: JSON.stringify({ command, workdir: record.cwd }) } })
     // A1-BIND branches on this structured value; A1-OUT re-hashes its stdout/stderr.
     events.push({ seq: events.length, type: 'tool/result', data: { message: { toolCallId: record.innerCallId, isError: false, content: [], value: foregroundValue() } } })
@@ -112,7 +134,7 @@ function callEvent(record: CheckRunRecord, contract: ActivationContract, seq: nu
     data: {
       name: over.name ?? 'bash', callId: over.callId ?? record.innerCallId,
       arguments: JSON.stringify({
-        command: over.command ?? checkCommand(contract.baseSha, definition.command, definition.args),
+        command: over.command ?? checkCommand(contract.baseSha, definition.command, definition.args, runDirOf(contract, record)),
         workdir: over.workdir ?? record.cwd,
       }),
     },
@@ -161,7 +183,7 @@ function jobRegisteredEvent(record: CheckRunRecord, contract: ActivationContract
   jobId?: string; owner?: string; command?: string; workdir?: string; withArguments?: boolean; rootCallId?: string; kind?: string
 } = {}): SessionEvent {
   const definition = contract.verification.checks.find(check => check.id === record.checkId)!
-  const command = over.command ?? checkCommand(contract.baseSha, definition.command, definition.args)
+  const command = over.command ?? checkCommand(contract.baseSha, definition.command, definition.args, runDirOf(contract, record))
   const data: any = {
     jobId: over.jobId ?? 'job-1', owner: over.owner ?? 'worker-session', kind: over.kind ?? 'bash',
     label: command, toolCall: { callId: record.innerCallId, rootCallId: over.rootCallId ?? record.callId },
@@ -222,6 +244,7 @@ async function setup() {
   const r = await repo(); const stateDir = await mkdtemp(join(tmpdir(), 'hephi-lean-'))
   cleanup.push(r.dir, stateDir)
   const c = contract(r.dir, r.baseSha)
+  registerStateDir(c, stateDir)
   const execute = (checkId: string, tools = nativeTools()) =>
     runCheck({ stateDir, contract: c, checkId, outer: outer(checkId), tools })
   const verify = () => createEvidenceVerifier({ stateDir })(c, ready(r.dir))

@@ -1,0 +1,25 @@
+diff --git a/backend/app/domain/money.py b/backend/app/domain/money.py
+index 61bb903..02b4790 100644
+--- a/backend/app/domain/money.py
++++ b/backend/app/domain/money.py
+@@ -98,3 +98,20 @@ def window_bounds(window: object) -> tuple[str, str]:
+ def datetime_with_tz(date_str: str, time_str: str = "00:00:00") -> datetime:
+     """构造 Asia/Shanghai 时区（+08:00）的 datetime，用于比较业务时间。"""
+     return datetime.fromisoformat(f"{date_str}T{time_str}+08:00")
++
++
++def window_months(start: str, end: str) -> list[str]:
++    """返回窗口覆盖的自然月列表（``YYYY-MM``，升序，含首尾）。
++
++    ``start > end`` 时返回空列表（与 ``date_range`` 的退化约定一致）。
++    """
++    start_date = parse_date(start)
++    end_date = parse_date(end)
++    if start_date > end_date:
++        return []
++    months: list[str] = []
++    cursor = date(start_date.year, start_date.month, 1)
++    while cursor <= end_date:
++        months.append(f"{cursor.year:04d}-{cursor.month:02d}")
++        cursor = date(cursor.year + (cursor.month // 12), (cursor.month % 12) + 1, 1)
++    return months

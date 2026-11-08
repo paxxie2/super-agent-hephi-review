@@ -1,0 +1,16 @@
+diff --git a/backend/app/main.py b/backend/app/main.py
+index bc6cbc8..1761a20 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -125,6 +125,11 @@ def create_app(settings: Settings | None = None, *, seed: bool = True) -> FastAP
+             return JSONResponse(status_code=503, content=payload.model_dump())
+         return payload
+ 
++    @app.get("/api/health/live", tags=["health"])
++    def health_live() -> dict[str, str]:
++        # liveness：只证明进程在服务；不查数据库、不依赖种子数据。
++        return {"status": "ok"}
++
+     app.include_router(api.sites.router)
+     app.include_router(api.diagnoses.router)
+     app.include_router(api.scenarios.router)

@@ -1,0 +1,68 @@
+diff --git a/backend/app/api/diagnoses.py b/backend/app/api/diagnoses.py
+index 90f02bf..36b0387 100644
+--- a/backend/app/api/diagnoses.py
++++ b/backend/app/api/diagnoses.py
+@@ -34,11 +34,12 @@ def create_diagnosis(
+ @router.get("/diagnoses", response_model=DiagnosisPage)
+ def list_diagnoses(
+     request: Request,
++    siteId: str | None = Query(None, min_length=1),
+     limit: int = Query(20, ge=1, le=100),
+     offset: int = Query(0, ge=0),
+ ) -> DiagnosisPage:
+     return diagnosis_service.get_diagnosis_page(
+-        str(request.app.state.db_path), limit, offset
++        str(request.app.state.db_path), limit, offset, siteId
+     )
+ 
+ 
+diff --git a/backend/app/services/diagnoses.py b/backend/app/services/diagnoses.py
+index 4f058e4..102ee76 100644
+--- a/backend/app/services/diagnoses.py
++++ b/backend/app/services/diagnoses.py
+@@ -543,21 +543,37 @@ def get_diagnosis(db_path: str, diagnosis_id: str) -> Diagnosis:
+         conn.close()
+ 
+ 
+-def list_diagnoses(db_path: str, limit: int, offset: int) -> tuple[list[Diagnosis], int]:
++def list_diagnoses(
++    db_path: str, limit: int, offset: int, site_id: str | None = None
++) -> tuple[list[Diagnosis], int]:
+     conn = connect(db_path)
+     try:
+-        total = int(conn.execute("SELECT COUNT(*) AS c FROM diagnoses").fetchone()["c"])
+-        rows = conn.execute(
+-            "SELECT * FROM diagnoses ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
+-            (limit, offset),
+-        ).fetchall()
++        if site_id is None:
++            total = int(conn.execute("SELECT COUNT(*) AS c FROM diagnoses").fetchone()["c"])
++            rows = conn.execute(
++                "SELECT * FROM diagnoses ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
++                (limit, offset),
++            ).fetchall()
++        else:
++            total = int(
++                conn.execute(
++                    "SELECT COUNT(*) AS c FROM diagnoses WHERE site_id = ?", (site_id,)
++                ).fetchone()["c"]
++            )
++            rows = conn.execute(
++                "SELECT * FROM diagnoses WHERE site_id = ? "
++                "ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?",
++                (site_id, limit, offset),
++            ).fetchall()
+         return [_row_to_diagnosis(conn, row) for row in rows], total
+     finally:
+         conn.close()
+ 
+ 
+-def get_diagnosis_page(db_path: str, limit: int, offset: int) -> DiagnosisPage:
+-    items, total = list_diagnoses(db_path, limit, offset)
++def get_diagnosis_page(
++    db_path: str, limit: int, offset: int, site_id: str | None = None
++) -> DiagnosisPage:
++    items, total = list_diagnoses(db_path, limit, offset, site_id)
+     return DiagnosisPage(items=items, total=total, limit=limit, offset=offset)
+ 
+ 

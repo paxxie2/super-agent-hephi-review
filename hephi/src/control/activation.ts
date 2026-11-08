@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { link, mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { parseVerificationConfig, type VerificationConfig } from '../contracts/checks.js'
@@ -63,7 +63,37 @@ type ContractHashInput = Omit<ActivationContract, 'contractHash' | 'executionMod
 
 export type ActivationResult =
   | { enabled: false; reason: 'not-requested' }
-  | { enabled: true; filePath: string; contract: ActivationContract }
+  /**
+   * T11: `reused` is true when prepare replayed an existing frozen contract for this ticket
+   * instead of creating one. A contract is written once per ticket and never overwritten:
+   * re-prepare keeps the same file, contractHash and mtime, so previous plan/check evidence
+   * still binds to it.
+   */
+  | { enabled: true; filePath: string; contract: ActivationContract; reused?: boolean }
+
+/** Writes the activation intent marker, tolerating an existing one. */
+async function writeActivationIntent(intentPath: string, ticketId: string): Promise<void> {
+  await mkdir(dirname(intentPath), { recursive: true })
+  try {
+    await writeFile(intentPath, `${ticketId}\n`, { flag: 'wx' })
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+  }
+}
+
+/**
+ * T11 replay branch: load and validate the frozen contract, require it to belong to this exact
+ * ticket, restore a missing intent marker (an interrupted earlier prepare), and return it as
+ * reused. Never writes the contract: a corrupt or mismatched contract throws instead.
+ */
+async function reuseActivation(filePath: string, ticketId: string, intentPath: string): Promise<ActivationResult> {
+  const contract = await loadActivation(filePath)
+  if (contract.ticketId !== ticketId) {
+    throw new Error(`HEPHI activation contract ${filePath} belongs to ticket ${contract.ticketId}; refusing to overwrite it for ${ticketId}`)
+  }
+  await writeActivationIntent(intentPath, ticketId)
+  return { enabled: true, filePath, contract, reused: true }
+}
 
 
 // ---- C4.6 prepare-time offline environment enforcement ----------------------
@@ -570,7 +600,17 @@ export function defaultStateDir(configured?: string): string {
 export async function prepareActivation(env: NodeJS.ProcessEnv = process.env): Promise<ActivationResult> {
   if (env.HEPHI_ENABLED !== '1') return { enabled: false, reason: 'not-requested' }
 
-  // Reject an invalid mode before writing an intent or a partial contract.
+  const ticketId = safeTicketId(required(env, 'DSH_SUPERAGENT_TICKET'))
+  const stateDir = env.HEPHI_STATE_DIR?.trim() || DEFAULT_STATE_DIR
+  const intentPath = activationIntentPath(stateDir, ticketId)
+  const filePath = activationPath(stateDir, ticketId)
+  // T11: replay, do not overwrite. After an interrupted prepare (or a retried hook), the
+  // frozen contract is revalidated and reused; it is never rewritten. Only a ticket without
+  // a contract goes on to freeze one below.
+  if (await activationExists(filePath)) return reuseActivation(filePath, ticketId, intentPath)
+  await writeActivationIntent(intentPath, ticketId)
+  // Reject an invalid mode before writing a partial contract (the intent marker above is
+  // already enough to tell an attempted activation from a normal task).
   const enforcement = parseEnforcement(env.HEPHI_ENFORCEMENT)
   // A1-K5: the binding requirement is frozen into the contract, not read at ready time.
   // Default stays false until A2 confirms the host's inner-call event shape; a host
@@ -579,15 +619,6 @@ export async function prepareActivation(env: NodeJS.ProcessEnv = process.env): P
   const executionMode = env.HEPHI_ISSUE_TITLE !== undefined
     ? parseIssueExecutionMode(env.HEPHI_ISSUE_TITLE, env.HEPHI_EXECUTION_MODE)
     : parseExecutionMode(env.HEPHI_EXECUTION_MODE)
-  const ticketId = safeTicketId(required(env, 'DSH_SUPERAGENT_TICKET'))
-  const stateDir = env.HEPHI_STATE_DIR?.trim() || DEFAULT_STATE_DIR
-  const intentPath = activationIntentPath(stateDir, ticketId)
-  await mkdir(dirname(intentPath), { recursive: true })
-  try {
-    await writeFile(intentPath, `${ticketId}\n`, { flag: 'wx' })
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-  }
   const verification = await loadVerificationFromEnv(env)
   const task = taskOf(env, verification)
   const base: Omit<ActivationContract, 'contractHash'> = {
@@ -616,10 +647,18 @@ export async function prepareActivation(env: NodeJS.ProcessEnv = process.env): P
   const authorizationIssue = authorizationProblem({ allowedPaths: base.allowedPaths, task })
   if (authorizationIssue) throw new Error(`invalid HEPHI task authorizations: ${authorizationIssue}`)
   const contract: ActivationContract = { ...base, contractHash: contractHash(base) }
-  const filePath = activationPath(stateDir, ticketId)
-  const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}`
+  const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}-${randomUUID()}`
   await writeFile(temporary, `${JSON.stringify(contract, null, 2)}\n`, { flag: 'wx' })
-  await rename(temporary, filePath)
+  try {
+    // `link` publishes the fully written file atomically and fails with EEXIST if another
+    // prepare process won the race; only one process can create the contract.
+    await link(temporary, filePath)
+  } catch (error) {
+    await unlink(temporary).catch(() => { /* Section below removes it when linked. */ })
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return reuseActivation(filePath, ticketId, intentPath)
+    throw error
+  }
+  await unlink(temporary).catch(() => { /* The contract is linked; the temporary name is gone. */ })
   return { enabled: true, filePath, contract }
 }
 

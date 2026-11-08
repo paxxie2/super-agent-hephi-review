@@ -1,0 +1,35 @@
+{
+ "canonical_card": {
+  "path": "eval/tasks/site-pnl-diagnosis/previous-window-order/issue.md",
+  "sha256": "f91d1b6afb6e1d97c6132c7537afd06b548c058886248b01405e0e095b0d3497",
+  "bytes": 657
+ },
+ "off": {
+  "issue_url": "https://github.com/paxxie2/b5-off-site-pnl/issues/15",
+  "labels": [],
+  "state": "open",
+  "stored_body_bytes": 666,
+  "stored_body_sha256": "a54c17e945e6543ea40170c8bbc766c6dfba1571216f896db0d292fce356ed15",
+  "card_portion_sha256": "f91d1b6afb6e1d97c6132c7537afd06b548c058886248b01405e0e095b0d3497",
+  "card_portion_bytes": 657,
+  "submitted_body_bytes": 666,
+  "submitted_body_sha256": "a54c17e945e6543ea40170c8bbc766c6dfba1571216f896db0d292fce356ed15"
+ },
+ "native": {
+  "issue_url": "https://github.com/paxxie2/b5-native-site-pnl/issues/2",
+  "labels": [
+   "hephi/delivery"
+  ],
+  "stored_body_bytes": 1336,
+  "stored_body_sha256": "47eb70026a0cd4fa8f6ce1a65980d21385059e94586ff14ffdbf1c2bda02b772",
+  "card_portion_sha256": "f91d1b6afb6e1d97c6132c7537afd06b548c058886248b01405e0e095b0d3497",
+  "card_portion_bytes": 657,
+  "hephi_contract_suffix_bytes": 670
+ },
+ "taskCard.sha256": "f91d1b6afb6e1d97c6132c7537afd06b548c058886248b01405e0e095b0d3497",
+ "taskCard.sha256.off": "f91d1b6afb6e1d97c6132c7537afd06b548c058886248b01405e0e095b0d3497",
+ "taskCard.sha256.native": "f91d1b6afb6e1d97c6132c7537afd06b548c058886248b01405e0e095b0d3497",
+ "verifiedEqual": true,
+ "off_body_is_prefix_of_native": true,
+ "group_trace_hits_in_off_body": []
+}

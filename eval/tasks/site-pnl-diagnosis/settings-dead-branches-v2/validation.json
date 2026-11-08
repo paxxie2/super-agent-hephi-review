@@ -1,0 +1,99 @@
+{
+  "mode": "full",
+  "taskDir": "/Users/zm/repos/hephi-dev-base/eval/tasks/site-pnl-diagnosis/settings-dead-branches-v2",
+  "structure": {
+    "ok": true,
+    "errors": [],
+    "warnings": [
+      "environment.offline=true：lockfile 未在任务目录/本地仓库找到（uv.lock）；完整模式会强制校验，dry-run 无法确认仓库锁文件"
+    ]
+  },
+  "checks": {
+    "environment": {
+      "offline": true,
+      "lockfile": "uv.lock",
+      "found": true,
+      "ok": true
+    },
+    "base": {
+      "expected": "fail",
+      "runs": [
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 30, in <module>\nAssertionError: from_env must call the dotenv entry point unconditionally\n",
+          "outputSha256": "d033badd0550f2467c394366612df84f959ec527c403bbb5150586828e7abfd4"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 30, in <module>\nAssertionError: from_env must call the dotenv entry point unconditionally\n",
+          "outputSha256": "d033badd0550f2467c394366612df84f959ec527c403bbb5150586828e7abfd4"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 30, in <module>\nAssertionError: from_env must call the dotenv entry point unconditionally\n",
+          "outputSha256": "d033badd0550f2467c394366612df84f959ec527c403bbb5150586828e7abfd4"
+        }
+      ],
+      "codes": [
+        1,
+        1,
+        1
+      ],
+      "consistent": true,
+      "ok": true
+    },
+    "scope": {
+      "allowedFiles": [
+        "backend/app/settings.py"
+      ],
+      "changedFiles": [
+        "backend/app/settings.py"
+      ],
+      "outside": [],
+      "ok": true
+    },
+    "reference": {
+      "expected": "pass",
+      "runs": [
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: dotenv entry reads real files with correct priority and fallbacks\n",
+          "stderr": "",
+          "outputSha256": "82e6a4a86aa99ba3a202b0b6369de61a22729123d553ccc8773798e7897ae07b"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: dotenv entry reads real files with correct priority and fallbacks\n",
+          "stderr": "",
+          "outputSha256": "82e6a4a86aa99ba3a202b0b6369de61a22729123d553ccc8773798e7897ae07b"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: dotenv entry reads real files with correct priority and fallbacks\n",
+          "stderr": "",
+          "outputSha256": "82e6a4a86aa99ba3a202b0b6369de61a22729123d553ccc8773798e7897ae07b"
+        }
+      ],
+      "codes": [
+        0,
+        0,
+        0
+      ],
+      "consistent": true,
+      "ok": true
+    }
+  },
+  "ok": true,
+  "baseSha": "8d2ec5858ed3071eae598e5afb30b069807ce598",
+  "repo": "/Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis",
+  "repeats": 3
+}

@@ -78,7 +78,8 @@
 - 路径：`<stateDir>/hephi/<ticketId>/plan.jsonl`；只追加，不重写历史版本。
 - 字段（每行一个版本）：`version: 1`、`at`（ISO）、`contractHash`、`files: string[]`（工作区相对精确路径或 glob，
   与 `allowedPaths` 同 glob 语义；非空、禁绝对路径/`..`/空段/控制字符）、可选 `note`（≤4000 字符，无控制字符）。
-- 绑定：计划只对**同一 `contractHash`** 生效；重新 prepare 后旧计划既不阻塞也不作为 ready 依据。
+- 绑定：计划只对**同一 `contractHash`** 生效；**同一 ticket 重新 prepare 会复用同一合同（T11：合同只创建一次、不覆盖，
+  `contractHash` 与文件 mtime 不变）**，因此旧计划继续有效；只有新 ticket（或人工移除合同后重新激活）才产生新 `contractHash`。
 - 语义：`files` 声明预期改动；ready 复核最终 diff 必须落在计划并集内；**插件不判断计划合理性**。
 - `requirePlan`（verification 配置 additive，**M1 修复批次已引入 `verification.requirePlan`；以 M1 最终代码为准**）：
   - 启用时 fail-closed：当前合同没有计划 → 拒绝 write/edit 或 ready，规则 `plan.not-declared`；

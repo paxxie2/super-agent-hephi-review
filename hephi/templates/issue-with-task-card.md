@@ -43,7 +43,7 @@
 
 ## 2. 任务卡写法（hephi-task 块）
 
-- `version`：当前为 1（需要"受保护验收资产授权"时用 version 2，并给 `authorizes`）。
+- `version`：支持 1/2/3——1 为基础任务卡；2 增加受保护验收资产授权（`authorizes`/`protectedAssets`）；3 增加必填 `kind`、必填 `outOfScope` 和验收项 `tests`/`cases`（示例见 §6）。
 - `goal`：一句可核对的目标；不要写"优化一下"这类不可验收的话。
 - `acceptance[]`：每项含
   - `id`：稳定标识（如 AC1）；
@@ -71,3 +71,61 @@
 2. 每个 acceptance 的 `check` 存在且为 test 类（构建类不能当验收）。
 3. 每个 paths 都在合同 allowedPaths 内；没有受保护测试的未授权修改。
 4. 失败时报告 blocked 的固定格式：卡住的验收项、每次改了什么、输出要点、判断原因、需要谁决定什么。
+
+## 6. 任务卡 v3 示例（T13/T16）
+
+v3 在 v1/v2 基础上新增以下要求：
+
+- `kind`：**必填**，只能是 `code` / `refactor` / `doc`，用来区分"改代码 / 行为保持型重构 / 只改文档"；
+- `outOfScope`：**必填**，不再默认空数组；
+- 每个 `acceptance[]` 项可写 `tests`（相对路径数组，**`kind` 为 `code` 时每个验收项都必填**）和 `cases`（用例名数组，可选）。
+
+v1/v2 卡不接受 `kind`/`tests`/`cases`（会被拒绝）；已有 v1 示例见 §1。
+
+### 6.1 代码缺陷修复（kind: code）
+
+```hephi-task
+{
+  "version": 3,
+  "kind": "code",
+  "goal": "total() 返回两个参数之和（当前错误地返回差）",
+  "outOfScope": [
+    "不得修改 pricing 规则、模块布局或其他文件",
+    "不得合并 PR；失败如实报告 blocked，不绕过检查"
+  ],
+  "acceptance": [
+    {
+      "id": "AC1",
+      "text": "total(2, 3) 返回 5，project-regression 通过",
+      "check": "project-regression",
+      "paths": ["src/price.js"],
+      "tests": ["tests/price.test.js"],
+      "cases": ["两个正数相加", "含零的输入"]
+    }
+  ]
+}
+```
+
+### 6.2 行为保持型重构（kind: refactor）
+
+```hephi-task
+{
+  "version": 3,
+  "kind": "refactor",
+  "goal": "把 total() 的求和逻辑提取为私有函数，不改变对外行为",
+  "outOfScope": [
+    "不改变 total() 的返回值、异常与函数签名",
+    "不修改测试或其他文件"
+  ],
+  "acceptance": [
+    {
+      "id": "AC1",
+      "text": "现有测试全绿，total() 对相同输入的结果与重构前一致",
+      "check": "project-regression",
+      "paths": ["src/price.js"]
+    }
+  ]
+}
+```
+
+> 说明：`refactor`/`doc` 的验收项不强制 `tests`；只有在需要点名具体用例时才写 `tests`/`cases`。所有路径都是相对仓库根的路径，不使用绝对路径或 `..`。

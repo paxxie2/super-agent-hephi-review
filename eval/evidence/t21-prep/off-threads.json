@@ -1,0 +1,67 @@
+[
+ {
+  "key": "github:15",
+  "value": {
+   "key": "github:15",
+   "ref": {
+    "source": "github",
+    "id": "15"
+   },
+   "createdAt": "2026-11-08T16:06:48.193Z",
+   "subscriptions": [
+    "7dfffe7ab3d6b2aaf7404bbbbea833e2"
+   ],
+   "correlated": [],
+   "pending": [],
+   "meta": {
+    "title": "[B5] previous-window-order",
+    "label": "#15 [B5] previous-window-order",
+    "facts": {
+     "number": {
+      "value": "#15"
+     }
+    },
+    "number": 15,
+    "isPr": false,
+    "url": "https://github.com/paxxie2/b5-off-site-pnl/issues/15"
+   },
+   "lastAt": "2026-11-08T16:06:07.000Z"
+  }
+ },
+ {
+  "key": "github:16",
+  "value": {
+   "key": "github:16",
+   "ref": {
+    "source": "github",
+    "id": "16"
+   },
+   "createdAt": "2026-11-08T16:08:29.093Z",
+   "subscriptions": [
+    "7dfffe7ab3d6b2aaf7404bbbbea833e2"
+   ],
+   "correlated": [],
+   "pending": [],
+   "meta": {
+    "number": 16,
+    "isPr": true,
+    "url": "https://github.com/paxxie2/b5-off-site-pnl/pull/16",
+    "prAuthor": "paxxie2",
+    "facts": {
+     "ci": {
+      "label": "CI",
+      "value": {
+       "zh": "通过",
+       "en": "passed"
+      }
+     },
+     "number": {
+      "value": "#16"
+     }
+    },
+    "title": "fix(domain): raise ValueError for reversed previous_window",
+    "label": "#16 fix(domain): raise ValueError for reversed previous_window"
+   }
+  }
+ }
+]

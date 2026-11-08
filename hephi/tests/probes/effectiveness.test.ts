@@ -46,7 +46,7 @@ describe('scope creep and refactoring', () => {
     const p = await project()
     await fix(p.dir); await writeFile(join(p.dir, 'src/m05.js'), 'exports.value5 = () => 5\n'); await commitAll(p.dir, 'fix + tidy')
     const result = await deliver(p)
-    expect(result.statuses.tests).toContain('changed path outside contract')
+    expect(result.statuses.tests).toContain('path-out-of-contract')
     expect(result.ready).toMatchObject({ ok: false, reason: expect.stringContaining('outside the task scope: src/m05.js') })
   })
 

@@ -1,32 +1,36 @@
 # B5 运行手册（RUNBOOK）— ROADMAP-95 工作线 B
 
-状态：**骨架 v0.1（2026-11-07）· 供 review**。本手册规定第一轮对照实验（Q1：同一任务卡 off vs native）
+状态：**v0.2（2026-11-09）· 供 review**。本手册规定第一轮对照实验（Q1：同一任务卡 原系统组 legacy-system vs 整包组 full-package，PREREG v1.2 口径）
 的分组定义、任务卡投递、计划生成约束、运行记录、盲评与统计流程。
 
 > 本版**没有执行任何真实运行**；所有宿主相关能力（drain 字段、hostVersion、实载 SHA 回读、P4 shadow）
 > 均沿用 ROADMAP-95 现状核对与计划审查（`ROADMAP95-plan-review.md`）的“未验证/blocked”口径。
 > 本手册不改变 R3.7 blocked 与 P8 部分完成的结论。
 
-## 1. 名词与分组定义（统一口径，避免 off/native/shadow 混用）
+## 1. 名词与分组定义（统一口径；off/native 为旧 B5 历史值，新运行禁用）
 
 | 名词 | 定义 | 记录字段 |
 | --- | --- | --- |
-| **native** | 挂载赫菲插件（enforce 模式），Issue 走 `hephi/delivery` → Ticket → Worker，产生合同与检查记录 | `arm=native` |
-| **off** | **不挂载赫菲**（不打 `hephi/delivery` 标签、不挂载插件），但使用与 native **逐字节相同**的任务卡 | `arm=off` |
+| **full-package（整包组）** | 以 v1.2 锁定的新制品全集运行（HEPHI `055491d` + SA `d0e64d6` + G1 配置），Issue 走 `hephi/delivery` → Ticket → Worker，产生合同与检查记录 | `arm=full-package` |
+| **legacy-system（原系统组）** | 以 T01 冻结制品运行（HEPHI `6d24e1b` + SA `62d7d53` + 原配置，含旧赫菲），使用与整包组**逐字节相同**的任务卡 | `arm=legacy-system` |
 | **staged** | 挂载赫菲且使用 staged 执行方式；**只用于 Q3 单独实验**、只用 `staged-suitable` 任务 | `arm=staged` |
-| **shadow** | 执行机制，不是分组：Worker 完全不受影响，同时按同一套规则记录违规（P4）。**只允许 `arm=off` + `executionMode=shadow`** | `executionMode=shadow` |
+| **shadow** | 执行机制，不是分组：Worker 完全不受影响，同时按同一套规则记录违规（P4）。**只允许对照组 + `executionMode=shadow`**；现行 PREREG v1.2 锁定 `executionMode=normal`、**shadow 未启用**，且 schema 当前只允许 `arm=off` 配 shadow（现行 `arm=legacy-system` 只是未来条件说明，见下方边界） | `executionMode=shadow` |
 
 硬性规则：
 
 1. `arm` 是**分析分组**，`executionMode` 是**执行机制**；两者不得互相替代。
-2. off 组严禁出现赫菲合同/Ticket/检查记录；出现即该运行无效（记录保留，标 `invalid`）。
-3. shadow 只有在 P4 影子模式经负责人确认可用后才可启用；不可用时 off 组按普通模式运行，
+2. 原系统组严禁出现任何新制品（新插件 SHA/新提示/新配置）；出现即该运行无效（记录保留，标 `invalid`）。旧 B5 的"off 不挂赫菲"规则自 v1.2 废弃（原系统组合法包含旧赫菲）。
+3. shadow 只有在 P4 影子模式经负责人确认可用后才可启用（PREREG v1.2 已锁定 `executionMode=normal`，**现行未启用**）；不可用时对照组按普通模式运行，
    `executionMode=normal`，并在报告中注明“未用 shadow，机械指标可能不同口径”。
-4. 不得为了凑数把 staged 运行并入 native 分析。
+4. 不得为了凑数把 staged 运行并入 native 分析（旧 B5 用 `native/staged`；现行分组见上表）。
+
+> **shadow 现行边界（PREREG v1.2，2026-11-09 已 LOCKED）**：v1.2 锁定 `executionMode=normal`，**shadow 未启用**；上面第 3 条只是“未来若负责人确认可用”的条件说明，本版**不实现** shadow。两处边界如实写明：
+> 1. 手册层面：即使将来启用，也只允许用于对照组；现行对照组的分析分组是 `legacy-system`，旧 B5 `arm=off` 属历史口径（本手册不再声称 `legacy-system` 现在就能用 shadow）。
+> 2. schema 层面：`eval/schema/run.schema.json` 的 `allOf` 目前**只允许 `arm=off` 配 `executionMode=shadow`**（该文件末段：“只有 off 组允许以 shadow 机制运行”）；因此现行 `legacy-system` 实际上无法按 shadow 记录，启用 shadow 需先升 schema 与 PREREG 版本，本轮不做。
 
 ## 2. 实验轮次与范围
 
-- **第一轮（必做，Q1）**：同一任务集，off vs native；本手册只覆盖这一轮。
+- **第一轮（必做，Q1）**：同一任务集，legacy-system vs full-package；本手册只覆盖这一轮。
 - Q2（普通需求 vs 任务卡需求，都不开赫菲）与 Q3（native vs staged）是**后续单独实验**，
   另行修订 RUNBOOK；只做过 Q1 时报告不得声称 Q2/Q3 已验证。
 - 仓库/模型范围按 `eval/PREREG.md` §10 D-7 决定；**每个仓库/模型/类别分层分别估计样本量**，
@@ -37,14 +41,14 @@
 | 前置 | 要求 | 现状 |
 | --- | --- | --- |
 | 任务集 | 所有任务通过 `node eval/check-task.mjs <task> --repo ... --base ...`（B2 双向 3 次一致） | 工具骨架已就绪（本目录），任务集待建 |
-| PREREG | `eval/PREREG.md` 已锁定（数值、版本、seed、requirements、任务清单哈希） | **草稿，未锁定** |
+| PREREG | `eval/PREREG.md` 已锁定（数值、版本、seed、requirements、任务清单哈希） | **已 LOCKED v1.2（2026-11-09）**；"草稿，未锁定"是 v0.1（2026-11-08 前）的历史表述，仅留档 |
 | 统计环境 | `pip install -r eval/stats/requirements.txt`（固定版本）成功 | 骨架自测在隔离 venv 通过（见 §12） |
 | 盲评准备 | 两名标注者、rubric 已校准（开发集 kappa ≥ 0.7） | rubric 骨架已就绪，标注者待定 |
 | 宿主 | 实载版本回读/正式 hostVersion/排空字段语义等外部解阻项 | **未解阻**；R3.7 blocked。**不得把 R3.7/P8 当作已通过** |
 | 环境隔离 | 全新检出目录 + 全新 Session；构建只在隔离克隆执行 | 运行纪律见 §6 |
 
-> **P4 shadow 现状**：`hephi` 侧影子模式代码存在（P4），但 off 组要用 shadow 需要宿主配置与
-> 负责人确认；未确认前 off 组按普通模式记录，机械指标口径差异写进报告。
+> **P4 shadow 现状**：`hephi` 侧影子模式代码存在（P4），但对照组要用 shadow 需要宿主配置与
+> 负责人确认；未确认前对照组按普通模式记录，机械指标口径差异写进报告。
 
 ## 4. 任务卡投递机制（**计划审查 P1-1，必须 review**）
 
@@ -52,26 +56,27 @@
 
 - 每个任务的任务卡就是 `eval/tasks/<repo>/<taskId>/issue.md` 的**逐字节内容**。
 - 运行时对任务卡计算 `sha256`，写入 `run.taskCard.sha256`；
-  **off 组与 native 组必须使用同一个 sha256**（`taskCard.verifiedEqual=true`）。
+  **原系统组与整包组必须使用同一个 sha256**（`taskCard.verifiedEqual=true`）。
 - 任务卡中**不得**出现组别信息（“这是对照组/实验组”、分支名、赫菲字样）；
   导出盲评材料前 `eval/label/export.mjs` 会再次扫描并 fail-closed。
 
-### 4.2 native 组投递
+### 4.2 整包组（full-package）投递
 
 1. 以任务卡原文作为 Issue body 创建 Issue，打 `hephi/delivery` 标签；
 2. 等 Trigger → Ticket → Worker，按赫菲合同流程运行；
 3. 记录 Issue 编号/URL、`taskCard.sha256`、`deliveryMechanism=issue-body`、`verifiedEqual=true`。
 
-### 4.3 off 组投递（本版方案：**固定 Trigger 文本注入同一任务卡**）
+### 4.3 原系统组（legacy-system）投递（v0.2：**同文 Issue body 注入同一任务卡**）
 
-off 组不挂插件、不产生赫菲合同。为了让 Worker 收到的任务文本与 native 组**完全一致**，采用以下
-两种等效机制（按宿主能力选一种，**默认 A**）：
+原系统组以 T01 冻结制品运行（**含旧赫菲**：HEPHI `6d24e1b` + SA `62d7d53` + 原配置），
+旧版"off 不挂插件/无赫菲合同"要求自 PREREG v1.2 废弃。投递只要求：Worker 收到的任务文本与
+整包组（full-package）**完全一致**。机制按宿主能力选一种，**默认 A**：
 
 **A. 同文 Issue body（首选）**
 
-- 用与 native **完全相同的任务卡原文**创建 Issue（同一正文、同一标题前缀），**不打** `hephi/delivery`；
-- 让该 Issue 走 Super Agent 的原生 Issue → Ticket → Worker 路径；
-- 记录 `deliveryMechanism=issue-body`、`taskCard.sha256`（必须与 native 相同）。
+- 用与整包组**完全相同的任务卡原文**创建 Issue（同一正文、同一标题前缀）；标签/合同行为遵循原系统自身配置，不人为增删；
+- 让该 Issue 走该实例的原生 Issue → Ticket → Worker 路径；
+- 记录 `deliveryMechanism=issue-body`、`taskCard.sha256`（必须与整包组相同）。
 
 **B. 固定 Trigger 文本注入（宿主要求显式 Trigger 时）**
 
@@ -79,19 +84,19 @@ off 组不挂插件、不产生赫菲合同。为了让 Worker 收到的任务�
   正文为：
 
   ```text
-  [ROADMAP95-B5-OFF run=<runId>]
+  [ROADMAP95-GROUP-RUN run=<runId>]  <!-- 组别信息不得写入正文；标记仅含 runId -->
   <issue.md 全文，逐字节复制，不做任何改写>
   ```
 
 - 除该模板外**不得**添加任何说明/提示（尤其不得写“这是对照组/请比平时更谨慎”等改变行为的文字）；
 - 记录 `deliveryMechanism=trigger-text`、`taskCard.sha256`；
-- 复核者必须核对：native Issue body 的 sha256 == off Trigger 注入文本中任务卡部分的 sha256。
+- 复核者必须核对：整包组 Issue body 的 sha256 == 原系统组注入文本中任务卡部分的 sha256。
 
 **C. task-file 注入（兜底，需负责人批准）**
 
 - 仅当 A/B 都不可行时：把同一任务卡文件挂到 Worker 工作区（路径记录在 `taskCard.sourcePath`），
   并让 Worker 只读该文件作为任务来源；
-- 记录 `deliveryMechanism=task-file`；必须人工核对文件 sha256 与 native 任务卡一致。
+- 记录 `deliveryMechanism=task-file`；必须人工核对文件 sha256 与整包组任务卡一致。
 
 ### 4.4 投递一致性校验（每次运行必做）
 
@@ -99,20 +104,26 @@ off 组不挂插件、不产生赫菲合同。为了让 Worker 收到的任务�
 | --- | --- | --- |
 | 任务卡同文 | 两组的 `taskCard.sha256` 相等；`verifiedEqual=true` | 运行无效，不得进入效果分析 |
 | 无组别痕迹 | 任务卡/注入文本扫描（“对照组/实验组/赫菲/hephi/分支名”） | 重做投递；不得带痕迹运行 |
-| off 组无赫菲 | 检查该 Issue/Ticket 无 `hephi/delivery`、无合同、无检查记录 | 运行无效，记录原因 |
-| 注入文本唯一 | off Issue 中除任务卡模板外无额外指令评论 | 运行无效 |
+| 原系统组无新制品 | 该实例实载 SHA/提示/配置与 §1 冻结值一致（含旧赫菲；出现新制品即无效） | 运行无效，记录原因 |
+| 注入文本唯一 | 原系统组 Issue 中除任务卡模板外无额外指令评论 | 运行无效 |
 
-> **为什么不能“off 组直接人写一句简短需求”**：那会同时改变任务内容和需求表达，混淆 Q1 的
-> 因果解释；P1-1 的核心就是保证两组的**唯一差异是是否挂载赫菲**。方案 B 的固定 Trigger 文本
+> **为什么不能“对照组直接人写一句简短需求”**：那会同时改变任务内容和需求表达，混淆 Q1 的
+> 因果解释；P1-1 的核心是保证两组的**唯一差异是制品版本**（原系统=旧赫菲+旧 SA+原配置，整包=新制品全集）；同一批次投递、同一任务卡 sha256。方案 B 的固定 Trigger 文本
 > 必须由负责人 review 后方可使用（见 §11 D-2）。
 
 ## 5. 运行计划生成约束（B5）
+
+> **当前口径（PREREG v1.2，2026-11-09 起）**：分组为 `legacy-system`（原系统组）vs `full-package`（整包组），锁定 `seed=20261108`；计划生成器**已提供**（`eval/b5-plan.mjs`，见 §13.2），当前命令：
+> ```sh
+> node eval/b5-plan.mjs --tasks <tasks.json> --seed 20261108 [--groups legacy-system,full-package] --out <plan.json>
+> ```
+> 下文 §5 正文中的 `off`/`native`、`seed 20261107`、`preregVersion v0.1-locked` 以及“不提供计划生成脚本”均为 **v0.1 / 旧 B5 历史表述**，仅作存档，正式计划以上块命令为准（历史事实不改写）。
 
 生成计划时必须满足（正式实验前由负责人确认一份 `plan.json`）：
 
 1. **固定种子**：`seed` 在 PREREG 中锁定并写入每一条运行记录；随机排序/重复抽样都用该种子，
    任何人不得事后更换。
-2. **两组交错**：同一任务的 off 与 native 运行**相邻安排**；任务之间随机排序（用固定种子）；
+2. **两组交错**（旧 B5 口径，对应现行 `legacy-system`/`full-package`）：同一任务的 off 与 native 运行**相邻安排**；任务之间随机排序（用固定种子）；
    先 off 还是先 native 也由种子随机决定。禁止“先跑完所有 off 再跑 native”。
 3. **20% 重复**：正式实验中随机抽 20% 的任务，每组各重复一次（`repetition=2`）；
    重复运行也必须邻近原运行（同一任务内），并报告重复一致性（见 §8）。
@@ -122,7 +133,7 @@ off 组不挂插件、不产生赫菲合同。为了让 Worker 收到的任务�
 6. **两个组同一时间窗**：交错运行的目的就是避免模型服务/时间段只影响一组；若无法交错（例如宿主
    只能按组批量跑），必须在报告中说明并视为混杂因素。
 
-计划文件示例（`<batch>/plan.json`，骨架约定）：
+计划文件示例（**历史示例：旧 B5 口径**，`seed=20261107`；正式计划见上方“当前口径”命令）：
 
 ```json
 {
@@ -139,8 +150,8 @@ off 组不挂插件、不产生赫菲合同。为了让 Worker 收到的任务�
 }
 ```
 
-> 本版只定义约束与计划格式；**不提供**计划生成脚本（避免在骨架里固化尚未 review 的抽样策略）。
-> 计划生成可在 B5 实施时补 `eval/b5-plan.mjs`，并用 `seed` 复现。
+> **历史表述（v0.1，已过时）**：v0.1 当时只定义约束与计划格式、不提供计划生成脚本；
+> 当前已提供 `eval/b5-plan.mjs`（见 §13.2），正式计划用上方“当前口径”命令生成，并用 `seed=20261108` 复现。
 
 ## 6. 运行记录与环境纪律
 
@@ -206,7 +217,7 @@ python3 -m venv .venv && .venv/bin/pip install -r eval/stats/requirements.txt
 | 情况 | 处理 |
 | --- | --- |
 | 环境不可用 | 记录原因、标 `validationEnvironment.status=unavailable`；运行不计效果，计成本/稳定性 |
-| 任务卡不一致 / off 组出现赫菲 | 运行标无效，保留记录并在报告“排除”节列出原因 |
+| 任务卡不一致 / 原系统组（legacy-system）出现新制品 | 运行标无效，保留记录并在报告“排除”节列出原因。PREREG v1.2：原系统组合法包含旧赫菲；旧 B5 的“off 组出现赫菲即无效”规则**已废弃**（历史口径，仅存档） |
 | 隐藏测试/参考修复失败（接入期） | 按 B2 分类（依赖/提取/环境/任务本身），保留原始失败并计入接入成本 |
 | 宿主故障或恢复不安全 | 立即停止本批运行，按 PREREG §8 停止规则处理，保留现场 |
 | 模型/宿主/插件版本变化 | 记录实际值；未记录的变化视为批次瑕疵，必要时作废该批 |
@@ -218,7 +229,9 @@ python3 -m venv .venv && .venv/bin/pip install -r eval/stats/requirements.txt
 - 独立复现按 B7：从测试集随机抽子集重跑并盲评，判定“方向一致、CI 有重叠”，不要求达到原门槛；
 - 复现报告由复现者撰写，原样收录。
 
-## 11. 待 review / 负责人决策项
+## 11. 待 review / 负责人决策项（历史记录）
+
+> **现状（PREREG v1.2，2026-11-09 已 LOCKED）**：下表是 v0.1（2026-11-08）时的待决清单，**已全部关闭**（D-1/D-2/D-6/D-7/D-9/D-10 负责人批准；D-3/D-4/D-5/D-8 委托代定；见 `eval/PREREG.md` §10）。保留原文仅作历史记录，不再是当前待办；“PREREG 草稿未锁定/D-4 待批”等说法只适用于 v0.1 时点。
 
 | # | 决策项 | 关联 |
 | --- | --- | --- |
@@ -246,7 +259,8 @@ node eval/label/import.mjs --self-test
 ## 13. B6 机械指标与 B5 计划生成器（2026-11-07 追加）
 
 > 本节为**追加引用**，不修改 §1–§12 的既有约束与数值。对应 B6（ab-metrics 清理）与 B5
-> （运行计划生成器）；D-4/D-6 仍待负责人 review（见 §11 / `eval/PREREG.md` §10）。
+> （运行计划生成器）。**状态说明（2026-11-09）**：D-4 已由 PREREG v1.2 锁定（`eval/PREREG.md` §10；
+> “D-4 仍待负责人 review”是 v0.1 历史表述）；D-6 的 ab-metrics 删除实施项见 §13.1；§11 的待决清单整体为历史记录。
 
 ### 13.1 `eval/ab-metrics.mjs` 只提取机械指标
 
@@ -266,9 +280,15 @@ node eval/label/import.mjs --self-test
 ### 13.2 `eval/b5-plan.mjs` 运行计划生成器
 
 ```sh
+# 当前口径（PREREG v1.2，2026-11-09 起）：分组 legacy-system vs full-package，seed=20261108
+node eval/b5-plan.mjs --tasks <tasks.json> --seed 20261108 \
+     [--groups legacy-system,full-package] [--repeat-fraction 0.2] \
+     (--out <plan.json> | --dry-run)
+node eval/b5-plan.mjs --self-test
+
+# 历史示例（旧 B5 口径，勿用于正式计划，仅留档）：--groups off,native、--seed <int>
 node eval/b5-plan.mjs --tasks <tasks.json> --seed <int> [--groups off,native] \
      [--repeat-fraction 0.2] (--out <plan.json> | --dry-run)
-node eval/b5-plan.mjs --self-test
 ```
 
 - `tasks.json` 格式（数组或 `{"tasks": [...]}`）：
@@ -283,9 +303,10 @@ node eval/b5-plan.mjs --self-test
   `repeatFraction`/`taskSet`/`repeats`/`order`/`summary`；`order` 每条含 `order`、`runId`、
   `taskId`、`repo`、`category`、`group`（同时给出 `arm`）、`repeat`、`repetition`、`seed`。
 - 参数约束：未知参数/未知组/重复 taskId/非法 seed/非法 fraction/缺 `--out` 且非 `--dry-run` 均
-  exit 2；`staged` 只用于 Q3 的 `native,staged` 单独实验，禁止与 `off` 混合。
+  exit 2；`staged` 只用于 Q3 单独实验，禁止与 `legacy-system` 混合（旧 B5 写作 `native,staged`、`off`，属历史口径）。
 - **本计划只是运行输入，不代表任何运行已完成**；seed、重复比例与样本量最终仍由 PREREG 锁定
-  （`eval/PREREG.md` §9/§12，D-4 待负责人）；`plan.json` 随批次存档（§10）。
+  （`eval/PREREG.md` §9/§10：v1.2 已锁定 seed=20261108、67 配对/13 重复；“D-4 待负责人”是 v0.1 历史表述）；
+  `plan.json` 随批次存档（§10）。
 
 ## 14. B3 运行记录工具 `eval/record-run.mjs`（2026-11-08 追加）
 
@@ -333,3 +354,16 @@ node eval/record-run.mjs --self-test   # 26 条断言；全部在 mkdtemp 临时
 
 > **未验证项（必须保留）**：B3-05 只是**派生夹具，不是正式实验记录**；本仓库目前**没有甲（A 侧）
 > 交付的真实 run**，因此本工具及其自测不能证明任何正式实验记录或对照实验结论。与 §12 口径一致。
+
+## 15. T03 部署前置三条规则（2026-11-08 追加）
+
+> 本节为**追加规则**，不修改 §1–§14 的既有约束与数值。部署检查脚本 `scripts/deploy-check.sh`
+> 只读核对下列前置；任一不满足则不得升级插件/部署。
+
+1. **有 HEPHI 工单不升级插件**：`/orchestrator/api/tickets`（或探测到的可用 tickets 端点）中存在
+   运行/等待/blocked/待修复的 HEPHI 工单时，不得升级插件或部署新版本；先清空未决工单。接口不可达
+   时同样视为无法确认，按失败处理并记录 `FAIL:unreachable` 与 curl 退出码，不得猜测为空。
+2. **本期不配置审批人**：`project-config/*.json` 中不得出现 `approvers` 配置；当前口径为不配置审批人
+   （`eval/daily/APPEALS.md` 的人工复核流程另行约定，不代表审批人配置）。
+3. **由人合并 PR**：Worker/Agent 不启用 auto-merge（提示中未命名具体 merge CLI 时由人合并每个 PR）；
+   本期的 PR 合并由人执行，Agent 不得代合并、不得代批。

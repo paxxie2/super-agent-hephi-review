@@ -1,0 +1,272 @@
+diff --git a/.gitignore b/.gitignore
+index 44c73a2..3a6a804 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -18,6 +18,9 @@ web/e2e/.auth/
+ 
+ # Local runtime data and secrets
+ data/
++# 运行期数据目录仍整体忽略，但源码包 backend/app/data/ 必须重新纳入
++!/backend/app/data/
++!/backend/app/data/**/*.py
+ *.db
+ *.db-wal
+ *.db-shm
+diff --git a/backend/app/data/__init__.py b/backend/app/data/__init__.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/backend/app/data/loader.py b/backend/app/data/loader.py
+new file mode 100644
+index 0000000..7c931f8
+--- /dev/null
++++ b/backend/app/data/loader.py
+@@ -0,0 +1,249 @@
++"""源数据只读加载（T1）。
++
++- 只读取当前 ``data_version``（app_meta.data_version，缺省 constants.DATA_VERSION）。
++- ``load_site_data`` 除请求窗口外，额外加载紧邻前期（``previous_window``）记录，
++  供 ``evaluate_rules`` 计算客流/转化变化；``SiteData.range_start/range_end`` 仍是请求窗口。
++- 覆盖清单读取该点位全部分日期（数据版本内），使任意子窗口都能判断完整性与比较期。
++- 源记录 id 原样保留（证据需要引用）。
++"""
++
++from __future__ import annotations
++
++from app.constants import DATA_VERSION, DATASET_END_DATE, DATASET_START_DATE
++from app.db import connect, get_meta
++from app.domain.models import (
++    BusinessHour,
++    CoverageInfo,
++    Device,
++    DeviceHour,
++    MaintenanceFee,
++    Order,
++    PaymentFee,
++    Refund,
++    RentContract,
++    ShareContract,
++    SiteData,
++    SiteInfo,
++    SlotFault,
++    TrafficDay,
++)
++from app.domain.money import previous_window
++
++
++def _current_data_version(conn: object) -> str:
++    return get_meta(conn, "data_version") or DATA_VERSION  # type: ignore[arg-type]
++
++
++def _dataset_bounds(conn: object) -> tuple[str, str]:
++    start = get_meta(conn, "dataset_start") or DATASET_START_DATE  # type: ignore[arg-type]
++    end = get_meta(conn, "dataset_end") or DATASET_END_DATE  # type: ignore[arg-type]
++    return start, end
++
++
++def _site_from_row(row: object) -> SiteInfo:
++    return SiteInfo(
++        id=row["id"],  # type: ignore[index]
++        name=row["name"],  # type: ignore[index]
++        city=row["city"],  # type: ignore[index]
++        address=row["address"],  # type: ignore[index]
++        case_label=row["case_label"],  # type: ignore[index]
++        planned_capacity=row["planned_capacity"],  # type: ignore[index]
++        data_version=row["data_version"],  # type: ignore[index]
++    )
++
++
++def load_sites(db_path: str) -> list[SiteInfo]:
++    conn = connect(db_path)
++    try:
++        version = _current_data_version(conn)
++        rows = conn.execute(
++            "SELECT * FROM sites WHERE data_version = ? ORDER BY id", (version,)
++        ).fetchall()
++        return [_site_from_row(row) for row in rows]
++    finally:
++        conn.close()
++
++
++def get_site_info(site_id: str, db_path: str) -> SiteInfo | None:
++    conn = connect(db_path)
++    try:
++        version = _current_data_version(conn)
++        row = conn.execute(
++            "SELECT * FROM sites WHERE id = ? AND data_version = ?", (site_id, version)
++        ).fetchone()
++        return _site_from_row(row) if row else None
++    finally:
++        conn.close()
++
++
++def load_site_data(site_id: str, start_date: str, end_date: str, db_path: str) -> SiteData:
++    """按站点 + 窗口加载源数据；未知点位抛 ``ValueError``。"""
++    conn = connect(db_path)
++    try:
++        version = _current_data_version(conn)
++        dataset_start, dataset_end = _dataset_bounds(conn)
++        site_row = conn.execute(
++            "SELECT * FROM sites WHERE id = ? AND data_version = ?", (site_id, version)
++        ).fetchone()
++        if site_row is None:
++            raise ValueError(f"unknown site: {site_id}")
++        site = _site_from_row(site_row)
++
++        # 比较期记录也加载（客流/转化变化规则需要），但受数据集范围约束。
++        comparison_start, _ = previous_window(start_date, end_date)
++        load_start = max(comparison_start, dataset_start)
++        load_end = min(end_date, dataset_end)
++        query_start = min(load_start, load_end) if load_start <= load_end else load_start
++
++        def by_date_rows(table: str) -> list[object]:
++            if query_start > load_end:
++                return []
++            return conn.execute(
++                f"SELECT * FROM {table} WHERE site_id = ? AND data_version = ? "
++                "AND business_date BETWEEN ? AND ? ORDER BY business_date, id",
++                (site_id, version, query_start, load_end),
++            ).fetchall()
++
++        orders = [
++            Order(
++                id=row["id"], site_id=row["site_id"], business_time=row["business_time"],
++                business_date=row["business_date"], amount_cents=row["amount_cents"],
++                is_paid_rental=bool(row["is_paid_rental"]),
++            )
++            for row in by_date_rows("orders")
++        ]
++        refunds = [
++            Refund(
++                id=row["id"], site_id=row["site_id"], order_id=row["order_id"],
++                business_time=row["business_time"], business_date=row["business_date"],
++                amount_cents=row["amount_cents"],
++            )
++            for row in by_date_rows("refunds")
++        ]
++        traffic = [
++            TrafficDay(
++                id=row["id"], site_id=row["site_id"], business_date=row["business_date"],
++                visitors=row["visitors"],
++            )
++            for row in by_date_rows("traffic_daily")
++        ]
++        business_hours = [
++            BusinessHour(
++                id=row["id"], site_id=row["site_id"], business_date=row["business_date"],
++                open_minute=row["open_minute"], close_minute=row["close_minute"],
++            )
++            for row in by_date_rows("business_hours")
++        ]
++        device_hours = [
++            DeviceHour(
++                id=row["id"], site_id=row["site_id"], device_id=row["device_id"],
++                business_date=row["business_date"], hour=row["hour"], status=row["status"],
++                planned_capacity=row["planned_capacity"],
++            )
++            for row in by_date_rows("device_hours")
++        ]
++        slot_faults = [
++            SlotFault(
++                id=row["id"], site_id=row["site_id"], device_id=row["device_id"],
++                business_date=row["business_date"], hour=row["hour"],
++                faulted_slots=row["faulted_slots"],
++            )
++            for row in by_date_rows("slot_faults")
++        ]
++        maintenance = [
++            MaintenanceFee(
++                id=row["id"], site_id=row["site_id"], business_time=row["business_time"],
++                business_date=row["business_date"], amount_cents=row["amount_cents"],
++                description=row["description"],
++            )
++            for row in by_date_rows("maintenance_fees")
++        ]
++        payment_fees = [
++            PaymentFee(
++                id=row["id"], site_id=row["site_id"], order_id=row["order_id"],
++                business_date=row["business_date"], amount_cents=row["amount_cents"],
++            )
++            for row in by_date_rows("payment_fees")
++        ]
++
++        devices = [
++            Device(
++                id=row["id"], site_id=row["site_id"], name=row["name"],
++                purchase_cost_cents=row["purchase_cost_cents"],
++                depreciation_months=row["depreciation_months"],
++                in_service_date=row["in_service_date"],
++                planned_capacity=row["planned_capacity"],
++            )
++            for row in conn.execute(
++                "SELECT * FROM devices WHERE site_id = ? AND data_version = ? ORDER BY id",
++                (site_id, version),
++            ).fetchall()
++        ]
++
++        rent_contracts = [
++            RentContract(
++                id=row["id"], site_id=row["site_id"], effective_start=row["effective_start"],
++                effective_end=row["effective_end"], monthly_rent_cents=row["monthly_rent_cents"],
++                contract_version=row["contract_version"],
++            )
++            for row in conn.execute(
++                "SELECT * FROM rent_contracts WHERE site_id = ? AND data_version = ? "
++                "AND effective_end >= ? AND effective_start <= ? ORDER BY effective_start, id",
++                (site_id, version, start_date, end_date),
++            ).fetchall()
++        ]
++        share_contracts = [
++            ShareContract(
++                id=row["id"], site_id=row["site_id"], effective_start=row["effective_start"],
++                effective_end=row["effective_end"], rate_bps=row["rate_bps"],
++                contract_version=row["contract_version"],
++            )
++            for row in conn.execute(
++                "SELECT * FROM share_contracts WHERE site_id = ? AND data_version = ? "
++                "AND effective_end >= ? AND effective_start <= ? ORDER BY effective_start, id",
++                (site_id, version, start_date, end_date),
++            ).fetchall()
++        ]
++
++        expected: dict[str, set[str]] = {}
++        for row in conn.execute(
++            "SELECT source_type, business_date FROM coverage "
++            "WHERE site_id = ? AND data_version = ? AND expected = 1",
++            (site_id, version),
++        ).fetchall():
++            expected.setdefault(row["source_type"], set()).add(row["business_date"])
++        coverage = CoverageInfo(
++            dataset_start=dataset_start, dataset_end=dataset_end, expected=expected
++        )
++
++        return SiteData(
++            site=site,
++            range_start=start_date,
++            range_end=end_date,
++            orders=orders,
++            refunds=refunds,
++            traffic=traffic,
++            business_hours=business_hours,
++            devices=devices,
++            device_hours=device_hours,
++            slot_faults=slot_faults,
++            rent_contracts=rent_contracts,
++            share_contracts=share_contracts,
++            maintenance=maintenance,
++            payment_fees=payment_fees,
++            coverage=coverage,
++        )
++    finally:
++        conn.close()
++
++
++def dataset_bounds(db_path: str) -> tuple[str, str]:
++    """读取数据集自然日边界（app_meta，缺省 constants）。"""
++    conn = connect(db_path)
++    try:
++        return _dataset_bounds(conn)
++    finally:
++        conn.close()
++
++
++__all__ = ["load_sites", "get_site_info", "load_site_data", "dataset_bounds"]

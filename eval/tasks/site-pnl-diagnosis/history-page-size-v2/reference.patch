@@ -1,0 +1,29 @@
+diff --git a/backend/app/schemas.py b/backend/app/schemas.py
+index e7e91dc..03dccbb 100644
+--- a/backend/app/schemas.py
++++ b/backend/app/schemas.py
+@@ -199,6 +199,7 @@ class DiagnosisPage(BaseModel):
+     total: int
+     limit: int
+     offset: int
++    hasMore: bool
+ 
+ 
+ class CreateDiagnosisRequest(BaseModel):
+diff --git a/backend/app/services/diagnoses.py b/backend/app/services/diagnoses.py
+index 4f058e4..2e8a862 100644
+--- a/backend/app/services/diagnoses.py
++++ b/backend/app/services/diagnoses.py
+@@ -558,7 +558,11 @@ def list_diagnoses(db_path: str, limit: int, offset: int) -> tuple[list[Diagnosi
+ 
+ def get_diagnosis_page(db_path: str, limit: int, offset: int) -> DiagnosisPage:
+     items, total = list_diagnoses(db_path, limit, offset)
+-    return DiagnosisPage(items=items, total=total, limit=limit, offset=offset)
++    # 分页元数据：是否还有下一页；末页或越界 offset 时为 False。
++    has_more = offset + len(items) < total
++    return DiagnosisPage(
++        items=items, total=total, limit=limit, offset=offset, hasMore=has_more
++    )
+ 
+ 
+ def list_evidence(

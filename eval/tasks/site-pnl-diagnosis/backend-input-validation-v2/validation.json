@@ -1,0 +1,194 @@
+{
+  "mode": "full",
+  "taskDir": "/Users/zm/repos/hephi-dev-base/eval/tasks/site-pnl-diagnosis/backend-input-validation-v2",
+  "structure": {
+    "ok": true,
+    "errors": [],
+    "warnings": [
+      "environment.offline=true：lockfile 未在任务目录/本地仓库找到（uv.lock）；完整模式会强制校验，dry-run 无法确认仓库锁文件"
+    ]
+  },
+  "checks": {
+    "environment": {
+      "offline": true,
+      "lockfile": "uv.lock",
+      "found": true,
+      "ok": true
+    },
+    "base": {
+      "expected": "fail",
+      "runs": [
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 100, in <module>\nAssertionError: error response must point at the unknown field: {\"code\": \"VALIDATION_ERROR\", \"fieldErrors\": {\"siteId\": \"Field required\"}, \"message\": \"请求参数不合法\"}\n",
+          "outputSha256": "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd",
+          "normalizedSha256": "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 100, in <module>\nAssertionError: error response must point at the unknown field: {\"code\": \"VALIDATION_ERROR\", \"fieldErrors\": {\"siteId\": \"Field required\"}, \"message\": \"请求参数不合法\"}\n",
+          "outputSha256": "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd",
+          "normalizedSha256": "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 100, in <module>\nAssertionError: error response must point at the unknown field: {\"code\": \"VALIDATION_ERROR\", \"fieldErrors\": {\"siteId\": \"Field required\"}, \"message\": \"请求参数不合法\"}\n",
+          "outputSha256": "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd",
+          "normalizedSha256": "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd"
+        }
+      ],
+      "codes": [
+        1,
+        1,
+        1
+      ],
+      "outputSha256": [
+        "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd",
+        "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd",
+        "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd"
+      ],
+      "normalizedSha256": [
+        "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd",
+        "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd",
+        "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd"
+      ],
+      "consistent": true,
+      "failureClasses": [
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        },
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        },
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        }
+      ],
+      "validFailureClasses": [
+        "target-assertion-failed",
+        "target-symbol-missing"
+      ],
+      "normalization": {
+        "version": 3,
+        "scope": "stdout+stderr",
+        "rules": [
+          "CRLF/CR → LF",
+          "行首日志时间戳（可带 [] 或 \" - \" 分隔）只替换时间本身为 <log-timestamp>，保留日志级别与正文",
+          "仅日志元数据行上的关联 ID 键值（requestId/traceId/spanId/pid/correlationId 等）→ <dynamic>",
+          "AssertionError/assert/actual=/expected= 等业务断言行内的键值（含 requestId）不归一化；timestamp/createdAt 等业务值一律不归一化",
+          "裸值、actual=/expected= 之后的值、普通文本中的时间/UUID 不归一化（业务结果差异必须保留）"
+        ],
+        "note": "C02：级别、正文与业务断言负载保留；只有已确认的日志时间戳与日志元数据上下文被归一化。原始 stdout/stderr 与 outputSha256 不删除。"
+      },
+      "ok": true
+    },
+    "scope": {
+      "allowedFiles": [
+        "backend/app/schemas.py"
+      ],
+      "patchPaths": [
+        "backend/app/schemas.py"
+      ],
+      "filesystemChanges": [
+        "backend/app/schemas.py"
+      ],
+      "changedFiles": [
+        "backend/app/schemas.py"
+      ],
+      "outside": [],
+      "ok": true
+    },
+    "reference": {
+      "expected": "pass",
+      "runs": [
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: unknown request fields are rejected and named (ASGI behavior)\n",
+          "stderr": "",
+          "outputSha256": "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031",
+          "normalizedSha256": "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: unknown request fields are rejected and named (ASGI behavior)\n",
+          "stderr": "",
+          "outputSha256": "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031",
+          "normalizedSha256": "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: unknown request fields are rejected and named (ASGI behavior)\n",
+          "stderr": "",
+          "outputSha256": "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031",
+          "normalizedSha256": "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031"
+        }
+      ],
+      "codes": [
+        0,
+        0,
+        0
+      ],
+      "outputSha256": [
+        "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031",
+        "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031",
+        "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031"
+      ],
+      "normalizedSha256": [
+        "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031",
+        "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031",
+        "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031"
+      ],
+      "consistent": true,
+      "normalization": {
+        "version": 3,
+        "scope": "stdout+stderr",
+        "rules": [
+          "CRLF/CR → LF",
+          "行首日志时间戳（可带 [] 或 \" - \" 分隔）只替换时间本身为 <log-timestamp>，保留日志级别与正文",
+          "仅日志元数据行上的关联 ID 键值（requestId/traceId/spanId/pid/correlationId 等）→ <dynamic>",
+          "AssertionError/assert/actual=/expected= 等业务断言行内的键值（含 requestId）不归一化；timestamp/createdAt 等业务值一律不归一化",
+          "裸值、actual=/expected= 之后的值、普通文本中的时间/UUID 不归一化（业务结果差异必须保留）"
+        ],
+        "note": "C02：级别、正文与业务断言负载保留；只有已确认的日志时间戳与日志元数据上下文被归一化。原始 stdout/stderr 与 outputSha256 不删除。"
+      },
+      "ok": true
+    }
+  },
+  "normalization": {
+    "version": 3,
+    "scope": "stdout+stderr",
+    "rules": [
+      "CRLF/CR → LF",
+      "行首日志时间戳（可带 [] 或 \" - \" 分隔）只替换时间本身为 <log-timestamp>，保留日志级别与正文",
+      "仅日志元数据行上的关联 ID 键值（requestId/traceId/spanId/pid/correlationId 等）→ <dynamic>",
+      "AssertionError/assert/actual=/expected= 等业务断言行内的键值（含 requestId）不归一化；timestamp/createdAt 等业务值一律不归一化",
+      "裸值、actual=/expected= 之后的值、普通文本中的时间/UUID 不归一化（业务结果差异必须保留）"
+    ],
+    "note": "C02：级别、正文与业务断言负载保留；只有已确认的日志时间戳与日志元数据上下文被归一化。原始 stdout/stderr 与 outputSha256 不删除。"
+  },
+  "isolation": {
+    "reset": "每次运行前 git reset --hard <baseSha> + git clean -ffdx；base 与 reference 阶段彼此隔离，重复运行也重置",
+    "baseReset": true,
+    "referenceReset": true,
+    "repeatsReset": true
+  },
+  "ok": true,
+  "baseSha": "e00f338b098546adc40156dc15b4b6559e19835d",
+  "repo": "/Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis",
+  "repeats": 3
+}
