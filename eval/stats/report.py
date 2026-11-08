@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 from dataclasses import dataclass, field
 
@@ -104,6 +105,17 @@ DEFAULT_COST_CAPS = {
     "very_slow_share_max": 0.20,
 }
 
+# S02：PREREG v1.3 LOCKED 的冻结实验条件（§1 Q1 / §7.5 / §9）。
+# HEPHI/SA 以锁定短 SHA 为准（SA d0e64d6 只记录了 7 位，按前缀核对；其余为完整 SHA）。
+LOCKED_MODEL_ID = "deepseek-flash"
+LOCKED_ARTIFACTS = {
+    "control": {"hephi": "6d24e1b39b75948b02c7dbd5fbac3e1af3c5ff80", "sa": "62d7d53723e5841eca5e02b151c1b48653650ea4"},
+    "treatment": {"hephi": "055491d016078b6d92eaa4d95364b097938e58fc", "sa": "d0e64d6"},
+}
+# S06：PREREG §5 单次运行停止线（达到任一下限即停）。
+HARD_STOP_MINUTES = 60.0
+HARD_STOP_TOKENS = 3_000_000
+
 
 # ---- 数据整理 ---------------------------------------------------------------
 
@@ -138,6 +150,13 @@ class Run:
     acceptance_invalid: bool
     test_weakening: bool | None
     label_kappa: float | None
+    labelers: list[str] = field(default_factory=list)
+    label_present: bool = False
+    model_temperature: object = None
+    host_version: str | None = None
+    plugin_loaded: str | None = None
+    plugin_candidate: str | None = None
+    plugin_readback: str | None = None
     faults: list[str] = field(default_factory=list)
 
 
@@ -156,9 +175,211 @@ def _require(record: dict, path: str, kind: type):
     return value
 
 
+SHORT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,63}$")
+SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+DELIVERIES = ("ready-pr-created", "blocked", "timeout", "failed")
+ARMS = ("legacy-system", "full-package", "off", "native", "staged")
+IMPLEMENTATION_VERDICTS = ("none", "has-defect", "unlabeled")
+
+
+def _is_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+
+
+def _is_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def record_contract_errors(record: dict) -> list[str]:
+    """S01：统计入口的完整字段契约（与 run.schema.json 的 required/类型/枚举/数值下限一致）。
+
+    缺失/类型错/枚举非法/数值非法一律拒绝或保留 unknown，不把缺失默认成有利值。
+    """
+    if not isinstance(record, dict):
+        return ["每条运行记录必须是对象"]
+    errors: list[str] = []
+
+    def get(path: str, *, required: bool = True):
+        current = record
+        for part in path.split("."):
+            if not isinstance(current, dict) or part not in current:
+                if required:
+                    errors.append(f"缺少字段：{path}")
+                return None
+            current = current[part]
+        return current
+
+    def expect(path: str, ok: bool, detail: str):
+        if not ok:
+            errors.append(f"字段 {path} 非法：{detail}")
+
+    def require_string(path: str, *, nullable: bool = False):
+        value = get(path)
+        if value is None:
+            if not nullable and not any(item == f"缺少字段：{path}" for item in errors):
+                errors.append(f"字段 {path} 不可为 null")
+            return
+        expect(path, isinstance(value, str) and value != "", f"期望非空字符串，实际 {type(value).__name__}")
+
+    def require_bool(path: str):
+        value = get(path)
+        expect(path, isinstance(value, bool), f"期望 boolean，实际 {type(value).__name__}")
+
+    def require_int(path: str, *, minimum: int | None = None, nullable: bool = False):
+        value = get(path, required=not nullable)
+        if value is None:
+            if not nullable and not any(item == f"缺少字段：{path}" for item in errors):
+                errors.append(f"字段 {path} 不可为 null")
+            return
+        expect(path, _is_int(value), f"期望 integer，实际 {type(value).__name__}")
+        if _is_int(value) and minimum is not None:
+            expect(path, value >= minimum, f"必须 >= {minimum}，实际 {value}")
+
+    def require_number(path: str, *, minimum: float | None = None, nullable: bool = False):
+        value = get(path, required=not nullable)
+        if value is None:
+            if not nullable and not any(item == f"缺少字段：{path}" for item in errors):
+                errors.append(f"字段 {path} 不可为 null")
+            return
+        expect(path, _is_number(value), f"期望有限数字，实际 {type(value).__name__}")
+        if _is_number(value) and minimum is not None:
+            expect(path, float(value) >= minimum, f"必须 >= {minimum}，实际 {value}")
+
+    def require_sha(path: str, pattern, *, nullable: bool = False):
+        require_string(path, nullable=nullable)
+        value = get(path)
+        if isinstance(value, str):
+            expect(path, bool(pattern.match(value)), "不是合法 SHA（小写十六进制）")
+
+    require_int("schemaVersion")
+    expect("schemaVersion", get("schemaVersion") == 1, "必须为 1")
+    for field in ("runId", "batch", "taskId"):
+        require_string(field)
+        value = get(field)
+        if isinstance(value, str):
+            expect(field, bool(SHORT_ID_RE.match(value)), "必须匹配 ^[a-z0-9][a-z0-9._-]{1,63}$")
+    require_string("repo")
+    require_sha("base", SHA40_RE)
+    require_sha("head", SHA40_RE)
+    arm = get("arm")
+    expect("arm", arm in ARMS, f"必须是 {ARMS}")
+    execution_mode = get("executionMode")
+    expect("executionMode", execution_mode in ("normal", "shadow"), "必须是 normal/shadow")
+    require_int("repetition", minimum=1)
+    require_int("seed")
+    require_string("startedAt")
+    require_string("endedAt")
+    require_number("wallClockSeconds", minimum=0)
+    require_bool("timeout")
+    category = get("category", required=False)
+    expect("category", category is None or category in ("defect-fix", "new-feature", "behavior-preserving-refactor", "cross-module", "staged-suitable", "unknown"), "category 枚举非法")
+
+    model = get("model")
+    expect("model", isinstance(model, dict), "必须是对象")
+    if isinstance(model, dict):
+        expect("model.id", isinstance(model.get("id"), str) and model.get("id") != "", "id 必须是非空字符串")
+        provider = model.get("provider", "<missing>")
+        expect("model.provider", provider is None or isinstance(provider, str), "provider 必须是字符串或 null")
+        parameters = model.get("parameters")
+        expect("model.parameters", isinstance(parameters, dict), "必须是对象")
+        temperature = parameters.get("temperature") if isinstance(parameters, dict) else None
+        expect("model.parameters.temperature", temperature == "uncontrolled" or _is_number(temperature), "必须是 number 或 uncontrolled")
+        expect("model.parametersSource", model.get("parametersSource") in ("host-config", "run-config", "unavailable"), "必须 host-config/run-config/unavailable")
+
+    host = get("host")
+    expect("host", isinstance(host, dict), "必须是对象")
+    if isinstance(host, dict):
+        expect("host.version", isinstance(host.get("version"), str) and host.get("version") != "", "version 必须是非空字符串")
+
+    plugin = get("plugin")
+    expect("plugin", isinstance(plugin, dict), "必须是对象")
+    if isinstance(plugin, dict):
+        for field in ("candidateSha", "baselineSha", "loadedSha"):
+            value = plugin.get(field, "<missing>")
+            expect(f"plugin.{field}", value is None or (isinstance(value, str) and bool(SHA40_RE.match(value))), "必须是 40hex SHA 或 null")
+        expect("plugin.loadedShaReadback", plugin.get("loadedShaReadback") in ("verified", "unverified", "unavailable"), "必须 verified/unverified/unavailable")
+
+    card = get("taskCard")
+    expect("taskCard", isinstance(card, dict), "必须是对象")
+    if isinstance(card, dict):
+        sha = card.get("sha256")
+        expect("taskCard.sha256", sha is None or (isinstance(sha, str) and bool(SHA256_RE.match(sha))), "必须是 64hex 或 null")
+        expect("taskCard.deliveryMechanism", isinstance(card.get("deliveryMechanism"), str) and card.get("deliveryMechanism") != "", "必须是非空字符串")
+        expect("taskCard.verifiedEqual", isinstance(card.get("verifiedEqual"), bool), "必须是 boolean")
+
+    tokens = get("tokens")
+    expect("tokens", isinstance(tokens, dict), "必须是对象")
+    if isinstance(tokens, dict):
+        for field in ("input", "output", "total", "cacheRead", "cacheWrite"):
+            if field in tokens:
+                value = tokens.get(field)
+                expect(f"tokens.{field}", value is None or (_is_int(value) and value >= 0), "必须是 >=0 integer 或 null")
+        total = tokens.get("total")
+        input_tokens = tokens.get("input")
+        output_tokens = tokens.get("output")
+        # S05：可确定的算术约束（至少 total<output 必拒；三值已知时 total>=input+output）。
+        if _is_int(total) and _is_int(output_tokens):
+            expect("tokens.total", total >= output_tokens, f"total({total}) 不能小于 output({output_tokens})")
+        if _is_int(total) and _is_int(input_tokens) and _is_int(output_tokens):
+            expect("tokens.total", total >= input_tokens + output_tokens, f"total({total}) 不能小于 input+output({input_tokens + output_tokens})")
+
+    decision_log = get("decisionLog")
+    if decision_log is not None and not isinstance(decision_log, dict):
+        errors.append("字段 decisionLog 必须是对象或 null")
+    expect("objectiveChanged", isinstance(get("objectiveChanged"), str) and get("objectiveChanged") != "", "必须是字符串")
+    expect("requiredFunctionImplemented", isinstance(get("requiredFunctionImplemented"), str) and get("requiredFunctionImplemented") != "", "必须是字符串")
+    defect = get("implementationDefect")
+    expect("implementationDefect", isinstance(defect, dict), "必须是对象")
+    if isinstance(defect, dict):
+        expect("implementationDefect.verdict", defect.get("verdict") in IMPLEMENTATION_VERDICTS, f"必须是 {IMPLEMENTATION_VERDICTS}")
+    env = get("validationEnvironment")
+    expect("validationEnvironment", isinstance(env, dict), "必须是对象")
+    if isinstance(env, dict):
+        expect("validationEnvironment.status", env.get("status") in ("available", "unavailable"), "必须是 available/unavailable")
+        expect("validationEnvironment.reason", env.get("reason") is None or isinstance(env.get("reason"), str), "reason 必须是字符串或 null")
+    delivery = get("delivery")
+    expect("delivery", delivery in DELIVERIES, f"必须是 {DELIVERIES}")
+    out_of_scope = get("outOfScopeChanges")
+    expect("outOfScopeChanges", isinstance(out_of_scope, dict), "必须是对象")
+    if isinstance(out_of_scope, dict):
+        expect("outOfScopeChanges.has", isinstance(out_of_scope.get("has"), bool), "has 必须是 boolean（缺失不得默认 false）")
+    unrelated = get("unrelatedChanges")
+    expect("unrelatedChanges", isinstance(unrelated, dict), "必须是对象")
+    if isinstance(unrelated, dict):
+        expect("unrelatedChanges.has", unrelated.get("has") is None or isinstance(unrelated.get("has"), bool), "has 必须是 boolean 或 null")
+    weakening = get("testWeakening")
+    expect("testWeakening", isinstance(weakening, dict), "必须是对象")
+    if isinstance(weakening, dict):
+        expect("testWeakening.has", weakening.get("has") is None or isinstance(weakening.get("has"), bool), "has 必须是 boolean 或 null")
+    human = get("humanIntervention")
+    expect("humanIntervention", isinstance(human, dict), "必须是对象")
+    if isinstance(human, dict):
+        expect("humanIntervention.count", _is_int(human.get("count")) and human.get("count") >= 0, "count 必须是 >=0 integer（缺失不得默认 0）")
+    faults = get("faults", required=False)
+    if faults is not None:
+        expect("faults", isinstance(faults, dict), "必须是对象")
+        if isinstance(faults, dict):
+            for key in ("unexpectedDeliveryReleased", "unsafeRecovery"):
+                if key in faults:
+                    expect(f"faults.{key}", isinstance(faults.get(key), bool), "必须是 boolean")
+    label = get("label", required=False)
+    if label is not None:
+        expect("label", isinstance(label, dict), "必须是对象")
+        if isinstance(label, dict):
+            kappa = label.get("kappa")
+            expect("label.kappa", kappa is None or (_is_number(kappa) and -1 <= float(kappa) <= 1), "必须是 [-1,1] 数字或 null")
+            labelers = label.get("labelers")
+            expect("label.labelers", labelers is None or (isinstance(labelers, list) and all(isinstance(item, str) and item for item in labelers)), "labelers 必须是字符串数组")
+    return errors
+
+
 def parse_run(record: dict) -> Run:
     if not isinstance(record, dict):
         raise ValueError("每条运行记录必须是对象")
+    contract_errors = record_contract_errors(record)
+    if contract_errors:
+        raise ValueError("运行记录字段契约不满足：" + "；".join(contract_errors[:10]))
     # 先校验身份字段，保证缺字段的报错稳定、可读（不依赖后续字段顺序）。
     for field in ("runId", "batch", "taskId", "repo", "arm"):
         _require(record, field, str)
@@ -211,18 +432,22 @@ def parse_run(record: dict) -> Run:
     wall_clock = record.get("wallClockSeconds")
     if wall_clock is not None and not isinstance(wall_clock, (int, float)):
         raise ValueError("wallClockSeconds 必须是数字或 null")
+    model_block = record["model"]
+    plugin_block = record["plugin"]
+    host_block = record["host"]
+    label_block = record.get("label") if isinstance(record.get("label"), dict) else None
     return Run(
         run_id=str(_require(record, "runId", str)),
         batch=str(_require(record, "batch", str)),
         task_id=str(_require(record, "taskId", str)),
         repo=str(_require(record, "repo", str)),
         category=str(record.get("category") or "unknown"),
-        model=str((record.get("model") or {}).get("id") or "unknown"),
+        model=str(model_block["id"]),
         arm=str(_require(record, "arm", str)),
         repetition=int(record.get("repetition", 1)),
         env_available=env_status == "available",
         env_reason=env.get("reason"),
-        out_of_scope=bool((record.get("outOfScopeChanges") or {}).get("has")),
+        out_of_scope=record["outOfScopeChanges"]["has"],
         unrelated=unrelated,
         objective_changed=objective_changed,
         required_complete=required_complete,
@@ -233,14 +458,21 @@ def parse_run(record: dict) -> Run:
         tokens=tokens,
         tokens_input=tokens_input,
         tokens_output=tokens_output,
-        timeout=bool(record.get("timeout", False)),
-        human_interventions=int((record.get("humanIntervention") or {}).get("count") or 0),
+        timeout=record["timeout"],
+        human_interventions=record["humanIntervention"]["count"],
         task_card_ok=task_card.get("verifiedEqual") is True,
         task_sha256=card_sha,
         base=record.get("base") if isinstance(record.get("base"), str) else None,
         acceptance_invalid=acceptance == "invalid",
         test_weakening=test_weakening,
         label_kappa=None if kappa is None else float(kappa),
+        labelers=list((label_block or {}).get("labelers") or []),
+        label_present=label_block is not None,
+        model_temperature=(model_block.get("parameters") or {}).get("temperature"),
+        host_version=host_block.get("version"),
+        plugin_loaded=plugin_block.get("loadedSha"),
+        plugin_candidate=plugin_block.get("candidateSha"),
+        plugin_readback=plugin_block.get("loadedShaReadback"),
         faults=fault_list,
     )
 
@@ -260,6 +492,15 @@ def validate_runs(runs: list[Run]) -> list[Run]:
     batches = {run.batch for run in runs}
     if len(batches) > 1:
         raise ValueError(f"多批次输入：{sorted(batches)}；本统计入口一次只接受一个 batch（防跨批虚增独立任务数/重复关联），跨批汇总不在本工具范围")
+    # S03：输入级 runId 唯一性（同 task 不同 repetition 仍允许，但 runId 不得重复）。
+    seen_run_ids: dict[str, str] = {}
+    for run in runs:
+        if run.run_id in seen_run_ids:
+            raise ValueError(
+                f"重复 runId：{run.run_id} 同时出现在 task={seen_run_ids[run.run_id]} 与 {run.task_id}；"
+                "runId 必须唯一，拒绝用重复 ID 代表多次运行"
+            )
+        seen_run_ids[run.run_id] = run.task_id
     # F10：输入级检查全部 repetition 的 (task, arm, repetition) 唯一性；重复记录一律拒绝。
     seen: dict[tuple[str, str, str, int], str] = {}
     for run in runs:
@@ -481,6 +722,17 @@ def evaluate_cost(runs: list[Run], caps: dict) -> dict:
     token_unknown = [run.run_id for run in native_runs if run.tokens is None]
     token_total = len(native_runs)
     token_known = len(native_tokens)
+    # S06：PREREG §5 单次运行停止线（60 分钟 或 3,000,000 token）；任一命中即不得称成本满足。
+    hard_stop_violations = []
+    for run in runs:
+        reasons = []
+        if run.minutes is not None and run.minutes > HARD_STOP_MINUTES:
+            reasons.append(f"wallClockSeconds={run.minutes * 60:.0f}s > {HARD_STOP_MINUTES:.0f}min")
+        if run.tokens is not None and run.tokens > HARD_STOP_TOKENS:
+            reasons.append(f"tokens.total={run.tokens} > {HARD_STOP_TOKENS}")
+        if reasons:
+            hard_stop_violations.append({"runId": run.run_id, "taskId": run.task_id, "arm": run.arm, "reasons": reasons})
+    hard_stop_ok = len(hard_stop_violations) == 0
     token_unknown_ratio = ((token_total - token_known) / token_total) if token_total else None
     token_evidence_insufficient = token_total == 0 or len(token_unknown) > 0
     timeout_rate = (sum(1 for run in native_runs if run.timeout) / len(native_runs)) if native_runs else None
@@ -530,6 +782,8 @@ def evaluate_cost(runs: list[Run], caps: dict) -> dict:
         "native_very_slow_determined": determined,
         "native_very_slow_missing": len(missing),
         "native_very_slow_missing_runs": missing,
+        "hard_stop_violations": hard_stop_violations,
+        "hard_stop_violation_runs": [entry["runId"] for entry in hard_stop_violations],
     }
     minutes_ok = not minutes_evidence_insufficient
     token_ok = not token_evidence_insufficient
@@ -542,6 +796,7 @@ def evaluate_cost(runs: list[Run], caps: dict) -> dict:
         "timeout_rate_max": values["native_timeout_rate"] is not None and values["native_timeout_rate"] <= caps.get("timeout_rate_max", math.inf),
         "human_intervention_median_max": values["native_human_intervention_median"] is not None and values["native_human_intervention_median"] <= caps.get("human_intervention_median_max", math.inf),
         "very_slow_share_max": very_slow_ok and values["native_very_slow_share"] is not None and values["native_very_slow_share"] <= caps.get("very_slow_share_max", math.inf),
+        "single_run_hard_stop": hard_stop_ok,
     }
     evidence_notes: list[str] = []
     if token_evidence_insufficient:
@@ -564,13 +819,16 @@ def evaluate_cost(runs: list[Run], caps: dict) -> dict:
         "within_caps": all(checks.values()) and not (
             token_evidence_insufficient or minutes_evidence_insufficient or baseline_evidence_insufficient
         ),
+        "hard_stop_ok": hard_stop_ok,
+        "hard_stop_violations": hard_stop_violations,
         "evidence_insufficient": token_evidence_insufficient or minutes_evidence_insufficient or baseline_evidence_insufficient,
         "evidence_notes": evidence_notes,
         "exceeded": [name for name, ok in checks.items() if not ok],
         "note": (
             "非常慢运行阈值 = 全部原系统组运行（含重复、环境排除运行）的同任务中位数 ×3；"
             "token 主口径仍是 total，无 cache 的 input+output 仅描述性展示；"
-            "整包组任一 token 未知、任一运行耗时缺失或任一整包运行无对照基准时，成本结论标证据不足（无容忍比例）。"
+            "整包组任一 token 未知、任一运行耗时缺失或任一整包运行无对照基准时，成本结论标证据不足（无容忍比例）；"
+            f"单次运行 >{HARD_STOP_MINUTES:.0f}min 或 >{HARD_STOP_TOKENS} token 即触发 PREREG §5 停止线，成本不得判满足。"
         ),
     }
 
@@ -598,6 +856,66 @@ def repeat_consistency(runs: list[Run], metric_key: str) -> dict:
     return {"compared": compared, "agreed": agreed, "agreement_rate": (agreed / compared) if compared else None}
 
 
+def _sha_matches(value: str | None, expected: str) -> bool:
+    if not isinstance(value, str):
+        return False
+    return value == expected or value.startswith(expected)
+
+
+def _temperature_key(value) -> tuple[str, object]:
+    if value == "uncontrolled":
+        return ("uncontrolled", "uncontrolled")
+    return ("number", float(value))
+
+
+def _sa_sha_from_host(host_version: str | None) -> str | None:
+    if not isinstance(host_version, str):
+        return None
+    match = re.search(r"(?:source=|sa[:@=])([0-9a-f]{7,40})", host_version)
+    return match.group(1) if match else None
+
+
+def evaluate_frozen_conditions(run: Run) -> dict:
+    """S02：按 PREREG v1.3 锁定条件核对 model/温度/插件与 SA 制品。
+
+    返回 status=ok|unverified|invalid：
+    - invalid：记录中已有可核验的矛盾（错误制品/错误模型/温度不一致在配对待另算）；
+    - unverified：字段缺失或回读未验证，不得冒称完整预注册达标。
+    """
+    side = "treatment" if normalize_arm(run.arm) == "treatment" else ("control" if normalize_arm(run.arm) == "control" else None)
+    if side is None:
+        return {"status": "unverified", "reasons": [f"arm={run.arm} 不属于 Q1 两组，无法核对冻结条件"]}
+    expected = LOCKED_ARTIFACTS[side]
+    reasons: list[str] = []
+    invalid = False
+    unverified = False
+    if run.model != LOCKED_MODEL_ID:
+        reasons.append(f"model.id={run.model!r} 与锁定 {LOCKED_MODEL_ID!r} 不符")
+        invalid = True
+    hephi_values = [value for value in (run.plugin_loaded, run.plugin_candidate) if value is not None]
+    if not hephi_values:
+        reasons.append("plugin.loadedSha/candidateSha 缺失，无法核对 HEPHI 制品")
+        unverified = True
+    elif any(not _sha_matches(value, expected["hephi"]) for value in hephi_values):
+        reasons.append(f"HEPHI 制品 {hephi_values} 与 {side} 组锁定 {expected['hephi']} 不符")
+        invalid = True
+    if run.plugin_readback != "verified":
+        reasons.append(f"plugin.loadedShaReadback={run.plugin_readback!r}，未提供真实回读证据")
+        unverified = True
+    sa_sha = _sa_sha_from_host(run.host_version)
+    if sa_sha is None:
+        reasons.append("host.version 缺少 SA source SHA，无法核对锁定 SA 制品")
+        unverified = True
+    elif not _sha_matches(sa_sha, expected["sa"]):
+        reasons.append(f"SA 制品 {sa_sha} 与 {side} 组锁定 {expected['sa']} 不符")
+        invalid = True
+    if run.model_temperature is None:
+        reasons.append("model.parameters.temperature 缺失，无法核对冻结温度")
+        unverified = True
+    status = "invalid" if invalid else ("unverified" if unverified else "ok")
+    return {"status": status, "reasons": reasons}
+
+
 def analyze(runs: list[Run], config: dict | None = None) -> dict:
     # F09：直接调用 analyze 也必须经过与 CLI 相同的单批/混代/重复/同一性校验。
     validate_runs(runs)
@@ -611,10 +929,45 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
 
     task_card_mismatch = [run for run in runs if run.env_available and not run.task_card_ok]
     acceptance_invalid = [run for run in runs if run.acceptance_invalid]
-    # F02：invalid 运行保留记录并计入成本（evaluate_cost 用全部 runs），但不进入效果配对。
-    effect_runs = [run for run in runs if run.env_available and run.task_card_ok and not run.acceptance_invalid]
+    # S02：冻结条件核对；invalid 运行排除效果指标但保留成本；unverified 阻断“完整预注册达标”。
+    frozen = {run.run_id: evaluate_frozen_conditions(run) for run in runs}
+    invalid_ids = {run_id for run_id, entry in frozen.items() if entry["status"] == "invalid"}
+    unverified_ids = {run_id for run_id, entry in frozen.items() if entry["status"] == "unverified"}
+    condition_invalid_runs = [
+        {"runId": run.run_id, "taskId": run.task_id, "arm": run.arm, "reasons": frozen[run.run_id]["reasons"]}
+        for run in runs if run.run_id in invalid_ids
+    ]
+    condition_unverified_runs = [
+        {"runId": run.run_id, "taskId": run.task_id, "arm": run.arm, "reasons": frozen[run.run_id]["reasons"]}
+        for run in runs if run.run_id in unverified_ids and run.run_id not in invalid_ids
+    ]
+    # F02/S02：invalid 运行保留记录并计入成本（evaluate_cost 用全部 runs），但不进入效果配对。
+    effect_runs = [
+        run for run in runs
+        if run.env_available and run.task_card_ok and not run.acceptance_invalid and run.run_id not in invalid_ids
+    ]
     excluded_runs = [run for run in runs if not run.env_available]
     structural_pairs = paired_tasks(effect_runs, repetition)
+    # S02：两臂温度必须一致（0 vs 1 等矛盾使该对运行无效）。
+    temperature_mismatch_ids: set[str] = set()
+    for arms in structural_pairs.values():
+        control_temp = arms["control"].model_temperature
+        treatment_temp = arms["treatment"].model_temperature
+        if control_temp is None or treatment_temp is None:
+            continue
+        if _temperature_key(control_temp) != _temperature_key(treatment_temp):
+            temperature_mismatch_ids.update({arms["control"].run_id, arms["treatment"].run_id})
+    if temperature_mismatch_ids:
+        effect_runs = [run for run in effect_runs if run.run_id not in temperature_mismatch_ids]
+        structural_pairs = paired_tasks(effect_runs, repetition)
+        invalid_ids |= temperature_mismatch_ids
+        existing_ids = {entry["runId"] for entry in condition_invalid_runs}
+        for run in runs:
+            if run.run_id in temperature_mismatch_ids and run.run_id not in existing_ids:
+                condition_invalid_runs.append({
+                    "runId": run.run_id, "taskId": run.task_id, "arm": run.arm,
+                    "reasons": ["两臂 model.parameters.temperature 不一致（冻结条件矛盾）"],
+                })
 
     # F01/F02：有效配对 = 两臂任务卡可核对且一致 + M1-M3/G1-G3 标签齐全。
     label_incomplete_pairs: list[dict] = []
@@ -637,15 +990,33 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
         pairs[key] = arms
     n_pairs = len(pairs)
 
-    # F16：输入已记录的标注一致性低于阈值时，不得输出 meets_prereg。
+    # F16/S04：批次级标注一致性证据。显式 kappa<0.7 与“缺失/无定义”同等降级；
+    # 批准的降级模式（单真人/agent + AI 代标）保留 partial 标记，但不得把未知证据当通过。
     kappa_values = [(run.run_id, run.label_kappa) for run in runs if run.label_kappa is not None]
     low_kappa = [(run_id, value) for run_id, value in kappa_values if value < MIN_LABEL_KAPPA]
+    missing_kappa_runs = [run.run_id for run in runs if run.label_kappa is None]
+    labelers = sorted({labeler for run in runs for labeler in run.labelers})
+    agent_like = re.compile(r"(agent|assistant|ai|bot|delegate|model)", re.IGNORECASE)
+    calibration_mode = "full"
+    calibration_partial_reasons: list[str] = []
+    if labelers and all(agent_like.search(labeler) for labeler in labelers):
+        calibration_mode = "degraded-partial"
+        calibration_partial_reasons.append("所有 labelers 均为 agent/AI 标识：批准记录允许描述性/部分证据，不得当完整人工一致性")
+    elif kappa_values and len(labelers) < 2:
+        calibration_mode = "degraded-partial"
+        calibration_partial_reasons.append(f"labelers 少于 2 个（{labelers}）：按已批准的单人/代标降级模式保留 partial")
     label_quality = {
         "checked": len(kappa_values),
+        "defined_runs": len(kappa_values),
+        "missing_kappa_runs": missing_kappa_runs,
         "min_kappa": min((value for _, value in kappa_values), default=None),
         "threshold": MIN_LABEL_KAPPA,
-        "failed": bool(low_kappa),
+        "failed": bool(low_kappa) or len(kappa_values) == 0,
         "failed_runs": [{"runId": run_id, "kappa": value} for run_id, value in low_kappa],
+        "evidence_missing": len(kappa_values) == 0,
+        "calibration_mode": calibration_mode,
+        "calibration_partial_reasons": calibration_partial_reasons,
+        "labelers": labelers,
     }
 
     primary = {}
@@ -678,12 +1049,24 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
     evidence_reasons: list[str] = []
     if n_pairs < min_pairs:
         evidence_reasons.append(f"有效已标注配对 n_pairs={n_pairs} < min_pairs={min_pairs}")
-    if label_quality["failed"]:
+    if label_quality["evidence_missing"]:
+        evidence_reasons.append(
+            "批次级标注一致性证据缺失/无定义（没有任何 label.kappa 值；与 kappa<0.7 同等降级，不得视为通过）"
+        )
+    elif label_quality["failed"]:
         evidence_reasons.append(
             f"标注一致性 kappa={label_quality['min_kappa']} < {MIN_LABEL_KAPPA}（外部校准失败，见 label.kappa）"
         )
     if cost["evidence_insufficient"]:
         evidence_reasons.extend(cost["evidence_notes"])
+    if condition_unverified_runs:
+        evidence_reasons.append(
+            f"冻结条件证据未验证 {len(condition_unverified_runs)} 条运行（缺 SA/插件回读/温度等，不伪造回读，不得冒称完整预注册达标）"
+        )
+    if condition_invalid_runs:
+        evidence_reasons.append(
+            f"冻结条件矛盾 {len(condition_invalid_runs)} 条运行被标 invalid（保留成本，排除效果指标）"
+        )
     if evidence_reasons:
         conclusion = "evidence_insufficient"
         conclusion_note = "证据不足，不下结论：" + "；".join(evidence_reasons)
@@ -696,6 +1079,13 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
     else:
         conclusion = "not_meets_prereg"
         conclusion_note = "未满足 PREREG v1.3（LOCKED）联合判定；详见主指标/守护指标/成本各节。"
+    # S07：不可接受故障独立保留 stop/invalid 结论，evidence_insufficient 只能并列、不能覆盖。
+    if faults:
+        conclusion = "unacceptable_fault"
+        fault_runs = ", ".join(f"`{entry['runId']}`" for entry in faults)
+        conclusion_note = f"存在不可接受故障（V1–V3）：{fault_runs}；立即暂停/作废结论，证据不足状态={bool(evidence_reasons)}。"
+    if label_quality["calibration_mode"] != "full":
+        conclusion_note += f"（标注模式 {label_quality['calibration_mode']}：{'；'.join(label_quality['calibration_partial_reasons'])}）"
 
     strata = {}
     for dimension in ("repo", "model", "category"):
@@ -732,6 +1122,9 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
             "environment_unavailable": len(excluded_runs),
             "task_card_mismatch": len(task_card_mismatch),
             "acceptance_invalid": len(acceptance_invalid),
+            "condition_invalid": len(condition_invalid_runs),
+            "condition_unverified": len(condition_unverified_runs),
+            "hard_stop_violations": len(cost["values"]["hard_stop_violations"]),
             "structural_pairs": len(structural_pairs),
             "label_incomplete_pairs": len(label_incomplete_pairs),
             "task_identity_unresolved_pairs": len(identity_unresolved_pairs),
@@ -750,6 +1143,17 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
             {"runId": run.run_id, "taskId": run.task_id, "arm": run.arm, "reason": "acceptanceVerdict=invalid；保留记录并计入成本，排除效果指标"}
             for run in acceptance_invalid
         ],
+        "condition_invalid_runs": condition_invalid_runs,
+        "condition_unverified_runs": condition_unverified_runs,
+        "frozen_conditions": {
+            "locked_model": LOCKED_MODEL_ID,
+            "locked_artifacts": LOCKED_ARTIFACTS,
+            "checked_runs": len(frozen),
+            "ok_runs": sum(1 for entry in frozen.values() if entry["status"] == "ok"),
+            "unverified_runs": len(condition_unverified_runs),
+            "invalid_runs": len(condition_invalid_runs),
+            "note": "按 PREREG v1.3 §1/§7.5/§9 核对；缺失字段标 unverified，不伪造回读；已知矛盾运行标 invalid 并保留成本。",
+        },
         "label_incomplete_pairs": label_incomplete_pairs,
         "task_identity_unresolved_pairs": identity_unresolved_pairs,
         "label_quality": label_quality,
@@ -766,6 +1170,13 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
             "cost_ok": cost["within_caps"],
             "cost_evidence_insufficient": cost["evidence_insufficient"],
             "label_quality_ok": not label_quality["failed"],
+            "calibration_mode": label_quality["calibration_mode"],
+            "unacceptable_fault": bool(faults),
+            "evidence_insufficient": bool(evidence_reasons),
+            "condition_invalid_runs": len(condition_invalid_runs),
+            "condition_unverified_runs": len(condition_unverified_runs),
+            "hard_stop_ok": cost["hard_stop_ok"],
+            "hard_stop_violations": cost["values"]["hard_stop_violations"],
             "evidence_reasons": evidence_reasons,
             "conclusion": conclusion,
             "note": conclusion_note,
@@ -880,6 +1291,7 @@ def render_markdown(report: dict, source: str) -> str:
         f"| 超时率 | {fmt(values['native_timeout_rate'])} | {fmt(cost['caps']['timeout_rate_max'])} | {'超限' if not cost['checks']['timeout_rate_max'] else '未超限'} |",
         f"| 人工介入中位数 | {fmt(values['native_human_intervention_median'])} | {fmt(cost['caps']['human_intervention_median_max'])} | {'超限' if not cost['checks']['human_intervention_median_max'] else '未超限'} |",
         f"| 极慢运行占比（>3× 全部原系统组同任务中位数；基准缺失 {values['native_very_slow_missing']} 条） | {fmt(values['native_very_slow_share'])}（有效基准 {values['native_very_slow_determined']} 条/总 {treatment_total}） | {fmt(cost['caps']['very_slow_share_max'])} | {very_slow_verdict()} |",
+        f"| 单次运行停止线（>{HARD_STOP_MINUTES:.0f}min 或 >{HARD_STOP_TOKENS} token） | 违规 {len(values['hard_stop_violations'])} 条{('：' + ', '.join(values['hard_stop_violation_runs'])) if values['hard_stop_violations'] else ''} | 任一越线即成本不达标 | {'触发' if not cost['hard_stop_ok'] else '未触发'} |",
         "",
         f"总体成本状态：{'未超限' if cost['within_caps'] else '超限/证据不足：' + (', '.join(cost['exceeded']) or '无单项超限')}。{cost['note']}",
         *([f"- 证据不足说明：{'；'.join(cost['evidence_notes'])}"] if cost.get("evidence_notes") else []),
@@ -916,6 +1328,7 @@ def render_markdown(report: dict, source: str) -> str:
         f"- 主指标显著改善：{', '.join(decision['improved_primary']) or '无'}；显著恶化：{', '.join(decision['worsened_primary']) or '无'}",
         f"- 守护指标全部非劣效：{'是' if decision['guardrails_ok'] else '否'}；成本未超限：{'是' if decision['cost_ok'] else '否'}；标注质量（kappa≥{MIN_LABEL_KAPPA}）：{'是' if decision['label_quality_ok'] else '否'}",
         *([f"- 证据不足原因：{'；'.join(decision['evidence_reasons'])}"] if decision.get('evidence_reasons') else []),
+        f"- 不可接受故障：{'是' if decision.get('unacceptable_fault') else '否'}；证据不足并列：{'是' if decision.get('evidence_insufficient') else '否'}；单次停止线：{'触发' if not decision.get('hard_stop_ok', True) else '未触发'}；标注校准模式：{decision.get('calibration_mode', 'full')}",
         f"- **结论：{decision['conclusion']}** —— {decision['note']}",
         f"- 判定规则：{decision['rule']}",
         "",
@@ -931,6 +1344,14 @@ def render_markdown(report: dict, source: str) -> str:
     lines.append(f"- acceptanceVerdict=invalid 运行：{len(report['acceptance_invalid_runs'])} 条（保留记录并计入成本，排除效果指标）。")
     for run in report["acceptance_invalid_runs"]:
         lines.append(f"  - `{run['runId']}`（{run['taskId']}/{run['arm']}）：{run['reason']}")
+    condition_invalid = report.get("condition_invalid_runs", [])
+    condition_unverified = report.get("condition_unverified_runs", [])
+    lines.append(f"- 冻结条件矛盾（invalid，保留成本、排除效果）：{len(condition_invalid)} 条。")
+    for run in condition_invalid[:20]:
+        lines.append(f"  - `{run['runId']}`（{run['taskId']}/{run['arm']}）：{'；'.join(run['reasons'])}")
+    lines.append(f"- 冻结条件未验证（unverified；不得冒称完整预注册达标）：{len(condition_unverified)} 条。")
+    for run in condition_unverified[:20]:
+        lines.append(f"  - `{run['runId']}`（{run['taskId']}/{run['arm']}）：{'；'.join(run['reasons'])}")
     lines.append(f"- 标签不完整配对：{len(report['label_incomplete_pairs'])} 对（M1-M3/G1-G3 所需标签未全部标注，不计入有效配对）。")
     for pair in report["label_incomplete_pairs"][:20]:
         lines.append(f"  - `{pair['taskId']}`（batch={pair['batch']}）：缺 {', '.join(pair['missing'])}")
@@ -953,19 +1374,57 @@ def render_markdown(report: dict, source: str) -> str:
 # ---- 自测 -------------------------------------------------------------------
 
 
+def _default_condition_fields(arm: str) -> dict:
+    side = "treatment" if normalize_arm(arm) == "treatment" else "control"
+    locked = LOCKED_ARTIFACTS[side]
+    return {
+        "model": {
+            "id": LOCKED_MODEL_ID,
+            "provider": "deepseek-account",
+            "parameters": {"temperature": "uncontrolled"},
+            "parametersSource": "host-config",
+        },
+        "host": {
+            "version": f"dsh@0.2.1-rc.5;superagent@0.1.0;source={locked['sa']};node@26.1.0",
+            "versionSource": "experimental",
+            "instance": "selftest",
+        },
+        "plugin": {
+            "candidateSha": locked["hephi"],
+            "baselineSha": locked["hephi"],
+            "loadedSha": locked["hephi"],
+            "loadedShaReadback": "verified",
+        },
+        "label": {"batchId": "selftest-batch", "labelers": ["reviewer-a", "reviewer-b"], "kappa": 0.9},
+    }
+
+
 def _synthetic_runs(offs: list[bool], natives: list[bool], metric: str) -> list[Run]:
     runs: list[Run] = []
     for index, (off_value, native_value) in enumerate(zip(offs, natives)):
         task = f"t{index + 1:02d}"
         for arm, value in (("off", off_value), ("native", native_value)):
+            condition_fields = _default_condition_fields(arm)
             record = {
+                "schemaVersion": 1,
                 "runId": f"{task}-{arm}",
                 "batch": "selftest",
                 "taskCard": {"sha256": "0" * 64, "deliveryMechanism": "issue-body", "verifiedEqual": True},
                 "taskId": task,
                 "repo": "synthetic/repo",
+                "base": "a" * 40,
+                "head": "b" * 40,
                 "arm": arm,
+                "executionMode": "normal",
                 "repetition": 1,
+                "seed": DEFAULT_SEED,
+                "startedAt": "2026-11-09T00:00:00Z",
+                "endedAt": "2026-11-09T00:00:10Z",
+                "host": condition_fields["host"],
+                "plugin": condition_fields["plugin"],
+                "model": condition_fields["model"],
+                "label": condition_fields["label"],
+                "decisionLog": None,
                 "validationEnvironment": {"status": "available"},
                 "outOfScopeChanges": {"has": value} if metric == "outOfScopeRate" else {"has": False},
                 "unrelatedChanges": {"has": value} if metric == "unrelatedRate" else {"has": False},
@@ -977,6 +1436,7 @@ def _synthetic_runs(offs: list[bool], natives: list[bool], metric: str) -> list[
                 "timeout": False,
                 "tokens": {"total": 1000},
                 "humanIntervention": {"count": 0},
+                "testWeakening": {"has": False},
             }
             runs.append(parse_run(record))
     return runs
@@ -989,17 +1449,35 @@ def _record(task: str, arm: str, *, batch: str = "selftest", repetition: int = 1
             out_of_scope: bool = False, unrelated: bool | None = False, objective: str = "unchanged",
             required: str | None = "complete", defect: str | None = "none",
             delivery: str = "ready-pr-created", acceptance: str | None = None,
-            kappa: float | None = None, test_weakening: bool | None = False) -> dict:
+            kappa: float | None = 0.9, temperature: object = "uncontrolled",
+            plugin_sha: str | None = None, sa_sha: str | None = None,
+            readback: str = "verified", test_weakening: bool | None = False) -> dict:
+    condition_fields = _default_condition_fields(arm)
+    condition_fields["model"] = {**condition_fields["model"], "id": model, "parameters": {"temperature": temperature}}
+    if plugin_sha is not None:
+        condition_fields["plugin"] = {**condition_fields["plugin"], "candidateSha": plugin_sha, "loadedSha": plugin_sha}
+    if sa_sha is not None:
+        condition_fields["host"] = {**condition_fields["host"], "version": f"dsh@0.2.1-rc.5;superagent@0.1.0;source={sa_sha};node@26.1.0"}
+    condition_fields["plugin"] = {**condition_fields["plugin"], "loadedShaReadback": readback}
     record = {
+        "schemaVersion": 1,
         "runId": f"{task}-{arm}-r{repetition}",
         "batch": batch,
         "taskId": task,
         "repo": repo,
         "base": base,
+        "head": "b" * 40,
         "arm": arm,
+        "executionMode": "normal",
         "repetition": repetition,
-        "model": {"id": model},
-        "taskCard": {"sha256": sha, "verifiedEqual": True},
+        "seed": DEFAULT_SEED,
+        "startedAt": "2026-11-09T00:00:00Z",
+        "endedAt": "2026-11-09T00:00:10Z",
+        "model": condition_fields["model"],
+        "host": condition_fields["host"],
+        "plugin": condition_fields["plugin"],
+        "decisionLog": None,
+        "taskCard": {"sha256": sha, "deliveryMechanism": "issue-body", "verifiedEqual": True},
         "validationEnvironment": {"status": "available"},
         "outOfScopeChanges": {"has": out_of_scope},
         "unrelatedChanges": {"has": unrelated},
@@ -1016,7 +1494,7 @@ def _record(task: str, arm: str, *, batch: str = "selftest", repetition: int = 1
     if acceptance is not None:
         record["acceptanceVerdict"] = acceptance
     if kappa is not None:
-        record["label"] = {"kappa": kappa}
+        record["label"] = {"batchId": f"{batch}-labels", "labelers": ["reviewer-a", "reviewer-b"], "kappa": kappa}
     return record
 
 
@@ -1199,8 +1677,14 @@ def self_test(as_json: bool = False) -> int:
         _record("t1", "legacy-system", repetition=2, out_of_scope=True),
         _record("t1", "legacy-system", repetition=2, out_of_scope=False),
     ]
+    duplicate_records[3]["runId"] = "t1-legacy-system-r2-conflict"
     expect_value_error("F10 反例：同 task/arm/repetition=2 两条冲突记录 → 拒绝而非覆盖",
                        lambda: analyze([parse_run(item) for item in duplicate_records], {"n_boot": 200}), "重复运行记录")
+    # S03：runId 输入级唯一（不同 task/arm 也不得复用同一 runId）。
+    same_id_records = [_record("t1", "legacy-system"), _record("t2", "legacy-system")]
+    same_id_records[1]["runId"] = same_id_records[0]["runId"]
+    expect_value_error("S03 反例：不同记录复用同一 runId → 拒绝",
+                       lambda: analyze([parse_run(item) for item in same_id_records], {"n_boot": 200}), "重复 runId")
 
     # 10) F11：极慢基准用全部原系统运行（含重复）同任务中位数，整包组占比与缺失。
     slow_records = [
@@ -1323,9 +1807,11 @@ def self_test(as_json: bool = False) -> int:
     record("样本不足：n_pairs=1 < min_pairs=5 → evidence_insufficient", tiny_report["decision"]["conclusion"] == "evidence_insufficient", tiny_report["decision"]["conclusion"])
 
     # 15) 输入校验：缺字段 → 清晰 ValueError（不抛栈）。
+    missing_contract = _record("t1", "legacy-system")
+    del missing_contract["validationEnvironment"]["status"]
     cases = [
         ({"runId": "x", "validationEnvironment": {"status": "available"}}, "缺少字段"),
-        ({"runId": "x", "batch": "b", "taskId": "t", "repo": "r", "arm": "off"}, "validationEnvironment.status"),
+        (missing_contract, "validationEnvironment.status"),
     ]
     details = []
     bad_input = True
@@ -1339,6 +1825,93 @@ def self_test(as_json: bool = False) -> int:
             if expected not in str(error):
                 bad_input = False
     record("输入校验：缺字段抛清晰 ValueError", bad_input, "; ".join(details))
+
+    # ---- S01：缺失/非法字段不得默认成有利值 ----
+    for field_path, expected in [
+        ("outOfScopeChanges", "outOfScopeChanges"),
+        ("humanIntervention", "humanIntervention"),
+        ("timeout", "timeout"),
+        ("base", "base"),
+        ("model", "model"),
+    ]:
+        missing = _record("s01", "legacy-system")
+        del missing[field_path]
+        expect_value_error(f"S01 反例：缺 {field_path} → 拒绝而非默认有利值",
+                           lambda missing=missing: parse_run(missing), expected)
+    bad_type = _record("s01", "legacy-system")
+    bad_type["outOfScopeChanges"]["has"] = "false"
+    expect_value_error("S01 反例：outOfScopeChanges.has 类型错 → 拒绝", lambda: parse_run(bad_type), "outOfScopeChanges.has")
+
+    # ---- S02：冻结条件矛盾 invalid；缺失 unverified；不得 meets ----
+    wrong_plugin = [
+        _record("s02-plugin", "legacy-system"),
+        _record("s02-plugin", "full-package", plugin_sha="c" * 40),
+    ]
+    wrong_plugin_report = analyze([parse_run(item) for item in wrong_plugin], {"min_pairs": 1, "n_boot": 200})
+    record("S02 反例：整包组 HEPHI 制品与锁定 SHA 不符 → 运行 invalid、不得 meets",
+           wrong_plugin_report["counts"]["condition_invalid"] == 1
+           and wrong_plugin_report["decision"]["conclusion"] != "meets_prereg",
+           json.dumps({"invalid": wrong_plugin_report["counts"]["condition_invalid"], "conclusion": wrong_plugin_report["decision"]["conclusion"]}))
+    wrong_temp = [
+        _record("s02-temp", "legacy-system", temperature=0),
+        _record("s02-temp", "full-package", temperature=1),
+    ]
+    wrong_temp_report = analyze([parse_run(item) for item in wrong_temp], {"min_pairs": 1, "n_boot": 200})
+    record("S02 反例：两臂温度 0 vs 1 → 双方 invalid、不得 meets",
+           wrong_temp_report["counts"]["condition_invalid"] == 2
+           and wrong_temp_report["decision"]["conclusion"] != "meets_prereg",
+           json.dumps({"invalid": wrong_temp_report["counts"]["condition_invalid"], "conclusion": wrong_temp_report["decision"]["conclusion"]}))
+    unverified_plugin = [
+        _record("s02-unverified", "legacy-system", readback="unverified"),
+        _record("s02-unverified", "full-package"),
+    ]
+    unverified_report = analyze([parse_run(item) for item in unverified_plugin], {"min_pairs": 1, "n_boot": 200})
+    record("S02 反例：插件回读 unverified → 冻结条件 unverified、结论 evidence_insufficient",
+           unverified_report["counts"]["condition_unverified"] == 1
+           and unverified_report["decision"]["conclusion"] == "evidence_insufficient",
+           json.dumps({"unverified": unverified_report["counts"]["condition_unverified"], "conclusion": unverified_report["decision"]["conclusion"]}))
+
+    # ---- S04：缺失/无定义 kappa 不得通过 ----
+    no_label_runs = _good_pairs(2)
+    for run in no_label_runs:
+        run.label_kappa = None
+        run.label_present = True
+    no_label_report = analyze(no_label_runs, {"min_pairs": 2, "n_boot": 200})
+    record("S04 反例：批次全部 label.kappa=null → 标注证据缺失、结论 evidence_insufficient",
+           no_label_report["label_quality"]["evidence_missing"] is True
+           and no_label_report["decision"]["conclusion"] == "evidence_insufficient",
+           json.dumps({"label_quality": no_label_report["label_quality"], "conclusion": no_label_report["decision"]["conclusion"]}))
+
+    # ---- S05：report 消费端拒绝 token 算术矛盾 ----
+    bad_tokens = _record("s05", "legacy-system", total=100, tokens_in=4_000_000, tokens_out=4_000_000)
+    expect_value_error("S05 反例：tokens.total<output（100 < 4,000,000）→ report 拒绝", lambda: parse_run(bad_tokens), "tokens.total")
+
+    # ---- S06：单次硬停止线 ----
+    hard_stop_runs = _good_pairs(2)
+    stopped = [run for run in hard_stop_runs if run.task_id == "good-001" and run.arm == "full-package"][0]
+    stopped.minutes = 3601 / 60.0
+    hard_stop_report = analyze(hard_stop_runs, {"min_pairs": 2, "n_boot": 200})
+    record("S06 反例：单次 3601s > 60min → 成本不得判满足、不得 meets；列出违规 runId",
+           hard_stop_report["cost"]["hard_stop_ok"] is False
+           and hard_stop_report["decision"]["cost_ok"] is False
+           and hard_stop_report["decision"]["conclusion"] != "meets_prereg"
+           and stopped.run_id in hard_stop_report["cost"]["values"]["hard_stop_violation_runs"],
+           json.dumps({"violations": hard_stop_report["cost"]["values"]["hard_stop_violation_runs"], "conclusion": hard_stop_report["decision"]["conclusion"]}))
+
+    # ---- S07：不可接受故障独立保留，不被 evidence_insufficient 覆盖 ----
+    fault_runs = _good_pairs(2)
+    for run in fault_runs:
+        if run.task_id == "good-000" and run.arm == "full-package":
+            run.faults = ["unsafeRecovery"]
+        if run.task_id == "good-001" and run.arm == "full-package":
+            run.tokens = None
+    fault_report = analyze(fault_runs, {"min_pairs": 2, "n_boot": 200})
+    record("S07 反例：unsafeRecovery=true + token 未知 → 结论 unacceptable_fault（故障不被证据不足覆盖）",
+           fault_report["decision"]["conclusion"] == "unacceptable_fault"
+           and fault_report["decision"]["unacceptable_fault"] is True
+           and fault_report["decision"]["evidence_insufficient"] is True
+           and len(fault_report["faults"]) == 1,
+           json.dumps({"conclusion": fault_report["decision"]["conclusion"], "faults": fault_report["faults"]}))
 
     ok = all(step["ok"] for step in steps)
     if as_json:

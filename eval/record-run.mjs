@@ -312,11 +312,35 @@ function validateOneOf(value, schema, path, rootSchema, errors) {
 }
 
 /**
+ * S05：schema 无法表达的确定性算术/口径约束。
+ * total 是主口径合计（input+output+cacheRead+cacheWrite 去重后的合计），至少必须
+ * >= output；当 input/output/total 三者都已知时，total >= input+output（去重不会减少
+ * 已计入的 input/output）。矛盾即数据非法，不自行编造合计。
+ */
+function validateRecordSemantics(data) {
+  const errors = []
+  if (!isPlainObject(data) || !isPlainObject(data.tokens)) return errors
+  const tokens = data.tokens
+  const total = tokens.total
+  const input = tokens.input
+  const output = tokens.output
+  const known = value => typeof value === 'number' && Number.isInteger(value) && value >= 0
+  if (known(total) && known(output) && total < output) {
+    errors.push({ path: 'tokens.total', message: `total(${total}) 不能小于 output(${output})（主口径合计不可能小于分量）` })
+  }
+  if (known(total) && known(input) && known(output) && total < input + output) {
+    errors.push({ path: 'tokens.total', message: `total(${total}) 不能小于 input+output(${input + output})（去重关系矛盾）` })
+  }
+  return errors
+}
+
+/**
  * 校验候选记录；返回 [{ path, message }]（空数组表示合法）。
  */
 function validateRecord(data, schema) {
   const errors = []
   validateValue(data, schema, '', schema, errors)
+  errors.push(...validateRecordSemantics(data))
   return errors
 }
 
@@ -695,6 +719,8 @@ function selfTestB302(root, add) {
     ['faults 字段类型', data => { data.faults.unexpectedDeliveryReleased = 'no'; return data }, 'faults.unexpectedDeliveryReleased'],
     ['decisionLog 类型（字符串）', data => { data.decisionLog = 'log.jsonl'; return data }, 'decisionLog'],
     ['tokens.input 类型（字符串）', data => { data.tokens.input = '1234'; return data }, 'tokens.input'],
+    ['S05 tokens.total 小于 output（算术矛盾）', data => { data.tokens = { input: 4000000, output: 4000000, total: 100, cacheRead: 0 }; return data }, 'tokens.total'],
+    ['S05 tokens.total 小于 input+output', data => { data.tokens = { input: 900, output: 400, total: 1000, cacheRead: 0 }; return data }, 'tokens.total'],
     ['implementationDefect.verdict 非法 enum', data => {
       data.implementationDefect = { verdict: 'ok', notes: null }
       return data
