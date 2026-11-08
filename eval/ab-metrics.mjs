@@ -122,6 +122,20 @@ export function summarize(rows) {
 //     tickets; the task value is null when any ticket of the task lacks it.
 //   * first review pass: firstReviewCandidate.head === finalCandidate.head.
 // Task-level costs / waits are aggregated across tasks by median.
+//
+// F07: a metric is scored only when EVERY task in scope has the value. A known
+// subset may still be displayed, but the metric is marked `incomplete` and no
+// total score is released (partial data can no longer produce a full score).
+// AT-61's all-values-missing case remains `unknown`/不达标.
+//
+// F08: observation sufficiency is judged per task, not from the earliest merge
+// in the batch: every task must be merged, have a parseable mergedAt at least
+// 7 days old, and have an observable sevenDayOutcome. Any pending/fresh task
+// withholds the batch total (evidence-insufficient); no subset total is emitted.
+//
+// F17: T04 scoring is single-arm/single-batch only. The entry rejects mixed
+// `arm`/`batch` inputs and any repetition>=2 main record; tickets of the same
+// arm+batch still merge under their taskId.
 // ---------------------------------------------------------------------------
 export const OBSERVATION_DAYS_REQUIRED = 7
 
@@ -159,6 +173,38 @@ function median(values) {
 }
 
 const sumOrNull = values => (values.every(value => finite(value) !== null) ? values.reduce((a, b) => a + finite(b), 0) : null)
+
+/** F17: reject inputs that would merge different arms/batches or repeat runs. */
+export function assertSingleBatch(runs) {
+  if (runs.length === 0) return null
+  const arms = new Set()
+  const batches = new Set()
+  for (const run of runs) {
+    if (typeof run.arm !== 'string' || run.arm === '') {
+      throw new Error('T04 input is missing arm identity; single-arm/single-batch scoring requires every run to carry arm')
+    }
+    if (typeof run.batch !== 'string' || run.batch === '') {
+      throw new Error('T04 input is missing batch identity; single-arm/single-batch scoring requires every run to carry batch')
+    }
+    arms.add(run.arm)
+    batches.add(run.batch)
+    if (run.repetition !== undefined) {
+      if (!Number.isInteger(run.repetition) || run.repetition < 1) {
+        throw new Error(`T04 input has invalid repetition: ${String(run.repetition)}`)
+      }
+      if (run.repetition >= 2) {
+        throw new Error(`T04 input contains repetition=${run.repetition}; repetition>=2 is not a main scoring record and must not be merged into the main batch`)
+      }
+    }
+  }
+  if (arms.size > 1) {
+    throw new Error(`T04 input mixes arms (${[...arms].sort().join(', ')}); only one arm can be scored per batch`)
+  }
+  if (batches.size > 1) {
+    throw new Error(`T04 input mixes batches (${[...batches].sort().join(', ')}); only one batch can be scored per run`)
+  }
+  return { arm: [...arms][0], batch: [...batches][0] }
+}
 
 /** Merge the runs of one task into the task-level evaluation aggregate (AT-60). */
 export function aggregateByTask(runs) {
@@ -204,53 +250,115 @@ export function aggregateByTask(runs) {
  * current batch only (AT-60/61/62/64). `now` is injectable for tests.
  */
 export function computeMetrics(runs, { now = new Date() } = {}) {
+  assertSingleBatch(runs)
   const aggregation = aggregateByTask(runs)
   const tasks = aggregation.tasks
   const reasons = []
 
-  const ratio = (numerator, denominator) => (denominator > 0 ? numerator / denominator : null)
-  const values = {
-    acceptanceRate: ratio(tasks.filter(task => task.acceptance === 'passed').length, tasks.filter(task => task.acceptance !== null).length),
-    mergeRate: ratio(tasks.filter(task => task.merged).length, tasks.filter(task => task.ready).length),
-    firstReviewPassRate: ratio(tasks.filter(task => task.firstReviewPass === true).length, tasks.filter(task => task.firstReviewPass !== null).length),
-    reworkRate: ratio(tasks.filter(task => task.sevenDayOutcome === 'rework').length, tasks.filter(task => task.sevenDayOutcome !== null).length),
-    queueWaitSeconds: median(tasks.map(task => task.queueWaitSeconds)),
-    reviewWaitSeconds: median(tasks.map(task => task.reviewWaitSeconds)),
-    wallClockSeconds: median(tasks.map(task => task.wallClockSeconds)),
-    tokensTotal: median(tasks.map(task => task.tokensTotal)),
+  const taskHas = {
+    acceptanceRate: task => task.acceptance !== null,
+    mergeRate: task => task.ready === true,
+    firstReviewPassRate: task => task.firstReviewPass !== null,
+    reworkRate: task => task.sevenDayOutcome !== null,
+    queueWaitSeconds: task => finite(task.queueWaitSeconds) !== null,
+    reviewWaitSeconds: task => finite(task.reviewWaitSeconds) !== null,
+    wallClockSeconds: task => finite(task.wallClockSeconds) !== null,
+    tokensTotal: task => finite(task.tokensTotal) !== null,
   }
+  const ratioMetric = (name, predicate) => {
+    const known = tasks.filter(taskHas[name])
+    return { value: known.length > 0 ? known.filter(predicate).length / known.length : null, known: known.length }
+  }
+  const medianMetric = name => {
+    const known = tasks.filter(taskHas[name])
+    const numbers = known.map(task => finite(task[name])).filter(value => value !== null)
+    return { value: median(numbers), known: known.length }
+  }
+  const rawValues = {
+    acceptanceRate: ratioMetric('acceptanceRate', task => task.acceptance === 'passed'),
+    mergeRate: ratioMetric('mergeRate', task => task.merged),
+    firstReviewPassRate: ratioMetric('firstReviewPassRate', task => task.firstReviewPass === true),
+    reworkRate: ratioMetric('reworkRate', task => task.sevenDayOutcome === 'rework'),
+    queueWaitSeconds: medianMetric('queueWaitSeconds'),
+    reviewWaitSeconds: medianMetric('reviewWaitSeconds'),
+    wallClockSeconds: medianMetric('wallClockSeconds'),
+    tokensTotal: medianMetric('tokensTotal'),
+  }
+  const values = Object.fromEntries(Object.entries(rawValues).map(([name, entry]) => [name, entry.value]))
+  const knownCounts = Object.fromEntries(Object.entries(rawValues).map(([name, entry]) => [name, entry.known]))
+  // A task that never became ready has no merge disposition to report, not missing
+  // data: mergeRate's denominator is the ready subset (no F07 incompleteness).
+  knownCounts.mergeRate = tasks.length
 
-  // AT-64: less than 7 observation days or no merged PR is observable => no total.
-  const mergedTimes = runs.map(run => run.mergedAt).filter(value => typeof value === 'string' && value !== '').map(value => Date.parse(value)).filter(value => !Number.isNaN(value))
-  const startedTimes = runs.map(run => run.startedAt).filter(value => typeof value === 'string' && value !== '').map(value => Date.parse(value)).filter(value => !Number.isNaN(value))
-  const observationStart = mergedTimes.length ? Math.min(...mergedTimes) : startedTimes.length ? Math.min(...startedTimes) : null
-  const endTime = now instanceof Date ? now.getTime() : Date.parse(now)
-  const observedDays = observationStart === null || Number.isNaN(endTime) ? null : round2((endTime - observationStart) / 86400000)
-  const insufficientObservation = observedDays === null || observedDays < OBSERVATION_DAYS_REQUIRED || mergedTimes.length === 0
-  if (insufficientObservation) {
-    reasons.push(
-      mergedTimes.length === 0
-        ? 'AT-64: no merged PR is observable, so the 7-day outcome cannot be observed'
-        : `AT-64: observation window ${observedDays} day(s) < ${OBSERVATION_DAYS_REQUIRED} day(s)`,
-    )
+  // F08: per-task observation sufficiency, never the earliest merge in the batch.
+  const runsByTask = new Map()
+  for (const run of runs) {
+    const taskId = run.taskId ?? run.task
+    if (typeof taskId !== 'string' || taskId === '') continue
+    if (!runsByTask.has(taskId)) runsByTask.set(taskId, [])
+    runsByTask.get(taskId).push(run)
   }
+  const endTime = now instanceof Date ? now.getTime() : Date.parse(now)
+  const taskObservations = tasks.map(task => {
+    const group = runsByTask.get(task.taskId) ?? []
+    const mergeTimes = group.map(run => run.mergedAt).filter(value => typeof value === 'string' && value !== '')
+      .map(value => Date.parse(value)).filter(value => !Number.isNaN(value))
+    const earliestMergeTime = mergeTimes.length > 0 ? Math.min(...mergeTimes) : null
+    const observedDays = earliestMergeTime === null || Number.isNaN(endTime) ? null : round2((endTime - earliestMergeTime) / 86400000)
+    const problems = []
+    if (task.merged !== true || earliestMergeTime === null) problems.push('not merged / no parseable mergedAt')
+    else if (observedDays === null || observedDays < OBSERVATION_DAYS_REQUIRED) problems.push(`observed ${observedDays} day(s) < ${OBSERVATION_DAYS_REQUIRED} day(s)`)
+    if (task.sevenDayOutcome === null) problems.push('7-day outcome is pending/unknown')
+    return {
+      taskId: task.taskId,
+      merged: task.merged,
+      observedDays,
+      sevenDayOutcome: task.sevenDayOutcome,
+      sufficient: problems.length === 0,
+      problems,
+    }
+  })
+  const insufficientTasks = taskObservations.filter(task => !task.sufficient)
+  const observedDays = tasks.length === 0
+    ? null
+    : taskObservations.every(task => task.observedDays !== null)
+      ? round2(Math.min(...taskObservations.map(task => task.observedDays)))
+      : null
+  const insufficientObservation = tasks.length === 0 || insufficientTasks.length > 0
+  for (const task of insufficientTasks) {
+    reasons.push(`AT-64/F08: task ${task.taskId}: ${task.problems.join('; ')}; the batch total is withheld`)
+  }
+  if (tasks.length === 0) reasons.push('AT-64: no task-level records, so no total score can be produced')
 
   const metrics = METRIC_NAMES.map(name => {
     const anchor = METRIC_ANCHORS[name]
     const value = finite(values[name])
-    const status = insufficientObservation && name === 'reworkRate' ? '证据不足' : value === null ? 'unknown' : 'ok'
+    const known = knownCounts[name] ?? 0
+    const missing = tasks.length - known
+    let status
+    if (insufficientObservation && name === 'reworkRate') status = '证据不足'
+    else if (known === 0) status = 'unknown'
+    else if (missing > 0) status = 'incomplete'
+    else status = 'ok'
     const score = status === 'ok' ? anchorScore(name, value) : null
-    return { name, label: anchor.label, unit: anchor.unit, direction: anchor.direction, zero: anchor.zero, full: anchor.full, value: value === null ? null : round2(value), score, status }
+    return { name, label: anchor.label, unit: anchor.unit, direction: anchor.direction, zero: anchor.zero, full: anchor.full, value: value === null ? null : round2(value), score, status, knownTasks: known, missingTasks: missing }
   })
+  const incompleteMetrics = metrics.filter(metric => metric.status === 'incomplete').map(metric => metric.name)
   const unknownMetrics = metrics.filter(metric => metric.status === 'unknown' && !(insufficientObservation && metric.name === 'reworkRate')).map(metric => metric.name)
   const observation = {
     requiredDays: OBSERVATION_DAYS_REQUIRED,
     observedDays,
     observedThrough: Number.isNaN(endTime) ? null : new Date(endTime).toISOString(),
-    mergedTasks: mergedTimes.length,
+    mergedTasks: tasks.filter(task => task.merged === true).length,
     sufficient: !insufficientObservation,
+    insufficientTasks: insufficientTasks.map(task => task.taskId),
   }
   if (insufficientObservation) {
+    return { observation, aggregation, metrics, totalScore: null, verdict: '证据不足', reasons }
+  }
+  if (incompleteMetrics.length > 0) {
+    reasons.push(`F07: incomplete task data for ${incompleteMetrics.join(', ')}; known subset shown but no total score (verdict 证据不足)`)
+    if (unknownMetrics.length > 0) reasons.push(`AT-61: missing data for ${unknownMetrics.join(', ')}`)
     return { observation, aggregation, metrics, totalScore: null, verdict: '证据不足', reasons }
   }
   if (unknownMetrics.length > 0) {
@@ -336,6 +444,9 @@ export function selfTest() {
   const ticket = (overrides) => ({
     taskId: 'task-alpha',
     ticketIds: ['ticket-1'],
+    arm: 'full-package',
+    batch: 'batch-1',
+    repetition: 1,
     startedAt: '2026-01-01T00:00:00Z',
     delivery: 'ready-pr-created',
     acceptanceVerdict: 'passed',
@@ -357,8 +468,8 @@ export function selfTest() {
       ticketIds: ['ticket-3'],
       delivery: 'blocked',
       acceptanceVerdict: 'failed',
-      mergedAt: null,
-      sevenDayOutcome: 'pending',
+      mergedAt: '2026-01-02T00:00:00Z',
+      sevenDayOutcome: 'clean',
       firstReviewCandidate: { head: shaB, submittedAt: '2026-01-01T06:00:00Z' },
       finalCandidate: { head: shaC },
       queueWaitSeconds: 1800,
@@ -423,6 +534,72 @@ export function selfTest() {
   const reworkNoMerge = noMergeResult.metrics.find(metric => metric.name === 'reworkRate')
   pass(results, 'T04 AT-64 no observable PR produces no total score', noMergeResult.totalScore === null && noMergeResult.verdict === '证据不足' && noMergeResult.observation.mergedTasks === 0, `total=${noMergeResult.totalScore} verdict=${noMergeResult.verdict}`)
   pass(results, 'T04 AT-64 no observable PR marks rework as 证据不足', reworkNoMerge?.status === '证据不足', JSON.stringify(reworkNoMerge))
+
+  // F07 counterexample: two tasks, one lacks token/time/waits/acceptance/candidate.
+  // Before the completeness gate this produced totalScore=100; it must now be evidence-insufficient.
+  const perfectRuns = [
+    ticket({ taskId: 'task-perfect-a', ticketIds: ['ticket-pa'] }),
+    ticket({ taskId: 'task-perfect-b', ticketIds: ['ticket-pb'] }),
+  ]
+  const partialMissingRuns = perfectRuns.map(run => run.taskId === 'task-perfect-b'
+    ? {
+        ...run,
+        acceptanceVerdict: null,
+        firstReviewCandidate: null,
+        finalCandidate: null,
+        wallClockSeconds: null,
+        queueWaitSeconds: null,
+        reviewWaitSeconds: null,
+        tokens: { total: null },
+      }
+    : run)
+  const partialResult = computeMetrics(partialMissingRuns, { now: afterBatch })
+  const partialNames = partialResult.metrics.filter(metric => metric.status === 'incomplete').map(metric => metric.name)
+  const partialTokens = partialResult.metrics.find(metric => metric.name === 'tokensTotal')
+  pass(results, 'T04 F07 partial missing data is evidence-insufficient, never scored/100',
+    partialResult.totalScore === null && partialResult.verdict === '证据不足' && partialResult.verdict !== 'scored',
+    `total=${partialResult.totalScore} verdict=${partialResult.verdict}`)
+  pass(results, 'T04 F07 each affected metric is incomplete (known subset is still displayed)',
+    ['acceptanceRate', 'firstReviewPassRate', 'queueWaitSeconds', 'reviewWaitSeconds', 'wallClockSeconds', 'tokensTotal'].every(name => partialNames.includes(name)) && partialTokens?.value === 50000 && partialTokens?.score === null,
+    JSON.stringify({ incomplete: partialNames, tokens: partialTokens }))
+  pass(results, 'T04 F07 partial data reason names the missing metrics',
+    partialResult.reasons.some(reason => reason.includes('F07') && reason.includes('tokensTotal')),
+    JSON.stringify(partialResult.reasons))
+
+  // F08 counterexample: A merged 8 days ago clean + B merged today pending.
+  // The old batch-wide earliest-merge window let B pass; per-task observation must withhold the total.
+  const freshNow = new Date('2026-03-01T00:00:00Z')
+  const matureRun = ticket({ taskId: 'task-mature', ticketIds: ['ticket-mature'], mergedAt: '2026-02-21T00:00:00Z', sevenDayOutcome: 'clean' })
+  const freshRun = ticket({ taskId: 'task-fresh', ticketIds: ['ticket-fresh'], mergedAt: '2026-03-01T00:00:00Z', sevenDayOutcome: 'pending' })
+  const freshResult = computeMetrics([matureRun, freshRun], { now: freshNow })
+  const freshRework = freshResult.metrics.find(metric => metric.name === 'reworkRate')
+  pass(results, 'T04 F08 a fresh/pending task withholds the batch total',
+    freshResult.observation.sufficient === false && freshResult.totalScore === null && freshResult.verdict === '证据不足',
+    JSON.stringify(freshResult.observation) + ` total=${freshResult.totalScore} verdict=${freshResult.verdict}`)
+  pass(results, 'T04 F08 insufficient task is named and rework is 证据不足',
+    freshResult.observation.insufficientTasks.includes('task-fresh') && freshRework?.status === '证据不足' && freshRework?.score === null,
+    JSON.stringify({ insufficientTasks: freshResult.observation.insufficientTasks, rework: freshRework }))
+
+  // F17 counterexamples: mixed arm / mixed batch / repetition>=2 are rejected at the entry.
+  const errorOf = (fn) => { try { fn(); return null } catch (error) { return error instanceof Error ? error.message : String(error) } }
+  const mixedArmError = errorOf(() => computeMetrics([
+    ticket({ taskId: 'task-mixed', ticketIds: ['ticket-mixed-a'], arm: 'full-package' }),
+    ticket({ taskId: 'task-mixed', ticketIds: ['ticket-mixed-b'], arm: 'legacy-system' }),
+  ], { now: afterBatch }))
+  const mixedBatchError = errorOf(() => computeMetrics([
+    ticket({ taskId: 'task-mixed', ticketIds: ['ticket-mixed-a'], batch: 'batch-1' }),
+    ticket({ taskId: 'task-mixed', ticketIds: ['ticket-mixed-b'], batch: 'batch-2' }),
+  ], { now: afterBatch }))
+  const repetitionError = errorOf(() => computeMetrics([
+    ticket({ taskId: 'task-repeat', ticketIds: ['ticket-repeat-1'], repetition: 1 }),
+    ticket({ taskId: 'task-repeat', ticketIds: ['ticket-repeat-2'], repetition: 2 }),
+  ], { now: afterBatch }))
+  pass(results, 'T04 F17 mixed arms are rejected at the scoring entry', typeof mixedArmError === 'string' && mixedArmError.includes('mixes arms'), String(mixedArmError))
+  pass(results, 'T04 F17 mixed batches are rejected at the scoring entry', typeof mixedBatchError === 'string' && mixedBatchError.includes('mixes batches'), String(mixedBatchError))
+  pass(results, 'T04 F17 repetition>=2 main records are rejected', typeof repetitionError === 'string' && repetitionError.includes('repetition=2'), String(repetitionError))
+  pass(results, 'T04 F17 same arm+batch multi-ticket merging is preserved',
+    agg.taskCount === 2 && agg.ticketCount === 3 && computeMetrics(fixtureRuns, { now: afterBatch }).verdict === 'scored',
+    JSON.stringify({ taskCount: agg.taskCount, ticketCount: agg.ticketCount }))
 
   for (const line of results) console.log(line)
   const failed = results.filter(line => line.startsWith('FAIL')).length
