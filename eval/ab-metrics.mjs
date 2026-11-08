@@ -206,12 +206,80 @@ export function assertSingleBatch(runs) {
   return { arm: [...arms][0], batch: [...batches][0] }
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(item => canonicalJson(item)).join(',')}]`
+  if (value !== null && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+const T04_NON_NEGATIVE_FIELDS = ['wallClockSeconds', 'queueWaitSeconds', 'reviewWaitSeconds']
+
+function checkT04Row(run, index) {
+  if (run === null || typeof run !== 'object' || Array.isArray(run)) throw new Error(`T04 input row ${index + 1} is not an object`)
+  const taskId = run.taskId ?? run.task
+  if (typeof taskId !== 'string' || taskId.trim() === '') {
+    throw new Error(`T04 input row ${index + 1} is missing taskId identity; every scored row must identify its task`)
+  }
+  const ticketIds = Array.isArray(run.ticketIds) ? run.ticketIds.filter(id => typeof id === 'string' && id.trim() !== '') : []
+  const runId = typeof run.runId === 'string' && run.runId.trim() !== '' ? run.runId.trim() : ''
+  if (runId === '' && ticketIds.length === 0) {
+    throw new Error(`T04 input row ${index + 1} is missing runId/ticketIds identity; every scored row must identify its ticket or run`)
+  }
+  for (const field of T04_NON_NEGATIVE_FIELDS) {
+    const value = run[field]
+    if (value === undefined || value === null) continue
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      throw new Error(`T04 input row ${index + 1} has invalid ${field} (${String(value)}); expected a finite non-negative number`)
+    }
+  }
+  if (run.tokens !== undefined && run.tokens !== null) {
+    if (typeof run.tokens !== 'object' || Array.isArray(run.tokens)) {
+      throw new Error(`T04 input row ${index + 1} has invalid tokens; expected an object with a non-negative total`)
+    }
+    const total = run.tokens.total
+    if (total !== undefined && total !== null && (typeof total !== 'number' || !Number.isFinite(total) || total < 0)) {
+      throw new Error(`T04 input row ${index + 1} has invalid tokens.total (${String(total)}); expected a finite non-negative number`)
+    }
+  }
+  return { taskId: taskId.trim(), runId, ticketIds }
+}
+
+/**
+ * T01/T02: validate every T04 row and give it a stable identity. Identical
+ * duplicates are collapsed to one row with a warning; the same identity with a
+ * different snapshot is a hard conflict. Different tickets of one task remain
+ * distinct and are aggregated normally.
+ */
+export function normalizeRuns(runs) {
+  const unique = []
+  const warnings = []
+  const seen = new Map()
+  for (const [index, run] of runs.entries()) {
+    const { taskId, runId, ticketIds } = checkT04Row(run, index)
+    const identity = runId !== '' ? `run:${runId}` : `ticket:${taskId}:${ticketIds.join(',')}`
+    const snapshot = canonicalJson(run)
+    const previous = seen.get(identity)
+    if (previous !== undefined) {
+      if (previous !== snapshot) {
+        throw new Error(`T04 input has conflicting records for the same identity ${identity}; identical duplicates may be collapsed, different snapshots must be rejected`)
+      }
+      warnings.push(`T02: duplicate identical record ignored (${identity})`)
+      continue
+    }
+    seen.set(identity, snapshot)
+    unique.push(run)
+  }
+  return { runs: unique, warnings }
+}
+
 /** Merge the runs of one task into the task-level evaluation aggregate (AT-60). */
-export function aggregateByTask(runs) {
+export function aggregateByTask(inputRuns) {
+  const runs = normalizeRuns(inputRuns).runs
   const groups = new Map()
   for (const run of runs) {
     const taskId = run.taskId ?? run.task
-    if (typeof taskId !== 'string' || taskId === '') continue
     if (!groups.has(taskId)) groups.set(taskId, [])
     groups.get(taskId).push(run)
   }
@@ -269,7 +337,10 @@ export function aggregateByTask(runs) {
  * Compute the eight T04 metrics, anchored scores and the total score from the
  * current batch only (AT-60/61/62/64). `now` is injectable for tests.
  */
-export function computeMetrics(runs, { now = new Date() } = {}) {
+export function computeMetrics(inputRuns, { now = new Date() } = {}) {
+  const normalized = normalizeRuns(inputRuns)
+  const runs = normalized.runs
+  const warnings = normalized.warnings
   assertSingleBatch(runs)
   const aggregation = aggregateByTask(runs)
   const tasks = aggregation.tasks
@@ -421,19 +492,19 @@ export function computeMetrics(runs, { now = new Date() } = {}) {
     })),
   }
   if (insufficientObservation) {
-    return { observation, aggregation, metrics, totalScore: null, verdict: '证据不足', reasons }
+    return { observation, aggregation, metrics, totalScore: null, verdict: '证据不足', reasons, warnings }
   }
   if (incompleteMetrics.length > 0) {
     reasons.push(`F07: incomplete task data for ${incompleteMetrics.join(', ')}; known subset shown but no total score (verdict 证据不足)`)
     if (unknownMetrics.length > 0) reasons.push(`AT-61: missing data for ${unknownMetrics.join(', ')}`)
-    return { observation, aggregation, metrics, totalScore: null, verdict: '证据不足', reasons }
+    return { observation, aggregation, metrics, totalScore: null, verdict: '证据不足', reasons, warnings }
   }
   if (unknownMetrics.length > 0) {
     reasons.push(`AT-61: missing data for ${unknownMetrics.join(', ')}; the total is judged 不达标`)
-    return { observation, aggregation, metrics, totalScore: null, verdict: '不达标', reasons }
+    return { observation, aggregation, metrics, totalScore: null, verdict: '不达标', reasons, warnings }
   }
   const totalScore = round2(metrics.reduce((sum, metric) => sum + metric.score, 0) / metrics.length)
-  return { observation, aggregation, metrics, totalScore, verdict: 'scored', reasons }
+  return { observation, aggregation, metrics, totalScore, verdict: 'scored', reasons, warnings }
 }
 
 /** True when the run carries any T04 collection field (so the CLI builds the T04 summary). */
@@ -703,6 +774,48 @@ export function selfTest() {
     sharedObservation.observation.insufficientTickets.some(ticket => ticket.ticketId === 'ticket-fresh') && sharedObservation.observation.insufficientTasks.includes('task-shared-observation'),
     JSON.stringify(sharedObservation.observation.insufficientTickets))
 
+  // T01 counterexamples: no silent skipping of a row with missing identity, and
+  // negative/non-finite costs are rejected instead of being scored as unknown.
+  const goodTicket = ticket({ taskId: 'task-good', ticketIds: ['ticket-good'] })
+  const unnamedFail = { ...ticket({ ticketIds: ['ticket-unnamed'], delivery: 'blocked', acceptanceVerdict: 'failed' }), taskId: undefined }
+  const missingIdentityError = errorOf(() => computeMetrics([goodTicket, unnamedFail], { now: afterBatch }))
+  pass(results, 'T01 row with missing taskId is rejected, not skipped',
+    typeof missingIdentityError === 'string' && missingIdentityError.includes('taskId'),
+    String(missingIdentityError))
+  const negativeErrors = ['wallClockSeconds', 'queueWaitSeconds', 'reviewWaitSeconds', 'tokens'].map(field => {
+    const run = field === 'tokens'
+      ? ticket({ tokens: { total: -1 } })
+      : ticket({ [field]: -1 })
+    return errorOf(() => computeMetrics([run], { now: afterBatch }))
+  })
+  pass(results, 'T01 negative wall-clock/queue/review/token values are rejected',
+    negativeErrors.every(message => typeof message === 'string' && message.includes('invalid') && message.includes('non-negative')),
+    JSON.stringify(negativeErrors))
+  const nonFiniteError = errorOf(() => computeMetrics([ticket({ wallClockSeconds: Number.POSITIVE_INFINITY })], { now: afterBatch }))
+  pass(results, 'T01 non-finite cost is rejected', typeof nonFiniteError === 'string' && nonFiniteError.includes('non-negative'), String(nonFiniteError))
+
+  // T02 counterexamples: identical duplicate rows collapse with a warning (no
+  // double counting); same identity with a different snapshot is a conflict;
+  // different tickets of one task still accumulate.
+  const duplicated = computeMetrics([ticket(), ticket()], { now: afterBatch })
+  pass(results, 'T02 identical duplicate record is counted once with a warning',
+    duplicated.warnings?.length === 1 && duplicated.aggregation.taskCount === 1 && duplicated.aggregation.ticketCount === 1 && duplicated.totalScore === 100 && duplicated.verdict === 'scored',
+    JSON.stringify({ warnings: duplicated.warnings, aggregation: duplicated.aggregation, total: duplicated.totalScore, verdict: duplicated.verdict }))
+  const conflictError = errorOf(() => computeMetrics([
+    ticket({ taskId: 'task-conflict', ticketIds: ['ticket-conflict'], runId: 'run-conflict', wallClockSeconds: 300 }),
+    ticket({ taskId: 'task-conflict', ticketIds: ['ticket-conflict'], runId: 'run-conflict', wallClockSeconds: 301 }),
+  ], { now: afterBatch }))
+  pass(results, 'T02 same identity with a different snapshot is rejected',
+    typeof conflictError === 'string' && conflictError.includes('conflicting records'),
+    String(conflictError))
+  const distinctTickets = computeMetrics([
+    ticket({ taskId: 'task-distinct', ticketIds: ['ticket-distinct-1'] }),
+    ticket({ taskId: 'task-distinct', ticketIds: ['ticket-distinct-2'] }),
+  ], { now: afterBatch })
+  pass(results, 'T02 different tickets of one task still accumulate',
+    distinctTickets.warnings?.length === 0 && distinctTickets.aggregation.taskCount === 1 && distinctTickets.aggregation.ticketCount === 2,
+    JSON.stringify(distinctTickets.aggregation))
+
   for (const line of results) console.log(line)
   const failed = results.filter(line => line.startsWith('FAIL')).length
   if (failed > 0) { console.log(`\nFAILED: ${failed} assertion(s)`); return 1 }
@@ -739,6 +852,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
           verdict: summary.verdict,
         })
         if (summary.reasons.length > 0) output.reasons = summary.reasons
+        if (summary.warnings.length > 0) output.warnings = summary.warnings
       }
       console.log(JSON.stringify(output, null, 2))
     } catch (error) {
