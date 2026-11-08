@@ -458,12 +458,13 @@ export async function runCheck(options: {
       rootCallId: outer.callId, agent: outer.agent, signal: outer.signal,
       arguments: { description: `HEPHI ${check.id}`, command, workdir: cwd, timeoutMs: check.timeoutMs } })
     const value = result.value as { kind?: string; jobId?: string; exitCode?: number; timedOut?: boolean; aborted?: boolean; signal?: string | null;
-      stdout?: { text?: string }; stderr?: { text?: string } } | undefined
+      stdout?: { text?: string; truncated?: boolean }; stderr?: { text?: string; truncated?: boolean } } | undefined
     if (result.isError) throw new Error('native bash execution returned an error')
 
     let output = ''
     let exitCode: number | null = null
     let jobFailure: string | undefined
+    let truncatedStreams: string[] = []
     if (value?.kind === 'foreground') {
       if (!Number.isInteger(value.exitCode) || value.timedOut || value.aborted || value.signal != null) {
         throw new Error('only a confirmed foreground result is supported; background/cancel/unknown requires operator resolution')
@@ -471,6 +472,10 @@ export async function runCheck(options: {
       terminal = true
       output = `${value.stdout?.text ?? ''}\n${value.stderr?.text ?? ''}`
       exitCode = value.exitCode!
+      truncatedStreams = [
+        ...(value.stdout?.truncated === true ? ['stdout'] : []),
+        ...(value.stderr?.truncated === true ? ['stderr'] : []),
+      ]
     } else if (value?.kind === 'promoted' || value?.kind === 'background') {
       const jobId = value.jobId
       if (typeof jobId !== 'string' || !jobId) throw new Error(`native bash ${value.kind} result is missing its Job id`)
@@ -585,6 +590,11 @@ export async function runCheck(options: {
       throw new Error(`red run failed as expected: exit code ${exitCode}`)
     }
     if (jobFailure) throw new Error(jobFailure)
+    // H5-FOREGROUND: a confirmed foreground run never passes on incomplete output;
+    // the real exit code and the captured partial output stay in the blocked record.
+    if (truncatedStreams.length > 0) {
+      throw new Error(`foreground output was truncated (${truncatedStreams.join(', ')}); check cannot pass with incomplete output (exit code ${String(exitCode)})`)
+    }
     if (exitCode === null) throw new Error('native execution did not report an exit code')
     if (exitCode !== 0) throw new Error(`check did not exit successfully: ${exitCode}`)
     record.after = await gitFingerprint(workspace, contract.baseSha)

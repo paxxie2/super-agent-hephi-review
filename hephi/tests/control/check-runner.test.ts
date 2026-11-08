@@ -867,3 +867,38 @@ describe('T14: classified pre-check refusals and the decision log', () => {
     expect(record.status).toBe('passed')
   })
 })
+
+// H5-FOREGROUND DEVELOPMENT TESTS: these feed the documented native foreground
+// result shape (a constructed `value`, not a live host capture). They verify the
+// runner's decision on truncated output; they are not a real truncation E2E test.
+describe('foreground truncated output (development test: constructed native result)', () => {
+  it('[development test] blocks exit 0 when stdout was truncated and keeps the real code and output', async () => {
+    const x = await setup()
+    const stdout = 'stdout prefix only\n'
+    const stderr = 'stderr complete\n'
+    const record = await x.execute(bashResult({
+      kind: 'foreground', cwd: x.r.dir, exitCode: 0, signal: null, timedOut: false, aborted: false, timeoutMs: 5000,
+      stdout: { text: stdout, truncated: true }, stderr: { text: stderr, truncated: false },
+    }))
+    expect(record.status).toBe('blocked')
+    expect(record.exitCode).toBe(0)
+    expect(record.reason).toContain('truncated')
+    expect(record.reason).toContain('stdout')
+    expect(await readFile(join(checkRunDir(x.stateDir, 'ticket-1', record.runId), 'output.log'), 'utf8')).toBe(`${stdout}\n${stderr}`)
+  })
+
+  it('[development test] blocks exit 0 when stderr was truncated and keeps the real code and output', async () => {
+    const x = await setup()
+    const stdout = 'stdout complete\n'
+    const stderr = 'stderr prefix only\n'
+    const record = await x.execute(bashResult({
+      kind: 'foreground', cwd: x.r.dir, exitCode: 0, signal: null, timedOut: false, aborted: false, timeoutMs: 5000,
+      stdout: { text: stdout, truncated: false }, stderr: { text: stderr, truncated: true },
+    }))
+    expect(record.status).toBe('blocked')
+    expect(record.exitCode).toBe(0)
+    expect(record.reason).toContain('truncated')
+    expect(record.reason).toContain('stderr')
+    expect(await readFile(join(checkRunDir(x.stateDir, 'ticket-1', record.runId), 'output.log'), 'utf8')).toBe(`${stdout}\n${stderr}`)
+  })
+})
