@@ -341,10 +341,12 @@ export function computeMetrics(runs, { now = new Date() } = {}) {
       ticketIndex += 1
       const ticketIds = Array.isArray(run.ticketIds) && run.ticketIds.length > 0 ? run.ticketIds : [run.runId ?? `${taskId}#${ticketIndex}`]
       const mergeTime = typeof run.mergedAt === 'string' && run.mergedAt !== '' ? Date.parse(run.mergedAt) : NaN
-      const observedDays = Number.isNaN(mergeTime) || Number.isNaN(endTime) ? null : round2((endTime - mergeTime) / 86400000)
+      // T10-03：达标判断用未舍入的毫秒差（>= 7*86400000）；round2 仅用于展示，避免 6d23h59m 提前放行。
+      const observedMs = Number.isNaN(mergeTime) || Number.isNaN(endTime) ? null : endTime - mergeTime
+      const observedDays = observedMs === null ? null : round2(observedMs / 86400000)
       const problems = []
       if (!Number.isFinite(mergeTime)) problems.push('not merged / no parseable mergedAt')
-      else if (observedDays === null || observedDays < OBSERVATION_DAYS_REQUIRED) problems.push(`observed ${observedDays} day(s) < ${OBSERVATION_DAYS_REQUIRED} day(s)`)
+      else if (observedMs === null || observedMs < OBSERVATION_DAYS_REQUIRED * 86400000) problems.push(`observed ${observedDays} day(s) < ${OBSERVATION_DAYS_REQUIRED} day(s) (exact ms gate)`)
       if (!['clean', 'rework'].includes(run.sevenDayOutcome)) problems.push('7-day outcome is pending/unknown')
       for (const ticketId of ticketIds) {
         ticketObservations.push({

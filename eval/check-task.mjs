@@ -90,26 +90,26 @@ const NORMALIZATION = {
   scope: 'stdout+stderr',
   rules: [
     'CRLF/CR → LF',
-    '仅 JSON/Python repr 的元数据键值（timestamp/time/requestId/request_id/traceId/trace_id/spanId/span_id/pid/loggedAt/createdAt/updatedAt/durationMs/elapsedMs）→ <dynamic>',
+    '仅关联 ID 键值（requestId/traceId/spanId/pid/correlationId 等）→ <dynamic>；timestamp/createdAt 等可能是业务值，不归一化',
     '仅行首日志时间戳（可带 []，如 [2026-11-08T12:00:00Z] 或 2026-11-08T12:00:00Z）→ <timestamp>',
     '裸值、actual=/expected= 之后的值、普通文本中的时间/UUID 不归一化（业务结果差异必须保留）',
   ],
   note: 'R6：仅归一化已确认的元数据上下文（JSON 键值/日志前缀）；业务断言里的时间、UUID 等真实值保留，差异会令 consistent=false。原始 stdout/stderr 与 outputSha256 不删除。',
 }
 
-const METADATA_KEYS = 'timestamp|time|requestId|request_id|traceId|trace_id|spanId|span_id|pid|loggedAt|createdAt|updatedAt|durationMs|elapsedMs'
+const METADATA_KEYS = 'requestId|request_id|traceId|trace_id|spanId|span_id|pid|correlationId|correlation_id|x-request-id'
 const METADATA_KV_PATTERN = new RegExp(
   `(["'](?:${METADATA_KEYS})["']\\s*:\\s*)(?:"[^"]*"|'[^']*'|[^,\\s}\\]]+)`,
   'gi',
 )
-const LOG_PREFIX_TIMESTAMP_PATTERN = /^(\s*\[?)(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)(\]?)/gm
+const LOG_PREFIX_TIMESTAMP_PATTERN = /^(\[\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\]\s*\[(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL)\])|^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\s+-\s+(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL)\s+-)/gm
 
 function normalizeStableOutput(text) {
   let out = String(text ?? '').replace(/\r\n?/g, '\n')
-  // R6：只替换元数据键值（JSON/Python repr 的键必须是引号包裹）。
+  // T10-02：仅归一化关联 ID 键值；timestamp/createdAt 等可能是业务值，不再归一化。
   out = out.replace(METADATA_KV_PATTERN, '$1<dynamic>')
-  // R6：只替换行首的日志时间戳前缀（可带 []）；正文/断言中的时间不处理。
-  out = out.replace(LOG_PREFIX_TIMESTAMP_PATTERN, '$1<timestamp>$3')
+  // T10-02：仅结构化日志行（[ts] [LEVEL] 或 ts - LEVEL -）的时间戳归一化；裸日期行保留。
+  out = out.replace(LOG_PREFIX_TIMESTAMP_PATTERN, '<log-timestamp>')
   return out
 }
 
@@ -153,6 +153,22 @@ function normalizePathForCompare(pathText) {
   return String(pathText ?? '').replace(/\\/g, '/')
 }
 
+/** 单个路径是否位于任务 worktree 内（含 macOS /private 前缀差异）。 */
+function pathInsideWorktree(pathText, worktree) {
+  if (!worktree) return false
+  const normalizedWorktree = normalizePathForCompare(worktree).replace(/\/+$/, '')
+  const normalized = normalizePathForCompare(pathText)
+  return normalized === normalizedWorktree
+    || normalized.startsWith(`${normalizedWorktree}/`)
+    || normalized.startsWith(`/private${normalizedWorktree}/`)
+}
+
+/** 最内层（异常抛出点）帧路径；无 traceback 返回 null。 */
+function innermostFramePath(text) {
+  const frames = [...text.matchAll(/File "([^"]+)"/g)].map((m) => m[1])
+  return frames.length ? frames[frames.length - 1] : null
+}
+
 /** traceback 帧路径是否落在任务 worktree 内（含 macOS /private 前缀差异）。 */
 function worktreeFramePaths(text, worktree) {
   if (!worktree) return []
@@ -185,17 +201,23 @@ function targetSymbolEvidence(text, { worktree, packageRoots = [] } = {}) {
       return { reason: `missing module '${name[1]}' matches local package root (${packageRoots.join(', ')})` }
     }
   }
+  // T10-01：本地调用帧不能证明失败符号属于任务目标——调用者在 worktree 只说明"谁调的"，
+  // 不说明"错在哪"。归属只看失败符号自身：来源模块必须是本地包根，或异常抛出点（最内层帧）
+  // 位于 worktree 内；否则一律 environment-error（fail-closed）。
+  const innermostFrame = innermostFramePath(text)
+  const raisedInWorktree = innermostFrame !== null && pathInsideWorktree(innermostFrame, worktree)
   const cannotImport = CANNOT_IMPORT_PATTERN.exec(text)
-  if (cannotImport && (moduleBelongsToTarget(cannotImport[2], packageRoots) || frames.length > 0)) {
-    return { reason: `cannot import name '${cannotImport[1]}' from target module '${cannotImport[2]}'` }
+  if (cannotImport && moduleBelongsToTarget(cannotImport[2], packageRoots)) {
+    return { reason: `cannot import name '${cannotImport[1]}' from target module '${cannotImport[2]}' (module is a local package root)` }
   }
-  // 签名/参数不匹配：只有调用栈里存在任务 worktree 帧才算目标函数缺失。
-  if (TYPE_ERROR_SIGNATURE_PATTERN.test(text) && frames.length > 0) {
-    return { reason: 'TypeError signature mismatch at worktree call site' }
+  // 签名/参数不匹配：仅当异常抛出点本身位于任务 worktree（目标函数在本地实现）才算目标缺失；
+  // 第三方库内部抛出的 TypeError（即使调用者在本地）是环境/依赖问题。
+  if (TYPE_ERROR_SIGNATURE_PATTERN.test(text) && raisedInWorktree) {
+    return { reason: 'TypeError signature mismatch raised inside the task worktree (target implementation)' }
   }
   const attributeError = ATTRIBUTE_ERROR_PATTERN.exec(text)
-  if (attributeError && (moduleBelongsToTarget(attributeError[1], packageRoots) || frames.length > 0)) {
-    return { reason: `AttributeError on target symbol '${attributeError[1]}'` }
+  if (attributeError && moduleBelongsToTarget(attributeError[1], packageRoots)) {
+    return { reason: `AttributeError on target module '${attributeError[1]}' (local package root)` }
   }
   if (worktree && normalizePathForCompare(text).includes(normalizePathForCompare(worktree).replace(/\/+$/, '')) && FILE_MISSING_PATTERN.test(text)) {
     return { reason: 'FileNotFoundError/ENOENT on task checkout path (target file/symbol missing)' }
@@ -871,11 +893,11 @@ function selfTest(asJson) {
       fixedPass,
       "rid=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')",
       'ts=$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)',
-      'printf \'AssertionError: expected fixed at {"timestamp": "%s", "requestId": "%s"}\n\' "$ts" "$rid" >&2',
+      'printf \'AssertionError: expected fixed at {"requestId": "%s", "loggedVia": "%s"}\n\' "$rid" "fixed" >&2',
       'exit 1',
     ]))
     record(
-      'R6 元数据（JSON timestamp/requestId）变化被归一化：三次一致且分类 target-assertion-failed',
+      'R6/T10-02 元数据（JSON requestId）变化被归一化：三次一致且分类 target-assertion-failed',
       dynamicMetadata.ok === true
         && dynamicMetadata.checks.base.consistent === true
         && new Set(dynamicMetadata.checks.base.outputSha256).size > 1
@@ -885,6 +907,20 @@ function selfTest(asJson) {
         && (dynamicMetadata.checks.base.normalization?.rules?.length ?? 0) > 0
         && (dynamicMetadata.normalization?.rules?.length ?? 0) > 0,
       JSON.stringify({ ok: dynamicMetadata.ok, classes: dynamicMetadata.checks.base?.failureClasses?.map((entry) => entry.failureClass), rawHashes: dynamicMetadata.checks.base?.outputSha256?.map((hash) => hash?.slice(0, 8)), normalizedHashes: dynamicMetadata.checks.base?.normalizedSha256?.map((hash) => hash?.slice(0, 8)) }),
+    )
+
+    // T10-02 反例：业务 JSON 的 createdAt 差异不得被归一化（键名不能证明是元数据）。
+    const businessCreatedAt = runClassify('business-created-at', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      "rnd=$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')",
+      'printf \'AssertionError: actual={"createdAt":"2026-run-%s"}\n\' "$rnd" >&2',
+      'exit 1',
+    ]))
+    record(
+      'T10-02 业务 JSON createdAt 差异保留：三次不一致',
+      businessCreatedAt.checks.base.consistent === false,
+      JSON.stringify({ normalized: businessCreatedAt.checks.base?.normalizedSha256?.map((hash) => hash?.slice(0, 8)) }),
     )
 
     // R6 正例：行首日志时间戳属于元数据上下文，可归一化。
