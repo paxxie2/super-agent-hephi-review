@@ -23,21 +23,24 @@
           "signal": null,
           "stdout": "",
           "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 97, in <module>\nTypeError: list_diagnoses() takes 3 positional arguments but 4 were given\n",
-          "outputSha256": "600503174f608a7384e520f9e447adede9598f44d5cdd1a3ac0cbec14bbeee60"
+          "outputSha256": "600503174f608a7384e520f9e447adede9598f44d5cdd1a3ac0cbec14bbeee60",
+          "normalizedSha256": "600503174f608a7384e520f9e447adede9598f44d5cdd1a3ac0cbec14bbeee60"
         },
         {
           "code": 1,
           "signal": null,
           "stdout": "",
           "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 97, in <module>\nTypeError: list_diagnoses() takes 3 positional arguments but 4 were given\n",
-          "outputSha256": "600503174f608a7384e520f9e447adede9598f44d5cdd1a3ac0cbec14bbeee60"
+          "outputSha256": "600503174f608a7384e520f9e447adede9598f44d5cdd1a3ac0cbec14bbeee60",
+          "normalizedSha256": "600503174f608a7384e520f9e447adede9598f44d5cdd1a3ac0cbec14bbeee60"
         },
         {
           "code": 1,
           "signal": null,
           "stdout": "",
           "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 97, in <module>\nTypeError: list_diagnoses() takes 3 positional arguments but 4 were given\n",
-          "outputSha256": "600503174f608a7384e520f9e447adede9598f44d5cdd1a3ac0cbec14bbeee60"
+          "outputSha256": "600503174f608a7384e520f9e447adede9598f44d5cdd1a3ac0cbec14bbeee60",
+          "normalizedSha256": "600503174f608a7384e520f9e447adede9598f44d5cdd1a3ac0cbec14bbeee60"
         }
       ],
       "codes": [
@@ -45,7 +48,50 @@
         1,
         1
       ],
+      "outputSha256": [
+        "600503174f608a7384e520f9e447adede9598f44d5cdd1a3ac0cbec14bbeee60",
+        "600503174f608a7384e520f9e447adede9598f44d5cdd1a3ac0cbec14bbeee60",
+        "600503174f608a7384e520f9e447adede9598f44d5cdd1a3ac0cbec14bbeee60"
+      ],
+      "normalizedSha256": [
+        "600503174f608a7384e520f9e447adede9598f44d5cdd1a3ac0cbec14bbeee60",
+        "600503174f608a7384e520f9e447adede9598f44d5cdd1a3ac0cbec14bbeee60",
+        "600503174f608a7384e520f9e447adede9598f44d5cdd1a3ac0cbec14bbeee60"
+      ],
       "consistent": true,
+      "failureClasses": [
+        {
+          "code": 1,
+          "failureClass": "target-symbol-missing",
+          "reason": "symbol/import marker: /TypeError: \\S+?\\(\\) (?:takes|got|missing|accepts)[^\\n]*argument/i"
+        },
+        {
+          "code": 1,
+          "failureClass": "target-symbol-missing",
+          "reason": "symbol/import marker: /TypeError: \\S+?\\(\\) (?:takes|got|missing|accepts)[^\\n]*argument/i"
+        },
+        {
+          "code": 1,
+          "failureClass": "target-symbol-missing",
+          "reason": "symbol/import marker: /TypeError: \\S+?\\(\\) (?:takes|got|missing|accepts)[^\\n]*argument/i"
+        }
+      ],
+      "validFailureClasses": [
+        "target-assertion-failed",
+        "target-symbol-missing"
+      ],
+      "normalization": {
+        "version": 1,
+        "scope": "stdout+stderr",
+        "rules": [
+          "CRLF/CR → LF",
+          "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+          "UUID → <uuid>",
+          "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+          "pid=数字 → pid=<pid>"
+        ],
+        "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
+      },
       "ok": true
     },
     "scope": {
@@ -68,21 +114,24 @@
           "signal": null,
           "stdout": "PASS: optional siteId filtering (service and HTTP route) with unchanged unfiltered behavior\n",
           "stderr": "",
-          "outputSha256": "10e044861a688d18979129952232caf0cb506ad0dc634721d9e3271a7ab1811b"
+          "outputSha256": "10e044861a688d18979129952232caf0cb506ad0dc634721d9e3271a7ab1811b",
+          "normalizedSha256": "10e044861a688d18979129952232caf0cb506ad0dc634721d9e3271a7ab1811b"
         },
         {
           "code": 0,
           "signal": null,
           "stdout": "PASS: optional siteId filtering (service and HTTP route) with unchanged unfiltered behavior\n",
           "stderr": "",
-          "outputSha256": "10e044861a688d18979129952232caf0cb506ad0dc634721d9e3271a7ab1811b"
+          "outputSha256": "10e044861a688d18979129952232caf0cb506ad0dc634721d9e3271a7ab1811b",
+          "normalizedSha256": "10e044861a688d18979129952232caf0cb506ad0dc634721d9e3271a7ab1811b"
         },
         {
           "code": 0,
           "signal": null,
           "stdout": "PASS: optional siteId filtering (service and HTTP route) with unchanged unfiltered behavior\n",
           "stderr": "",
-          "outputSha256": "10e044861a688d18979129952232caf0cb506ad0dc634721d9e3271a7ab1811b"
+          "outputSha256": "10e044861a688d18979129952232caf0cb506ad0dc634721d9e3271a7ab1811b",
+          "normalizedSha256": "10e044861a688d18979129952232caf0cb506ad0dc634721d9e3271a7ab1811b"
         }
       ],
       "codes": [
@@ -90,9 +139,43 @@
         0,
         0
       ],
+      "outputSha256": [
+        "10e044861a688d18979129952232caf0cb506ad0dc634721d9e3271a7ab1811b",
+        "10e044861a688d18979129952232caf0cb506ad0dc634721d9e3271a7ab1811b",
+        "10e044861a688d18979129952232caf0cb506ad0dc634721d9e3271a7ab1811b"
+      ],
+      "normalizedSha256": [
+        "10e044861a688d18979129952232caf0cb506ad0dc634721d9e3271a7ab1811b",
+        "10e044861a688d18979129952232caf0cb506ad0dc634721d9e3271a7ab1811b",
+        "10e044861a688d18979129952232caf0cb506ad0dc634721d9e3271a7ab1811b"
+      ],
       "consistent": true,
+      "normalization": {
+        "version": 1,
+        "scope": "stdout+stderr",
+        "rules": [
+          "CRLF/CR → LF",
+          "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+          "UUID → <uuid>",
+          "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+          "pid=数字 → pid=<pid>"
+        ],
+        "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
+      },
       "ok": true
     }
+  },
+  "normalization": {
+    "version": 1,
+    "scope": "stdout+stderr",
+    "rules": [
+      "CRLF/CR → LF",
+      "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+      "UUID → <uuid>",
+      "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+      "pid=数字 → pid=<pid>"
+    ],
+    "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
   },
   "ok": true,
   "baseSha": "bd816e9eb019b0520b98dbc1bd53bdf0c85010d4",

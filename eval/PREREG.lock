@@ -3,7 +3,7 @@
   "kind": "b1-prereg-lock",
   "generator": "eval/prereg-lock.mjs",
   "generatorVersion": "1.0.0",
-  "createdAt": "2026-11-08T18:07:09.223Z",
+  "createdAt": "2026-11-08T18:50:46.299Z",
   "lockStatus": "markers-cleared",
   "ownerApproval": "not-verified-by-tool",
   "note": "本锁只证明扫描时未发现未决标记；负责人书面批准仍以 eval/decisions-draft.md 与 PREREG §9 的记录为准。",
@@ -14,8 +14,8 @@
   "inputs": [
     {
       "path": "eval/PREREG.md",
-      "sha256": "8ec2185591654ff2b8270ba23a4233d7fedfc4b9857f698db1baaf9bc7fd890d",
-      "bytes": 14185
+      "sha256": "e35e14929c9ac246fceb826ef787469819ccb1295526f4505e2e32bd1a54fe04",
+      "bytes": 14580
     },
     {
       "path": "eval/decisions-draft.md",
@@ -23,7 +23,7 @@
       "bytes": 13903
     }
   ],
-  "preregSha256": "bed885fd631dc94e5ceeab69281b9881a640074cde647a07436da9323e50c3e1",
+  "preregSha256": "8e99ceeb1482f75384a04a4d247623b129c17be9a07e21893c780a1a25045ff1",
   "markerScan": {
     "tokens": [
       "N_TODO",

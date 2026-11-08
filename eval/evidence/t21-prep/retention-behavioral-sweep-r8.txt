@@ -1,0 +1,28 @@
+# q1-retention 22 卡 full-mode 行为验证（第八轮整改后复验，新 F15 标准）
+
+标准：ok:true + base failureClasses 全为 target-* + normalizedSha256 三次一致 + reference 3×通过 + outside=[]
+
+注：history-page-size-v3 首轮被判 environment-error，根因是分类器缺 TypeError 签名不匹配模式（真实目标失败被 fail-closed 误判），已补模式后通过。
+
+backend-input-validation-v2 ok:true [target-assertion-failed×3] cons:true
+backend-input-validation-v3 ok:true [target-assertion-failed×3] cons:true
+backend-validation-messages ok:true [target-assertion-failed×3] cons:true
+backend-validation-messages-v2 ok:true [target-symbol-missing×3] cons:true
+backend-validation-messages-v3 ok:true [target-symbol-missing×3] cons:true
+health-service-field-v2 ok:true [target-assertion-failed×3] cons:true
+health-service-field-v3 ok:true [target-assertion-failed×3] cons:true
+history-page-size-v2 ok:true [target-assertion-failed×3] cons:true
+history-page-size-v3 ok:true [target-symbol-missing×3] cons:true (classifier fix applied, rerun above)
+money-window-helpers-v2 ok:true [target-assertion-failed×3] cons:true
+money-window-helpers-v3 ok:true [target-assertion-failed×3] cons:true
+previous-window-order-v2 ok:true [target-symbol-missing×3] cons:true
+previous-window-order-v3 ok:true [target-symbol-missing×3] cons:true
+restore-data-package ok:true [target-assertion-failed×3] cons:true
+restore-data-package-v2 ok:true [target-assertion-failed×3] cons:true
+restore-data-package-v3 ok:true [target-assertion-failed×3] cons:true
+restore-health-service-id ok:true [target-assertion-failed×3] cons:true
+restore-health-service-id-v2 ok:true [target-assertion-failed×3] cons:true
+restore-health-service-id-v3 ok:true [target-assertion-failed×3] cons:true
+settings-dead-branches ok:true [target-assertion-failed×3] cons:true
+settings-dead-branches-v2 ok:true [target-assertion-failed×3] cons:true
+settings-dead-branches-v3 ok:true [target-assertion-failed×3] cons:true

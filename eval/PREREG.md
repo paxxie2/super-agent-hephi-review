@@ -1,8 +1,10 @@
 # B1 预注册（PREREG）— ROADMAP-95 工作线 B
 
-状态：**LOCKED v1.2（2026-11-09）· seed=20261108**。版本史：
+状态：**LOCKED v1.3（2026-11-09）· seed=20261108**。版本史：
 - v1.0（2026-11-08）：初锁（原委托参数）。
 - v1.1（2026-11-09）：Q1 对照对象更正为"原系统 vs 整包"；任务清单改引用 manifest。
+- v1.3（2026-11-09，第八轮集中审查）：§9 任务集角色计数笔误更正 23/4 → 22/5（v1.2 已把
+  previous-window-order 移出保留集但 §9 计数未同步）；无任何数值/口径变化。
 - v1.2（2026-11-09，第三轮审查）：① 分组规则全文统一——原系统组**含旧赫菲**（HEPHI `6d24e1b`
   + SA `62d7d53` + 原配置），废除 v1.0 遗留的"off 不挂载赫菲"排除规则/D-9 表述；
   ② 版本表归属更正（v1.1 误把 `6d24e1b` 写成 SA）；③ `previous-window-order` 因 8 次开发
@@ -141,9 +143,11 @@ v1.2 口径说明：原系统组**包含旧版赫菲**（原配置原插件）�
 - **锁哈希覆盖面（如实声明）**：`eval/PREREG.lock` 只哈希 `eval/PREREG.md` 与 `eval/decisions-draft.md`
   两个文件（工具 `prereg-lock.mjs` 的固定输入）。`eval/stats/requirements.txt` 与 rubric
   （`eval/label/RUBRIC.md`）**不在锁哈希内**，以 git 提交为准冻结。
-  **任务集清单**以 `eval/evidence/t21-prep/taskset-manifest-v1.2.json` 为冻结载体
-  （逐任务 sha256 + 角色分类：q1-retention 23 / q1-devexposed-original 4 / non-q1-tooling 12 /
-  staged-only-q3 1，绑定本版 preregSha256）；任何后续改动须按本节升版本。
+  **任务集清单**以 `eval/evidence/t21-prep/taskset-manifest-v1.3.json` 为冻结载体
+  （逐任务 sha256 + 角色分类：q1-retention 22 / q1-devexposed-original 5 / non-q1-tooling 12 /
+  staged-only-q3 1，绑定本版 preregSha256）。角色计数 **v1.1 时为 23/4，v1.2 将
+  `previous-window-order` 移出保留集（8 次开发试跑 + D-9 曝光）后为 22/5**（见 manifest `roleCounts` 与
+  `note`）；任何后续改动须按本节升版本。
   **总费用硬门槛（100 元）核验方式**：`report.py` 不实现总金额门槛；以 §11 CLI 显式参数
   （seed/min-pairs/margin）+ 独立成本台账（实际计费数据）双重核验，禁止用阈值换算冒充实测消耗。
 - 版本记录：每次变更升 `v0.x`，写明变更点、理由、是否影响已跑数据；锁定后变更需负责人批准。

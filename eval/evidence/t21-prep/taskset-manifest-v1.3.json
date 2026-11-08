@@ -1,8 +1,8 @@
 {
-  "version": "v1.2",
-  "frozenAt": "2026-11-08T18:07:02.269Z",
-  "preregSha256": "bed885fd631dc94e5ceeab69281b9881a640074cde647a07436da9323e50c3e1",
-  "note": "bound to PREREG v1.2 lock; regenerated with fresh hashes after review-r2 card edits (v1.1 hashes went stale after 415-card body change); role change vs v1.1: previous-window-order -> q1-devexposed-original (8 trial runs + D-9 exposure), retention 23->22",
+  "version": "v1.3",
+  "frozenAt": "2026-11-08T18:50:46.224Z",
+  "preregSha256": "8e99ceeb1482f75384a04a4d247623b129c17be9a07e21893c780a1a25045ff1",
+  "note": "bound to PREREG v1.3 lock; regenerated after review-r8 F14 card edits (bi-v2 issue/patch revision recorded); role counts 22/5/12/1",
   "roleCounts": {
     "non-q1-tooling": 12,
     "q1-devexposed-original": 5,
@@ -147,9 +147,10 @@
       "category": "cross-module",
       "group": "site-pnl-diagnosis",
       "taskJsonSha256": "fb6804c7e3f546853fe60cc44ca1e1602bf91bf67bb477bfb9005bd3c03ece41",
-      "issueSha256": "6e8215150177dad20c3234d095dae73c1bc091c547232a83b0674b74f82b48d3",
+      "issueSha256": "a405f6f545c65778101289a3ea4de8fc9e2f05d77e9ae9ac2ec26ee1411ea4e1",
       "validationOk": true,
-      "role": "q1-retention"
+      "role": "q1-retention",
+      "revision": "reference patch revised in review-r8 F14 (StrictRequestModel carries unknown-field names); requirement semantics unchanged, frozen at this hash"
     },
     {
       "taskId": "backend-input-validation-v3",
@@ -169,7 +170,7 @@
       "group": "site-pnl-diagnosis",
       "taskJsonSha256": "cb02619259964b44c464f83789b98a85febe8a57243a5fb61d8ea75a7547e183",
       "issueSha256": "8c71fb52cbee1efc4b8f1794b959abe1ddf8d7e737298ba1db96ae4da3bc7f25",
-      "validationOk": null,
+      "validationOk": true,
       "role": "q1-retention"
     },
     {

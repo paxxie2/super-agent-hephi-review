@@ -128,6 +128,9 @@ const SYMBOL_PATTERNS = [
   /ImportError: (?:cannot import name|No module named)/i,
   /Cannot find module/i,
   /has no attribute/i,
+  // 签名不匹配：目标函数/构造器尚不具备需求要求的参数（TypeError 于任务符号调用点）
+  /TypeError: \S+?\(\) (?:takes|got|missing|accepts)[^\n]*argument/i,
+  /TypeError: \S+?\(\) got an unexpected keyword argument/i,
 ]
 
 // 分类顺序：进程异常/126/127 → 环境标记 → 断言标记 → 目标符号缺失 → （工作区内
