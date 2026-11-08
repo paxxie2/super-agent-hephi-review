@@ -1,8 +1,8 @@
 {
-  "version": "v1.3",
-  "frozenAt": "2026-11-08T18:50:46.224Z",
-  "preregSha256": "8e99ceeb1482f75384a04a4d247623b129c17be9a07e21893c780a1a25045ff1",
-  "note": "bound to PREREG v1.3 lock; regenerated after review-r8 F14 card edits (bi-v2 issue/patch revision recorded); role counts 22/5/12/1",
+  "version": "v1.4",
+  "frozenAt": "2026-11-08T19:07:01.934Z",
+  "preregSha256": "7bde8af3725177444223135cdb4e8b9e0eafefa13b4d6517b6dc925a3e5c8b3f",
+  "note": "regenerated after review-r9 card edits; bi-v2 marked as pending-owner-approval revision (not dispatchable until approved); health-v2 fixed-text assertion restored",
   "roleCounts": {
     "non-q1-tooling": 12,
     "q1-devexposed-original": 5,
@@ -147,10 +147,10 @@
       "category": "cross-module",
       "group": "site-pnl-diagnosis",
       "taskJsonSha256": "fb6804c7e3f546853fe60cc44ca1e1602bf91bf67bb477bfb9005bd3c03ece41",
-      "issueSha256": "a405f6f545c65778101289a3ea4de8fc9e2f05d77e9ae9ac2ec26ee1411ea4e1",
+      "issueSha256": "adc1719e9c5ab6a2263a49e5e0079ec556fce05a02db2136000cf70028c57a2d",
       "validationOk": true,
       "role": "q1-retention",
-      "revision": "reference patch revised in review-r8 F14 (StrictRequestModel carries unknown-field names); requirement semantics unchanged, frozen at this hash"
+      "revision": "REQUIREMENT REVISION PENDING OWNER APPROVAL (review-r9 R7): acceptance extended to require code=VALIDATION_ERROR + unknown-field naming; NOT dispatched until approved"
     },
     {
       "taskId": "backend-input-validation-v3",
@@ -161,7 +161,7 @@
       "issueSha256": "c273cf5af35d29d38bef0b6f0dce65bddd8748da50c1d8ccd071d5c25de29cca",
       "validationOk": true,
       "role": "q1-retention",
-      "revision": "requirement revised in review-r2 F4 (Content-Type guard makes 415 reachable); frozen at this hash as task revision"
+      "revision": "requirement revised in review-r2 F4 (Content-Type guard makes 415 reachable); frozen as task revision"
     },
     {
       "taskId": "backend-validation-messages",

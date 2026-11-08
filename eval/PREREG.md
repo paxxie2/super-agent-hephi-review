@@ -143,7 +143,7 @@ v1.2 口径说明：原系统组**包含旧版赫菲**（原配置原插件）�
 - **锁哈希覆盖面（如实声明）**：`eval/PREREG.lock` 只哈希 `eval/PREREG.md` 与 `eval/decisions-draft.md`
   两个文件（工具 `prereg-lock.mjs` 的固定输入）。`eval/stats/requirements.txt` 与 rubric
   （`eval/label/RUBRIC.md`）**不在锁哈希内**，以 git 提交为准冻结。
-  **任务集清单**以 `eval/evidence/t21-prep/taskset-manifest-v1.3.json` 为冻结载体
+  **任务集清单**以 `eval/evidence/t21-prep/taskset-manifest-v1.4.json` 为冻结载体
   （逐任务 sha256 + 角色分类：q1-retention 22 / q1-devexposed-original 5 / non-q1-tooling 12 /
   staged-only-q3 1，绑定本版 preregSha256）。角色计数 **v1.1 时为 23/4，v1.2 将
   `previous-window-order` 移出保留集（8 次开发试跑 + D-9 曝光）后为 22/5**（见 manifest `roleCounts` 与
