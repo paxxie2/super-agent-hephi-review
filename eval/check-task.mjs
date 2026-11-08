@@ -377,7 +377,7 @@ function fileDefinesOrImportsLocal(filePath, name, worktree, packageRoots) {
     // F1/N01-A：import 绑定同样要过 find_spec 归属——模块解析到 site-packages 等外部
     // （如真实 httpx vs 无关的 unrelated/httpx.py）时，本地同名文件不构成归属。
     const origin = resolveModuleOrigin(moduleName.split('.')[0], worktree)
-    if (origin.kind !== 'external' && origin.kind !== 'ambiguous') {
+    if (origin.kind === 'worktree' || origin.kind === 'not-found') {
       const moduleFile = moduleFileInWorktree(worktree, moduleName, packageRoots)
       if (moduleFile) return { evidence: `import ${name} from local module ${moduleName} (${moduleFile})` }
     }
@@ -430,25 +430,31 @@ function resolveModuleOrigin(moduleName, worktree) {
     const w = String(wt).replace(/\\/g, '/').replace(/\/+$/, '')
     return (normalized === w || normalized.startsWith(`${w}/`)) ? 'worktree' : 'external'
   }
-  const probe = (extraArgs, insertWorktree) => {
+  const probe = (insertWorktree) => {
     try {
       const py = [
         'import importlib.util, sys, json',
         insertWorktree ? `sys.path.insert(0, ${JSON.stringify(String(worktree))})` : 'pass',
         `spec = importlib.util.find_spec(${JSON.stringify(moduleName)})`,
-        'print(json.dumps(spec.origin) if spec else "NOT_FOUND")',
+        // 统一 JSON 输出：永远 print(json.dumps(...))，不存在裸 NOT_FOUND 分支
+        'print(json.dumps({"origin": spec.origin} if spec else {"origin": None}))',
       ].join('; ')
       // 中性 cwd（系统临时目录）：避免本进程 cwd 遮蔽；不用 -I（会把 user-site 一并隔离），
       // 两环境共用同一 PATH 解释器，差异只在是否把 worktree 插到 sys.path 首位。
       const out = execFileSync('python3', ['-c', py], { cwd: tmpdir(), encoding: 'utf8', timeout: 10_000 })
-      const origin = JSON.parse(String(out).trim())
-      return origin === 'NOT_FOUND' ? 'not-found' : classifyOrigin(origin, worktree)
+      const origin = JSON.parse(String(out).trim()).origin
+      if (!origin) return 'not-found'
+      return classifyOrigin(origin, worktree)
     } catch { return 'unknown' }
   }
-  const isolated = probe([], false)
-  const withWorktree = probe([], true)
+  const isolated = probe(false)
+  const withWorktree = probe(true)
+  // F14-P2：探测失败（unknown）≠ 模块不存在。任一环境 unknown 时结果即 unknown，
+  // 上层不得将其当作 not-found 而凭同名文件赋予本地归属（fail-closed → environment）。
   let result
-  if (isolated === 'external' && withWorktree === 'worktree') {
+  if (isolated === 'unknown' || withWorktree === 'unknown') {
+    result = { kind: 'unknown', path: null }
+  } else if (isolated === 'external' && withWorktree === 'worktree') {
     result = { kind: 'ambiguous', path: null }
   } else if (isolated === 'external' || withWorktree === 'external') {
     result = { kind: 'external', path: null }
