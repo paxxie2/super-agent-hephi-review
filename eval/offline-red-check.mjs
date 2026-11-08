@@ -22,14 +22,21 @@
 //        are dropped, so `tests/test_money.py` ~ `tests.test_money` ~
 //        `backend.tests.test_money`); a testcase without classname is matched by
 //        name only;
-//      * skipped testcases do not satisfy P1 (AT-68); when several testcases
-//        share a name the first match in report order is used.
+//      * every matching testcase is aggregated: a file-level entry matches all
+//        testcases of that file; missing cases, all-skipped target sets and
+//        any target failure are decided per spec (AT-68), e.g. a file with one
+//        passing and one failing target testcase is a failing target set in
+//        any report order.
 //   P2 the report belongs to this run: junit.xml lives inside the runId directory
-//      and its mtime is >= run.startedAt
+//      and its *real path* (after resolving symlinks) stays inside that run
+//      directory; its mtime is >= run.startedAt
 //   P3 every test file still hashes to the red commit's blob:
 //      `git -C <workspace> hash-object -- <file>` === `git ls-tree <redCommit> -- <file>`
-//   P4 the report is complete: junit.xml parses and the testsuite carries
-//      numeric `failures` and `errors` attributes
+//   P4 the report is complete and internally consistent: junit.xml is a
+//      well-formed document (balanced tags, no truncation), the testsuite
+//      `failures`/`errors` counters are numeric **and equal the number of
+//      actual `<failure>`/`<error>` nodes**, and flat reports declare a
+//      `tests` total equal to the number of testcase nodes
 //
 // Input shapes (documented because T17's phase field is not merged yet):
 //   run.json        { phase: 'red', startedAt: ISO, before: { headCommit: sha40 },
@@ -58,7 +65,7 @@
 // baselinePasses !== true). A batch-local number only; it is not an experiment
 // result and does not read any historical baseline.
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -98,48 +105,174 @@ const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", '#39': "'" 
 const decode = value => value.replace(/&(amp|lt|gt|quot|apos|#39);/g, (_, name) => ENTITIES[name])
 const attributes = tag => {
   const found = {}
-  const re = /([\w:.-]+)\s*=\s*"([^"]*)"/g
+  const re = /([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g
   let match
-  while ((match = re.exec(tag)) !== null) found[match[1]] = decode(match[2])
+  while ((match = re.exec(tag)) !== null) {
+    const value = match[2] !== undefined ? match[2] : match[3]
+    found[match[1]] = decode(value)
+  }
   return found
 }
 
-/** Parse a junit.xml report. Throws on structurally unreadable input. */
+/** Index of the first `>` that terminates a start tag, ignoring quoted values. */
+function startTagEnd(xml, from) {
+  let quote = null
+  for (let index = from + 1; index < xml.length; index += 1) {
+    const ch = xml[index]
+    if (quote !== null) { if (ch === quote) quote = null; continue }
+    if (ch === '"' || ch === "'") { quote = ch; continue }
+    if (ch === '>') return index
+  }
+  return -1
+}
+
+/**
+ * Dependency-free XML well-formedness parser (elements only; comments, CDATA,
+ * processing instructions and doctypes are skipped/ignored). Throws on
+ * truncated documents, unbalanced/ crossed tags, multiple roots and stray text.
+ * Returns the element tree, which the junit reader uses to cross-check counters.
+ */
+function parseXmlDocument(xml, label = 'junit report') {
+  let index = 0
+  const stack = []
+  const nodes = []
+  let root = null
+  let rootCount = 0
+  while (index < xml.length) {
+    const lt = xml.indexOf('<', index)
+    if (lt === -1) {
+      const tail = xml.slice(index)
+      if (stack.length > 0) stack.at(-1).text += tail
+      else if (tail.trim() !== '') throw new Error(`${label}: text outside the root element`)
+      break
+    }
+    if (lt > index) {
+      const text = xml.slice(index, lt)
+      if (stack.length > 0) stack.at(-1).text += text
+      else if (text.trim() !== '') throw new Error(`${label}: text outside the root element`)
+    }
+    index = lt
+    if (xml.startsWith('<?', index)) {
+      const end = xml.indexOf('?>', index + 2)
+      if (end === -1) throw new Error(`${label}: unterminated processing instruction`)
+      index = end + 2
+      continue
+    }
+    if (xml.startsWith('<!--', index)) {
+      const end = xml.indexOf('-->', index + 4)
+      if (end === -1) throw new Error(`${label}: unterminated comment`)
+      index = end + 3
+      continue
+    }
+    if (xml.startsWith('<![CDATA[', index)) {
+      const end = xml.indexOf(']]>', index + 9)
+      if (end === -1) throw new Error(`${label}: unterminated CDATA section`)
+      if (stack.length === 0) throw new Error(`${label}: CDATA outside the root element`)
+      stack.at(-1).text += xml.slice(index + 9, end)
+      index = end + 3
+      continue
+    }
+    if (xml.startsWith('<!', index)) {
+      const end = xml.indexOf('>', index)
+      if (end === -1) throw new Error(`${label}: unterminated declaration`)
+      index = end + 1
+      continue
+    }
+    if (xml.startsWith('</', index)) {
+      const end = xml.indexOf('>', index)
+      if (end === -1) throw new Error(`${label}: unterminated end tag`)
+      const name = xml.slice(index + 2, end).trim()
+      if (!/^[A-Za-z_][\w:.-]*$/.test(name)) throw new Error(`${label}: malformed end tag </${name}>`)
+      const open = stack.pop()
+      if (!open) throw new Error(`${label}: end tag </${name}> without an open element`)
+      if (open.name !== name) throw new Error(`${label}: end tag </${name}> does not match <${open.name}>`)
+      index = end + 1
+      continue
+    }
+    const end = startTagEnd(xml, index)
+    if (end === -1) throw new Error(`${label}: unterminated start tag (truncated document?)`)
+    const inner = xml.slice(index + 1, end)
+    const selfClosing = /\/\s*$/.test(inner)
+    const tag = selfClosing ? inner.slice(0, inner.lastIndexOf('/')) : inner
+    const nameMatch = /^\s*([A-Za-z_][\w:.-]*)/.exec(tag)
+    if (!nameMatch) throw new Error(`${label}: malformed start tag`)
+    const name = nameMatch[1]
+    const node = { name, attrs: attributes(tag.slice(nameMatch[0].length)), children: [], text: '' }
+    if (stack.length === 0) {
+      rootCount += 1
+      if (rootCount > 1) throw new Error(`${label}: multiple root elements`)
+      root = node
+    } else {
+      stack.at(-1).children.push(node)
+    }
+    nodes.push(node)
+    if (!selfClosing) stack.push(node)
+    index = end + 1
+  }
+  if (stack.length > 0) throw new Error(`${label}: unclosed element(s): ${stack.map(node => node.name).join(', ')}`)
+  if (root === null) throw new Error(`${label}: no root element`)
+  return { root, nodes }
+}
+
+/** Parse a junit.xml report. Throws on unreadable, truncated or inconsistent reports. */
 export function parseJunit(xml) {
-  if (typeof xml !== 'string' || !/<testsuite\b/.test(xml)) throw new Error('not a junit report (no <testsuite>)')
-  const suites = []
-  const suiteRe = /<testsuite\b([^>]*)>/g
-  let suite
-  while ((suite = suiteRe.exec(xml)) !== null) suites.push(attributes(suite[1]))
+  if (typeof xml !== 'string') throw new Error('junit report must be a string')
+  const { root, nodes } = parseXmlDocument(xml, 'junit report')
+  if (root.name !== 'testsuites' && root.name !== 'testsuite') {
+    throw new Error(`not a junit report (unexpected root <${root.name}>)`)
+  }
+  const suites = nodes.filter(node => node.name === 'testsuite')
   if (suites.length === 0) throw new Error('no parsable <testsuite> element')
-  const failures = suites.map(s => s.failures)
-  const errors = suites.map(s => s.errors)
-  const countersPresent = failures.every(v => v !== undefined && /^\d+$/.test(v)) && errors.every(v => v !== undefined && /^\d+$/.test(v))
-  const testcases = []
-  const caseRe = /<testcase\b([^>]*?)(?:\/>|>([\s\S]*?)<\/testcase>)/g
-  let testcase
-  while ((testcase = caseRe.exec(xml)) !== null) {
-    const attrs = attributes(testcase[1])
-    const body = testcase[2] ?? ''
-    const failureTags = [...body.matchAll(/<failure\b([^>]*)>/g)].map(match => attributes(match[1]))
-    const errorTags = [...body.matchAll(/<error\b([^>]*)>/g)].map(match => attributes(match[1]))
-    testcases.push({
-      classname: attrs.classname ?? '',
-      name: attrs.name ?? '',
-      file: attrs.file ?? null,
-      time: attrs.time ?? null,
-      skipped: /<skipped\b/.test(body),
-      failures: failureTags,
-      errors: errorTags,
-    })
+  const suiteAttrs = suites.map(suite => suite.attrs)
+  const failures = suiteAttrs.map(attrs => attrs.failures)
+  const errors = suiteAttrs.map(attrs => attrs.errors)
+  const countersPresent = failures.every(value => value !== undefined && /^\d+$/.test(value))
+    && errors.every(value => value !== undefined && /^\d+$/.test(value))
+  const testcases = nodes
+    .filter(node => node.name === 'testcase')
+    .map(node => ({
+      classname: node.attrs.classname ?? '',
+      name: node.attrs.name ?? '',
+      file: node.attrs.file ?? null,
+      time: node.attrs.time ?? null,
+      skipped: node.children.some(child => child.name === 'skipped'),
+      failures: node.children.filter(child => child.name === 'failure').map(child => child.attrs),
+      errors: node.children.filter(child => child.name === 'error').map(child => child.attrs),
+    }))
+
+  if (countersPresent) {
+    const declaredFailures = failures.reduce((sum, value) => sum + Number(value), 0)
+    const declaredErrors = errors.reduce((sum, value) => sum + Number(value), 0)
+    const actualFailures = nodes.filter(node => node.name === 'failure').length
+    const actualErrors = nodes.filter(node => node.name === 'error').length
+    if (declaredFailures !== actualFailures) {
+      throw new Error(`report counters disagree: testsuites declare failures=${declaredFailures} but the document contains ${actualFailures} <failure> node(s)`)
+    }
+    if (declaredErrors !== actualErrors) {
+      throw new Error(`report counters disagree: testsuites declare errors=${declaredErrors} but the document contains ${actualErrors} <error> node(s)`)
+    }
+    // pytest writes flat suites; only cross-check `tests` when suites are not nested.
+    const nestedSuites = suites.some(suite => suite.children.some(child => child.name === 'testsuite'))
+    const testsValues = suiteAttrs.map(attrs => attrs.tests)
+    if (!nestedSuites && testsValues.every(value => value !== undefined && /^\d+$/.test(value))) {
+      const declaredTests = testsValues.reduce((sum, value) => sum + Number(value), 0)
+      if (declaredTests !== testcases.length) {
+        throw new Error(`report counters disagree: testsuites declare tests=${declaredTests} but the document contains ${testcases.length} testcase node(s)`)
+      }
+    }
+    return {
+      root,
+      suites: suiteAttrs,
+      countersPresent,
+      counters: { failures: declaredFailures, errors: declaredErrors },
+      testcases,
+    }
   }
   return {
-    suites,
+    root,
+    suites: suiteAttrs,
     countersPresent,
-    counters: {
-      failures: countersPresent ? failures.reduce((sum, value) => sum + Number(value), 0) : null,
-      errors: countersPresent ? errors.reduce((sum, value) => sum + Number(value), 0) : null,
-    },
+    counters: { failures: null, errors: null },
     testcases,
   }
 }
@@ -254,15 +387,18 @@ export function assertionFailureTypesFor(card, acceptanceItem, checkConfig) {
   return [...DEFAULT_ASSERTION_FAILURE_TYPES]
 }
 
+// R02: an explicit `type` attribute decides; the message is never used to
+// override it. Only reports without a type attribute get the restricted
+// pytest plain-assert shape (`message` begins with `assert`) inferred as
+// AssertionError. Arbitrary message substrings are not accepted.
 const failureTypeMatches = (types, testcase) => {
   const failures = [...testcase.failures, ...testcase.errors]
   return failures.some(failure => {
-    let type = typeof failure.type === 'string' ? failure.type : ''
+    const explicit = typeof failure.type === 'string' ? failure.type.trim() : ''
+    if (explicit !== '') return types.includes(explicit)
     const message = typeof failure.message === 'string' ? failure.message : ''
-    // pytest junit omits the type attribute for plain asserts while writing the
-    // assert expression into message; treat that shape as an AssertionError.
-    if (type === '' && /^assert\b/.test(message)) type = 'AssertionError'
-    return types.some(configured => type === configured || message.includes(configured))
+    if (/^assert\b/.test(message)) return types.includes('AssertionError')
+    return false
   })
 }
 
@@ -357,12 +493,26 @@ export function evaluateAcceptanceItem({ item, run, workspace, card = {}, checkC
   const reportPath = resolve(run.runDir, reportName)
   const invalid = reason => ({ id: item.id, tests: specs, baselinePasses: false, red: 'invalid', reason, runId: run.runId, reportPath })
 
-  // P2: report belongs to this run (inside the runId directory and not older than startedAt).
+  // P2: report belongs to this run. Lexical containment is not enough: resolve
+  // symlinks and require the real report path to stay inside the real run
+  // directory (R03). mtime is only an auxiliary signal, it cannot prove origin.
   if (!inside(reportPath, run.runDir)) return invalid(`P2: report ${reportPath} is outside the run directory`)
   if (!existsSync(reportPath)) return invalid(`P2: report ${reportPath} does not exist`)
+  let realRunDir
+  let realReportPath
+  try {
+    realRunDir = realpathSync(run.runDir)
+    realReportPath = realpathSync(reportPath)
+  } catch (error) {
+    return invalid(`P2: cannot resolve report real path: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  if (!inside(realReportPath, realRunDir)) {
+    return invalid(`P2: report ${reportPath} resolves to ${realReportPath}, outside the run directory (symlinked report)`)
+  }
+  if (!statSync(realReportPath).isFile()) return invalid(`P2: report ${realReportPath} is not a regular file`)
   const startedAt = asIsoMs(run.record.startedAt)
   if (startedAt === null) return invalid('P2: run.json startedAt is missing or not an ISO timestamp')
-  const mtime = statSync(reportPath).mtimeMs
+  const mtime = statSync(realReportPath).mtimeMs
   if (mtime < startedAt) return invalid(`P2: report mtime ${new Date(mtime).toISOString()} predates run startedAt ${new Date(startedAt).toISOString()}`)
 
   // P4: report completeness.
@@ -374,13 +524,21 @@ export function evaluateAcceptanceItem({ item, run, workspace, card = {}, checkC
   }
   if (!report.countersPresent) return invalid('P4: testsuite failures/errors counters are missing or not numeric')
 
-  // P1: target cases exist and are not skipped (AT-68).
+  // P1: target cases exist and are aggregated per spec (R04). A file-level
+  // spec covers every matching testcase of the file; the report node order
+  // must not change the verdict. Aggregation rules:
+  //   - a spec with zero matching testcases is missing => invalid;
+  //   - a spec whose matching testcases are all skipped is skipped => invalid;
+  //   - otherwise the target set fails when any matching testcase failed
+  //     (the passing/skipped siblings do not cancel a real failure).
   if (specs.length === 0) return invalid('P1: acceptance item has no tests to match')
-  const matched = specs.map(spec => report.testcases.find(testcase => matchTestcase(spec, testcase)))
-  const missing = specs.filter((spec, index) => matched[index] === undefined)
-  if (missing.length > 0) return invalid(`P1: target test case(s) missing from the report: ${missing.map(spec => spec.name).join(', ')}`)
-  const skipped = matched.filter(testcase => testcase.skipped)
-  if (skipped.length > 0) return invalid(`AT-68: target test case(s) skipped: ${skipped.map(testcase => testcase.name).join(', ')}`)
+  const specMatches = specs.map(spec => report.testcases.filter(testcase => matchTestcase(spec, testcase)))
+  const missing = specs.filter((spec, index) => specMatches[index].length === 0)
+  if (missing.length > 0) return invalid(`P1: target test case(s) missing from the report: ${missing.map(spec => spec.name ?? spec.file ?? '(unnamed)').join(', ')}`)
+  const allSkipped = specs.filter((spec, index) => specMatches[index].every(testcase => testcase.skipped))
+  if (allSkipped.length > 0) return invalid(`AT-68: target test case(s) skipped: ${allSkipped.map(spec => spec.name ?? spec.file ?? '(unnamed)').join(', ')}`)
+  const matched = [...new Set(specMatches.flat())]
+    .sort((a, b) => `${a.classname}\u0000${a.name}`.localeCompare(`${b.classname}\u0000${b.name}`))
 
   // P3: test files still hash to the red commit.
   const files = testFilesFor(run, item, specs)
@@ -530,7 +688,7 @@ const JUNIT_TYPE_ERROR = `<?xml version="1.0" encoding="UTF-8"?>
 `
 const JUNIT_SKIPPED = `<?xml version="1.0" encoding="UTF-8"?>
 <testsuites>
-  <testsuite name="pytest" tests="1" failures="1" errors="0" skipped="1">
+  <testsuite name="pytest" tests="1" failures="0" errors="0" skipped="1">
     <testcase classname="backend.tests.test_money" name="test_window" file="${TEST_FILE}"><skipped message="not run"/></testcase>
   </testsuite>
 </testsuites>
@@ -543,6 +701,95 @@ const JUNIT_MISSING_CASE = `<?xml version="1.0" encoding="UTF-8"?>
 <testsuites>
   <testsuite name="pytest" tests="1" failures="1" errors="0">
     <testcase classname="backend.tests.test_money" name="test_other" file="${TEST_FILE}"><failure type="AssertionError" message="other"/></testcase>
+  </testsuite>
+</testsuites>
+`
+
+// --- R01: report integrity fixtures ---------------------------------------
+const JUNIT_TRUNCATED = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="pytest" tests="1" failures="1" errors="0">
+    <testcase classname="backend.tests.test_money" name="test_window" file="${TEST_FILE}">
+      <failure message="boom" type="AssertionError">traceback</failure>
+`
+const JUNIT_MISMATCHED_TAGS = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="pytest" tests="1" failures="1" errors="0">
+    <testcase classname="backend.tests.test_money" name="test_window" file="${TEST_FILE}">
+      <failure message="boom" type="AssertionError">traceback</failure>
+    </testcase>
+  </testsuites>
+</testsuites>
+`
+const JUNIT_COUNTER_MISMATCH = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="pytest" tests="1" failures="0" errors="0">
+    <testcase classname="backend.tests.test_money" name="test_window" file="${TEST_FILE}">
+      <failure message="boom" type="AssertionError">traceback</failure>
+    </testcase>
+  </testsuite>
+</testsuites>
+`
+const JUNIT_TESTS_COUNT_MISMATCH = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="pytest" tests="5" failures="1" errors="0">
+    <testcase classname="backend.tests.test_money" name="test_window" file="${TEST_FILE}">
+      <failure message="boom" type="AssertionError">traceback</failure>
+    </testcase>
+  </testsuite>
+</testsuites>
+`
+
+// --- R02: failure type fixtures -------------------------------------------
+const JUNIT_TYPE_WITH_ASSERTION_MESSAGE = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="pytest" tests="1" failures="0" errors="1">
+    <testcase classname="backend.tests.test_money" name="test_window" file="${TEST_FILE}">
+      <error message="expected AssertionError but got TypeError" type="TypeError">traceback</error>
+    </testcase>
+  </testsuite>
+</testsuites>
+`
+const JUNIT_NO_TYPE_PYTEST_ASSERT = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="pytest" tests="1" failures="1" errors="0">
+    <testcase classname="backend.tests.test_money" name="test_window" file="${TEST_FILE}">
+      <failure message="assert [1, 2] == [1, 2, 3]">traceback</failure>
+    </testcase>
+  </testsuite>
+</testsuites>
+`
+const JUNIT_NO_TYPE_MESSAGE_MENTIONS_ASSERTION = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="pytest" tests="1" failures="1" errors="0">
+    <testcase classname="backend.tests.test_money" name="test_window" file="${TEST_FILE}">
+      <failure message="AssertionError but actually a different exception">traceback</failure>
+    </testcase>
+  </testsuite>
+</testsuites>
+`
+
+// --- R04: file-level aggregation fixtures (same set, opposite order) ------
+const FILE_CASE_PASS = `<testcase classname="backend.tests.test_money" name="test_pass" file="${TEST_FILE}"/>`
+const FILE_CASE_FAIL = `<testcase classname="backend.tests.test_money" name="test_window" file="${TEST_FILE}"><failure message="assert 1 == 2" type="AssertionError">traceback</failure></testcase>`
+const FILE_CASE_SKIP = `<testcase classname="backend.tests.test_money" name="test_skip" file="${TEST_FILE}"><skipped message="not run"/></testcase>`
+const FILE_CASE_TYPE_ERROR = `<testcase classname="backend.tests.test_money" name="test_window" file="${TEST_FILE}"><error message="boom" type="TypeError">traceback</error></testcase>`
+const fileReport = (cases, failures, errors, skipped) => `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="pytest" tests="${cases.length}" failures="${failures}" errors="${errors}" skipped="${skipped}">
+    ${cases.join('\n    ')}
+  </testsuite>
+</testsuites>
+`
+const JUNIT_FILE_FAIL_FIRST = fileReport([FILE_CASE_FAIL, FILE_CASE_PASS], 1, 0, 0)
+const JUNIT_FILE_PASS_FIRST = fileReport([FILE_CASE_PASS, FILE_CASE_FAIL], 1, 0, 0)
+const JUNIT_FILE_ALL_PASS = fileReport([FILE_CASE_PASS], 0, 0, 0)
+const JUNIT_FILE_ALL_SKIPPED = fileReport([FILE_CASE_SKIP], 0, 0, 1)
+const JUNIT_FILE_WRONG_TYPE = fileReport([FILE_CASE_TYPE_ERROR, FILE_CASE_PASS], 0, 1, 0)
+const JUNIT_FILE_MISSING = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="pytest" tests="1" failures="1" errors="0">
+    <testcase classname="backend.tests.test_other" name="test_window" file="backend/tests/test_other.py"><failure message="boom" type="AssertionError">traceback</failure></testcase>
   </testsuite>
 </testsuites>
 `
@@ -656,6 +903,91 @@ export function selfTest() {
     const skipped = buildState(join(root, 'skipped'), redCommit, { report: JUNIT_SKIPPED })
     const skippedItem = evaluateBatch({ stateDir: skipped.stateDir, workspace, taskCards: { 'ticket-1': CARD } }).tickets[0].acceptance[0]
     pass(results, 'T18 AT-68 skipped target case => invalid', skippedItem.red === 'invalid' && /AT-68/.test(skippedItem.reason), JSON.stringify(skippedItem))
+
+    // R01: report integrity / counter consistency.
+    const truncated = buildState(join(root, 'r01-truncated'), redCommit, { report: JUNIT_TRUNCATED })
+    const truncatedItem = evaluateBatch({ stateDir: truncated.stateDir, workspace, taskCards: { 'ticket-1': CARD } }).tickets[0].acceptance[0]
+    pass(results, 'R01 truncated report => invalid', truncatedItem.red === 'invalid' && truncatedItem.reason.startsWith('P4:'), JSON.stringify(truncatedItem))
+
+    const mismatched = buildState(join(root, 'r01-mismatched'), redCommit, { report: JUNIT_MISMATCHED_TAGS })
+    const mismatchedItem = evaluateBatch({ stateDir: mismatched.stateDir, workspace, taskCards: { 'ticket-1': CARD } }).tickets[0].acceptance[0]
+    pass(results, 'R01 mismatched closing tag => invalid', mismatchedItem.red === 'invalid' && mismatchedItem.reason.startsWith('P4:'), JSON.stringify(mismatchedItem))
+
+    const counterMismatch = buildState(join(root, 'r01-counters'), redCommit, { report: JUNIT_COUNTER_MISMATCH })
+    const counterMismatchItem = evaluateBatch({ stateDir: counterMismatch.stateDir, workspace, taskCards: { 'ticket-1': CARD } }).tickets[0].acceptance[0]
+    pass(results, 'R01 declared failures=0 but a <failure> node exists => invalid', counterMismatchItem.red === 'invalid' && counterMismatchItem.reason.startsWith('P4:') && /counters disagree/.test(counterMismatchItem.reason), JSON.stringify(counterMismatchItem))
+
+    const testsMismatch = buildState(join(root, 'r01-tests-count'), redCommit, { report: JUNIT_TESTS_COUNT_MISMATCH })
+    const testsMismatchItem = evaluateBatch({ stateDir: testsMismatch.stateDir, workspace, taskCards: { 'ticket-1': CARD } }).tickets[0].acceptance[0]
+    pass(results, 'R01 declared tests=5 but 1 testcase node => invalid', testsMismatchItem.red === 'invalid' && testsMismatchItem.reason.startsWith('P4:'), JSON.stringify(testsMismatchItem))
+
+    // R02: explicit type decides; message mentioning AssertionError cannot override TypeError.
+    const typeMessage = buildState(join(root, 'r02-type-message'), redCommit, { report: JUNIT_TYPE_WITH_ASSERTION_MESSAGE })
+    const typeMessageItem = evaluateBatch({ stateDir: typeMessage.stateDir, workspace, taskCards: { 'ticket-1': CARD } }).tickets[0].acceptance[0]
+    pass(results, 'R02 type=TypeError with AssertionError in message => invalid', typeMessageItem.red === 'invalid' && /AT-66/.test(typeMessageItem.reason), JSON.stringify(typeMessageItem))
+
+    const noTypePytest = buildState(join(root, 'r02-no-type'), redCommit, { report: JUNIT_NO_TYPE_PYTEST_ASSERT })
+    const noTypePytestItem = evaluateBatch({ stateDir: noTypePytest.stateDir, workspace, taskCards: { 'ticket-1': CARD } }).tickets[0].acceptance[0]
+    pass(results, 'R02 no-type pytest plain assert message => valid', noTypePytestItem.red === 'valid', JSON.stringify(noTypePytestItem))
+
+    const noTypeMention = buildState(join(root, 'r02-no-type-mention'), redCommit, { report: JUNIT_NO_TYPE_MESSAGE_MENTIONS_ASSERTION })
+    const noTypeMentionItem = evaluateBatch({ stateDir: noTypeMention.stateDir, workspace, taskCards: { 'ticket-1': CARD } }).tickets[0].acceptance[0]
+    pass(results, 'R02 no-type arbitrary message mentioning AssertionError => invalid', noTypeMentionItem.red === 'invalid' && /AT-66/.test(noTypeMentionItem.reason), JSON.stringify(noTypeMentionItem))
+
+    // R03: symlinked report escaping the run directory is not owned by the run.
+    const externalDir = join(root, 'external-report')
+    const externalReport = join(externalDir, 'junit.xml')
+    write(externalReport, JUNIT_VALID)
+    execFileSync('touch', ['-t', '202601010000', externalReport])
+    const symlinkFixture = buildState(join(root, 'r03-symlink'), redCommit, {})
+    rmSync(join(symlinkFixture.runDir, 'junit.xml'))
+    symlinkSync(externalReport, join(symlinkFixture.runDir, 'junit.xml'))
+    const symlinkItem = evaluateBatch({ stateDir: symlinkFixture.stateDir, workspace, taskCards: { 'ticket-1': CARD } }).tickets[0].acceptance[0]
+    pass(results, 'R03 junit.xml symlink to a report outside the run dir => invalid', symlinkItem.red === 'invalid' && symlinkItem.reason.startsWith('P2:') && /symlink|outside/.test(symlinkItem.reason), JSON.stringify(symlinkItem))
+
+    const outsideParent = join(root, 'r03-outside-parent')
+    const outsideRun = buildState(outsideParent, redCommit, {})
+    const linkedDir = join(root, 'external-dir')
+    write(join(linkedDir, 'junit.xml'), JUNIT_VALID)
+    symlinkSync(linkedDir, join(outsideRun.runDir, 'reports'))
+    write(join(outsideRun.runDir, 'run.json'), JSON.stringify({
+      version: 3,
+      ticketId: 'ticket-1',
+      acceptanceId: 'AC1',
+      phase: 'red',
+      startedAt: '2026-01-01T00:00:00Z',
+      before: { headCommit: redCommit },
+      testFiles: [TEST_FILE],
+      junit: 'reports/junit.xml',
+    }, null, 2))
+    const outsideParentItem = evaluateBatch({ stateDir: outsideRun.stateDir, workspace, taskCards: { 'ticket-1': CARD } }).tickets[0].acceptance[0]
+    pass(results, 'R03 report under a symlinked parent outside the run dir => invalid', outsideParentItem.red === 'invalid' && outsideParentItem.reason.startsWith('P2:'), JSON.stringify(outsideParentItem))
+
+    // R04: file-level spec aggregates every matching testcase; report order is irrelevant.
+    const FILE_CARD = { version: 3, acceptance: [{ id: 'AC1', tests: [TEST_FILE], check: 'tests' }], assertionFailureTypes: ['AssertionError'] }
+    const fileFailFirst = buildState(join(root, 'r04-fail-first'), redCommit, { report: JUNIT_FILE_FAIL_FIRST })
+    const filePassFirst = buildState(join(root, 'r04-pass-first'), redCommit, { report: JUNIT_FILE_PASS_FIRST })
+    const failFirstItem = evaluateBatch({ stateDir: fileFailFirst.stateDir, workspace, taskCards: { 'ticket-1': FILE_CARD } }).tickets[0].acceptance[0]
+    const passFirstItem = evaluateBatch({ stateDir: filePassFirst.stateDir, workspace, taskCards: { 'ticket-1': FILE_CARD } }).tickets[0].acceptance[0]
+    pass(results, 'R04 file-level pass+failure: failure-first => valid', failFirstItem.red === 'valid', JSON.stringify(failFirstItem))
+    pass(results, 'R04 file-level pass+failure: pass-first => valid (order invariant)', passFirstItem.red === 'valid', JSON.stringify(passFirstItem))
+    pass(results, 'R04 same testcase set in either order => same verdict', failFirstItem.red === passFirstItem.red, `${failFirstItem.red} vs ${passFirstItem.red}`)
+
+    const fileAllPass = buildState(join(root, 'r04-all-pass'), redCommit, { report: JUNIT_FILE_ALL_PASS })
+    const fileAllPassItem = evaluateBatch({ stateDir: fileAllPass.stateDir, workspace, taskCards: { 'ticket-1': FILE_CARD } }).tickets[0].acceptance[0]
+    pass(results, 'R04 file-level all testcases pass => invalid (no failure)', fileAllPassItem.red === 'invalid' && /passed in the report/.test(fileAllPassItem.reason), JSON.stringify(fileAllPassItem))
+
+    const fileAllSkipped = buildState(join(root, 'r04-all-skipped'), redCommit, { report: JUNIT_FILE_ALL_SKIPPED })
+    const fileAllSkippedItem = evaluateBatch({ stateDir: fileAllSkipped.stateDir, workspace, taskCards: { 'ticket-1': FILE_CARD } }).tickets[0].acceptance[0]
+    pass(results, 'R04 file-level all testcases skipped => invalid (AT-68)', fileAllSkippedItem.red === 'invalid' && /AT-68/.test(fileAllSkippedItem.reason), JSON.stringify(fileAllSkippedItem))
+
+    const fileWrongType = buildState(join(root, 'r04-wrong-type'), redCommit, { report: JUNIT_FILE_WRONG_TYPE })
+    const fileWrongTypeItem = evaluateBatch({ stateDir: fileWrongType.stateDir, workspace, taskCards: { 'ticket-1': FILE_CARD } }).tickets[0].acceptance[0]
+    pass(results, 'R04 file-level failure type mismatch => invalid (AT-66)', fileWrongTypeItem.red === 'invalid' && /AT-66/.test(fileWrongTypeItem.reason), JSON.stringify(fileWrongTypeItem))
+
+    const fileMissing = buildState(join(root, 'r04-missing'), redCommit, { report: JUNIT_FILE_MISSING })
+    const fileMissingItem = evaluateBatch({ stateDir: fileMissing.stateDir, workspace, taskCards: { 'ticket-1': FILE_CARD } }).tickets[0].acceptance[0]
+    pass(results, 'R04 file-level no matching testcase => invalid (P1)', fileMissingItem.red === 'invalid' && fileMissingItem.reason.startsWith('P1:'), JSON.stringify(fileMissingItem))
 
     // absent: no phase === 'red' run is not a failure, just not observed.
     const nonRedRoot = join(root, 'non-red')
