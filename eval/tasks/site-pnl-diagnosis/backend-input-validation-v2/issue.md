@@ -1,6 +1,11 @@
 # backend-input-validation-v2
 
 ## 任务
+
+> **需求修订（R7，2026-11-09，待负责人确认）**：原 v1 卡只要求『拒绝未知字段/extra=forbid』；
+> 现卡增加了『响应包含 code=VALIDATION_ERROR 与未知字段名』的验收要求。这是行为验收语义的
+> **扩展**，按任务修订处理（非『语义不变』），须负责人批准后冻结；未批准前本卡不得进入正式派发。
+
 请求体未知字段一律拒绝，并在错误响应中**指明未知字段**：`CreateDiagnosisRequest` 与 `ScenarioRequest` 的写请求携带未知字段时必须被校验拒绝（状态码 4xx、`code=VALIDATION_ERROR`，响应文本包含未知字段名）；实现方式不限（参考实现使用 pydantic 严格模型 + 显式字段名错误）。
 
 本卡是 B5 变体批次 3 新定义的**需求点变体**（非 G1/G2 已用需求点：不涉及 limit 默认值/上限、offset le=10000、health 服务标识字段、money 窗口辅助函数抽取、后端输入校验中文错误复用）。base `e00f338b098546adc40156dc15b4b6559e19835d` 是本地只读 site-pnl clone 中**真实存在的提交**；`reference.patch` 是按本需求点编写的**最小实现补丁**（不是历史提交 diff），任务卡不向 Worker 提供参考实现或隐藏测试内容。

@@ -4,10 +4,12 @@
 // 校验内容：
 //   1) 结构：task.json / issue.md / hidden-test.sh / review.md / reference.patch 存在性与字段口径；
 //   2) 有效性（完整模式，需要 git 仓库）：隐藏测试在 base 上失败、在参考修复上通过；
-//      “连续 3 次一致”同时比较退出码与归一化后的稳定输出（F15：剔除 requestId/时间戳/UUID/pid 等动态字段，
-//      规则见 NORMALIZATION；原始 stdout/stderr 与 outputSha256 仍保留在报告中）；
-//      base 失败会分类为 target-assertion-failed / target-symbol-missing / environment-error；
-//      只有前两类算有效 base 失败，environment-error（依赖/环境故障、不可归类）判卡不合格。
+//      “连续 3 次一致”同时比较退出码与归一化后的稳定输出（F15/R6：仅归一化元数据上下文——
+//      JSON/Python repr 的 timestamp/requestId 等键值与行首日志时间戳；裸值及 actual=/expected=
+//      等业务结果不归一化。规则见 NORMALIZATION；原始 stdout/stderr 与 outputSha256 仍保留）；
+//      base 失败会做归属核对后分类为 target-assertion-failed / target-symbol-missing / environment-error
+//      （R5：ModuleNotFoundError/TypeError 只有追溯到 worktree 调用帧或本地包根才算目标缺失；
+//      第三方依赖/客户端错误归 environment-error）。只有前两类算有效 base 失败，environment-error 判卡不合格。
 //   3) 范围：参考修复改动的文件必须落在 task.json.allowedFiles 内。
 //
 // 用法：
@@ -20,7 +22,7 @@
 // 本脚本只使用 Node 内置模块，不新增依赖；只在系统临时目录创建 worktree，不动主工作树。
 import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, matchesGlob, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -84,26 +86,30 @@ function sameIds(list) {
 // 已确认的动态字段；原始 stdout/stderr 与 outputSha256 始终保留，归一化规则写入
 // validation 报告（顶层 normalization 及 checks.{base,reference}.normalization）。
 const NORMALIZATION = {
-  version: 1,
+  version: 2,
   scope: 'stdout+stderr',
   rules: [
     'CRLF/CR → LF',
-    'ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>',
-    'UUID → <uuid>',
-    'requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>',
-    'pid=数字 → pid=<pid>',
+    '仅 JSON/Python repr 的元数据键值（timestamp/time/requestId/request_id/traceId/trace_id/spanId/span_id/pid/loggedAt/createdAt/updatedAt/durationMs/elapsedMs）→ <dynamic>',
+    '仅行首日志时间戳（可带 []，如 [2026-11-08T12:00:00Z] 或 2026-11-08T12:00:00Z）→ <timestamp>',
+    '裸值、actual=/expected= 之后的值、普通文本中的时间/UUID 不归一化（业务结果差异必须保留）',
   ],
-  note: '仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。',
+  note: 'R6：仅归一化已确认的元数据上下文（JSON 键值/日志前缀）；业务断言里的时间、UUID 等真实值保留，差异会令 consistent=false。原始 stdout/stderr 与 outputSha256 不删除。',
 }
+
+const METADATA_KEYS = 'timestamp|time|requestId|request_id|traceId|trace_id|spanId|span_id|pid|loggedAt|createdAt|updatedAt|durationMs|elapsedMs'
+const METADATA_KV_PATTERN = new RegExp(
+  `(["'](?:${METADATA_KEYS})["']\\s*:\\s*)(?:"[^"]*"|'[^']*'|[^,\\s}\\]]+)`,
+  'gi',
+)
+const LOG_PREFIX_TIMESTAMP_PATTERN = /^(\s*\[?)(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)(\]?)/gm
 
 function normalizeStableOutput(text) {
   let out = String(text ?? '').replace(/\r\n?/g, '\n')
-  out = out.replace(/\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\b/g, '<timestamp>')
-  out = out.replace(/\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g, '<uuid>')
-  // requestId 可能以 Python/JSON repr 出现（'requestId': 'hex'）或 key=value 形式，
-  // 因此键名与冒号之间允许一个可选引号。
-  out = out.replace(/(\brequest[_-]?id\b['"]?\s*[:=]\s*['"]?)[0-9A-Za-z_-]{8,}/gi, '$1<request-id>')
-  out = out.replace(/\bpid\s*[:=]\s*['"]?\d+/gi, 'pid=<pid>')
+  // R6：只替换元数据键值（JSON/Python repr 的键必须是引号包裹）。
+  out = out.replace(METADATA_KV_PATTERN, '$1<dynamic>')
+  // R6：只替换行首的日志时间戳前缀（可带 []）；正文/断言中的时间不处理。
+  out = out.replace(LOG_PREFIX_TIMESTAMP_PATTERN, '$1<timestamp>$3')
   return out
 }
 
@@ -113,7 +119,6 @@ const ENV_ERROR_PATTERNS = [
   /permission denied/i,
   /\b(?:EACCES|ENOSPC|ECONNREFUSED|ETIMEDOUT|ENETUNREACH|EAI_AGAIN)\b/,
   /\b(?:npm|pnpm|yarn)\b[^\n]*\bERR!?/i,
-  /No module named ['"](?:pytest|numpy|pandas|scipy|statsmodels|pydantic|fastapi|sqlalchemy|requests|httpx|uvicorn|starlette|yaml|dotenv)['"]/i,
 ]
 const ASSERTION_PATTERNS = [
   /AssertionError/,
@@ -123,19 +128,84 @@ const ASSERTION_PATTERNS = [
   /\b(?:hidden[-_ ]?check|assertion|test)\s+failed\b/i,
   /期望/,
 ]
-const SYMBOL_PATTERNS = [
-  /ModuleNotFoundError: No module named/i,
-  /ImportError: (?:cannot import name|No module named)/i,
-  /Cannot find module/i,
-  /has no attribute/i,
-  // 签名不匹配：目标函数/构造器尚不具备需求要求的参数（TypeError 于任务符号调用点）
-  /TypeError: \S+?\(\) (?:takes|got|missing|accepts)[^\n]*argument/i,
-  /TypeError: \S+?\(\) got an unexpected keyword argument/i,
-]
+const IMPORT_ERROR_PATTERN = /(?:ModuleNotFoundError|ImportError): No module named ['"]([^'"]+)['"]/g
+const CANNOT_IMPORT_PATTERN = /ImportError: cannot import name ['"]([^'"]+)['"] from ['"]([^'"]+)['"]/
+const TYPE_ERROR_SIGNATURE_PATTERN = /TypeError: \S+?\(\) (?:takes|got|missing|accepts)[^\n]*argument/i
+const ATTRIBUTE_ERROR_PATTERN = /AttributeError: (?:module )?['"]?([A-Za-z0-9_.]+)['"]? has no attribute/
+const FILE_MISSING_PATTERN = /FileNotFoundError|No such file or directory/i
 
-// 分类顺序：进程异常/126/127 → 环境标记 → 断言标记 → 目标符号缺失 → （工作区内
-// FileNotFoundError/ENOENT）目标符号缺失 → 其余非零按环境错误 fail-closed。
-function classifyBaseFailure(run, worktree) {
+/** 由 worktree 顶层 Python 包（含 __init__.py 的目录）与 allowedFiles 首段推导本地包根。 */
+function localPackageRoots(worktree, allowedFiles = []) {
+  const roots = new Set()
+  for (const glob of allowedFiles ?? []) {
+    const first = String(glob).split('/')[0]
+    if (first && !first.includes('*') && existsSync(join(worktree, first))) roots.add(first)
+  }
+  try {
+    for (const entry of readdirSync(worktree, { withFileTypes: true })) {
+      if (entry.isDirectory() && existsSync(join(worktree, entry.name, '__init__.py'))) roots.add(entry.name)
+    }
+  } catch { /* ignore unreadable worktree */ }
+  return [...roots]
+}
+
+function normalizePathForCompare(pathText) {
+  return String(pathText ?? '').replace(/\\/g, '/')
+}
+
+/** traceback 帧路径是否落在任务 worktree 内（含 macOS /private 前缀差异）。 */
+function worktreeFramePaths(text, worktree) {
+  if (!worktree) return []
+  const normalizedWorktree = normalizePathForCompare(worktree).replace(/\/+$/, '')
+  const frames = []
+  const pattern = /File "([^"]+)"/g
+  let match
+  while ((match = pattern.exec(text)) !== null) frames.push(match[1])
+  return frames.filter((frame) => {
+    const normalizedFrame = normalizePathForCompare(frame)
+    return normalizedFrame === normalizedWorktree
+      || normalizedFrame.startsWith(`${normalizedWorktree}/`)
+      || normalizedFrame.startsWith(`/private${normalizedWorktree}/`)
+  })
+}
+
+function moduleBelongsToTarget(moduleName, roots) {
+  const first = String(moduleName ?? '').split('.')[0]
+  return roots.some((root) => first === root || String(moduleName) === root || String(moduleName).startsWith(`${root}.`))
+}
+
+/**
+ * R5：归属核对。只有模块/符号属于任务目标（worktree 内 traceback 帧，或缺失模块名匹配
+ * 本地包根）才算 target-symbol-missing；第三方依赖/客户端版本问题返回 null（归 environment-error）。
+ */
+function targetSymbolEvidence(text, { worktree, packageRoots = [] } = {}) {
+  const frames = worktreeFramePaths(text, worktree)
+  for (const name of text.matchAll(IMPORT_ERROR_PATTERN)) {
+    if (moduleBelongsToTarget(name[1], packageRoots)) {
+      return { reason: `missing module '${name[1]}' matches local package root (${packageRoots.join(', ')})` }
+    }
+  }
+  const cannotImport = CANNOT_IMPORT_PATTERN.exec(text)
+  if (cannotImport && (moduleBelongsToTarget(cannotImport[2], packageRoots) || frames.length > 0)) {
+    return { reason: `cannot import name '${cannotImport[1]}' from target module '${cannotImport[2]}'` }
+  }
+  // 签名/参数不匹配：只有调用栈里存在任务 worktree 帧才算目标函数缺失。
+  if (TYPE_ERROR_SIGNATURE_PATTERN.test(text) && frames.length > 0) {
+    return { reason: 'TypeError signature mismatch at worktree call site' }
+  }
+  const attributeError = ATTRIBUTE_ERROR_PATTERN.exec(text)
+  if (attributeError && (moduleBelongsToTarget(attributeError[1], packageRoots) || frames.length > 0)) {
+    return { reason: `AttributeError on target symbol '${attributeError[1]}'` }
+  }
+  if (worktree && normalizePathForCompare(text).includes(normalizePathForCompare(worktree).replace(/\/+$/, '')) && FILE_MISSING_PATTERN.test(text)) {
+    return { reason: 'FileNotFoundError/ENOENT on task checkout path (target file/symbol missing)' }
+  }
+  return null
+}
+
+// 分类顺序：进程异常/126/127 → 环境标记 → 断言标记 → 目标符号缺失（归属核对）
+// → 其余非零按环境错误 fail-closed。第三方依赖/客户端错误不会仅因异常类型被当成目标缺失。
+function classifyBaseFailure(run, context = {}) {
   if (run.signal !== null && run.signal !== undefined) {
     return { failureClass: 'environment-error', reason: `process signal=${run.signal}` }
   }
@@ -152,13 +222,11 @@ function classifyBaseFailure(run, worktree) {
   for (const pattern of ASSERTION_PATTERNS) {
     if (pattern.test(text)) return { failureClass: 'target-assertion-failed', reason: `assertion marker: ${pattern}` }
   }
-  for (const pattern of SYMBOL_PATTERNS) {
-    if (pattern.test(text)) return { failureClass: 'target-symbol-missing', reason: `symbol/import marker: ${pattern}` }
+  const symbolEvidence = targetSymbolEvidence(text, context)
+  if (symbolEvidence !== null) {
+    return { failureClass: 'target-symbol-missing', reason: symbolEvidence.reason }
   }
-  if (worktree && text.includes(worktree) && /FileNotFoundError|No such file or directory/i.test(text)) {
-    return { failureClass: 'target-symbol-missing', reason: 'FileNotFoundError/ENOENT on task checkout path (target file/symbol missing)' }
-  }
-  return { failureClass: 'environment-error', reason: 'unclassified non-zero base failure（fail-closed：按环境错误判无效）' }
+  return { failureClass: 'environment-error', reason: 'unattributed import/symbol/type failure or unclassified non-zero base failure（fail-closed：按环境错误判无效）' }
 }
 
 function summarizeConsistency(runs) {
@@ -510,9 +578,11 @@ export function validateTask(options) {
       // 未声明 environment 或 offline=false：保持旧行为（不拦截），在报告中标记声明状态。
       report.checks.environment = { offline: false, declared: structure.environment !== null, ok: true }
     }
+    // R5：本地包根用于 base 失败归属核对（缺失模块是否属于任务目标）。
+    const packageRoots = localPackageRoots(worktree, task.allowedFiles)
     const baseRuns = repeatRuns(worktree, hiddenPath, repeats, timeoutMs)
     const baseConsistency = summarizeConsistency(baseRuns)
-    const failureClasses = baseRuns.map((run) => ({ code: run.code, ...classifyBaseFailure(run, worktree) }))
+    const failureClasses = baseRuns.map((run) => ({ code: run.code, ...classifyBaseFailure(run, { worktree, packageRoots }) }))
     const invalidFailure = failureClasses.find((entry) => !VALID_BASE_FAILURE_CLASSES.has(entry.failureClass))
     report.checks.base = {
       expected: 'fail',
@@ -741,10 +811,11 @@ function selfTest(asJson) {
       JSON.stringify(relativeLockStructure.errors ?? relativeLockStructure.warnings),
     )
 
-    // ---- F15: 稳定内容一致性 + base 失败分类（自测合成夹具，不改仓库）----
+    // ---- F15/R5/R6: 稳定内容一致性 + base 失败归属分类（自测合成夹具，不改仓库）----
     const classifyRepo = join(root, 'repo-classify')
-    mkdirSync(classifyRepo, { recursive: true })
+    mkdirSync(join(classifyRepo, 'targetpkg'), { recursive: true })
     writeFileSync(join(classifyRepo, 'state.txt'), 'base\n', 'utf8')
+    writeFileSync(join(classifyRepo, 'targetpkg', '__init__.py'), '', 'utf8')
     git(classifyRepo, ['init', '--quiet'])
     git(classifyRepo, ['add', '-A'])
     git(classifyRepo, ['-c', 'user.name=B2 Self Test', '-c', 'user.email=b2@example.invalid', 'commit', '--quiet', '-m', 'classify base'])
@@ -793,39 +864,125 @@ function selfTest(asJson) {
       repeats: 3,
     })
     const fixedPass = 'if [ "$(cat state.txt)" = fixed ]; then echo "PASS: stable"; exit 0; fi'
-    const dynamicAssertion = runClassify('dynamic-assertion', scriptLines([
+
+    // R6 正例：仅元数据变化（JSON 键值）应被归一化，三次判一致。
+    const dynamicMetadata = runClassify('dynamic-metadata', scriptLines([
       '#!/bin/sh',
       fixedPass,
       "rid=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')",
       'ts=$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)',
-      'printf "AssertionError: expected fixed but got requestId=%s at %s\n" "$rid" "$ts" >&2',
+      'printf \'AssertionError: expected fixed at {"timestamp": "%s", "requestId": "%s"}\n\' "$ts" "$rid" >&2',
       'exit 1',
     ]))
     record(
-      'F15 动态字段归一化：base 三次稳定内容一致且分类 target-assertion-failed',
-      dynamicAssertion.ok === true
-        && dynamicAssertion.checks.base.consistent === true
-        && new Set(dynamicAssertion.checks.base.outputSha256).size > 1
-        && new Set(dynamicAssertion.checks.base.normalizedSha256).size === 1
-        && dynamicAssertion.checks.base.failureClasses.every((entry) => entry.failureClass === 'target-assertion-failed')
-        && dynamicAssertion.checks.base.runs.every((run) => typeof run.stdout === 'string' && typeof run.stderr === 'string')
-        && (dynamicAssertion.checks.base.normalization?.rules?.length ?? 0) > 0
-        && (dynamicAssertion.normalization?.rules?.length ?? 0) > 0,
-      JSON.stringify({ ok: dynamicAssertion.ok, codes: dynamicAssertion.checks.base?.codes, classes: dynamicAssertion.checks.base?.failureClasses?.map((entry) => entry.failureClass), rawHashes: dynamicAssertion.checks.base?.outputSha256?.map((hash) => hash?.slice(0, 8)), normalizedHashes: dynamicAssertion.checks.base?.normalizedSha256?.map((hash) => hash?.slice(0, 8)) }),
+      'R6 元数据（JSON timestamp/requestId）变化被归一化：三次一致且分类 target-assertion-failed',
+      dynamicMetadata.ok === true
+        && dynamicMetadata.checks.base.consistent === true
+        && new Set(dynamicMetadata.checks.base.outputSha256).size > 1
+        && new Set(dynamicMetadata.checks.base.normalizedSha256).size === 1
+        && dynamicMetadata.checks.base.failureClasses.every((entry) => entry.failureClass === 'target-assertion-failed')
+        && dynamicMetadata.checks.base.runs.every((run) => typeof run.stdout === 'string' && typeof run.stderr === 'string')
+        && (dynamicMetadata.checks.base.normalization?.rules?.length ?? 0) > 0
+        && (dynamicMetadata.normalization?.rules?.length ?? 0) > 0,
+      JSON.stringify({ ok: dynamicMetadata.ok, classes: dynamicMetadata.checks.base?.failureClasses?.map((entry) => entry.failureClass), rawHashes: dynamicMetadata.checks.base?.outputSha256?.map((hash) => hash?.slice(0, 8)), normalizedHashes: dynamicMetadata.checks.base?.normalizedSha256?.map((hash) => hash?.slice(0, 8)) }),
     )
+
+    // R6 正例：行首日志时间戳属于元数据上下文，可归一化。
+    const logPrefixMetadata = runClassify('log-prefix-metadata', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      'ts=$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)',
+      'printf \'[%s] [INFO] request started\nAssertionError: expected fixed\n\' "$ts" >&2',
+      'exit 1',
+    ]))
+    record(
+      'R6 行首日志时间戳变化被归一化：三次一致',
+      logPrefixMetadata.ok === true
+        && logPrefixMetadata.checks.base.consistent === true
+        && new Set(logPrefixMetadata.checks.base.outputSha256).size > 1
+        && new Set(logPrefixMetadata.checks.base.normalizedSha256).size === 1,
+      JSON.stringify({ ok: logPrefixMetadata.ok, rawHashes: logPrefixMetadata.checks.base?.outputSha256?.map((hash) => hash?.slice(0, 8)), normalizedHashes: logPrefixMetadata.checks.base?.normalizedSha256?.map((hash) => hash?.slice(0, 8)) }),
+    )
+
+    // R6 反例：业务断言里的时间/UUID 裸值必须保留，三次差异必须判不一致。
+    const businessValueVariation = runClassify('business-value-variation', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      'counter="$TASK_CHECKOUT/../.classify-business-counter"',
+      'n=$(cat "$counter" 2>/dev/null || echo 0)',
+      'n=$((n+1))',
+      'echo "$n" > "$counter"',
+      'case "$n" in 1) d=01;; 2) d=09;; *) d=12;; esac',
+      'printf \'AssertionError: actual=2026-%s-01T00:00:00Z id=00000000-0000-4000-8000-00000000000%s\n\' "$d" "$n" >&2',
+      'exit 1',
+    ]))
+    record(
+      'R6 业务值（actual 时间/UUID）变化必须判不一致、判卡不合格',
+      businessValueVariation.ok === false
+        && businessValueVariation.checks.base.consistent === false
+        && businessValueVariation.checks.base.failureClasses.every((entry) => entry.failureClass === 'target-assertion-failed')
+        && new Set(businessValueVariation.checks.base.normalizedSha256).size > 1,
+      JSON.stringify({ ok: businessValueVariation.ok, consistent: businessValueVariation.checks.base?.consistent, normalizedHashes: businessValueVariation.checks.base?.normalizedSha256?.map((hash) => hash?.slice(0, 8)) }),
+    )
+
+    // R5 正例：缺失模块属于本地包根（targetpkg）→ target-symbol-missing。
     const symbolMissing = runClassify('symbol-missing', scriptLines([
       '#!/bin/sh',
       fixedPass,
-      "printf \"ModuleNotFoundError: No module named 'backend.app.validation_summary'\\n\" >&2",
+      "printf \"ModuleNotFoundError: No module named 'targetpkg.summary'\\n\" >&2",
       'exit 1',
     ]))
     record(
-      'F15 base 目标符号缺失 → 分类 target-symbol-missing 且有效',
+      'R5 目标包缺失模块 → 归属核对为 target-symbol-missing 且有效',
       symbolMissing.ok === true
         && symbolMissing.checks.base.consistent === true
         && symbolMissing.checks.base.failureClasses.every((entry) => entry.failureClass === 'target-symbol-missing'),
       JSON.stringify({ ok: symbolMissing.ok, classes: symbolMissing.checks.base?.failureClasses?.map((entry) => entry.failureClass) }),
     )
+
+    // R5 反例：第三方依赖缺失 → environment-error（不能只因 ModuleNotFoundError 判目标缺失）。
+    const thirdPartyModule = runClassify('third-party-module', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      "printf \"ModuleNotFoundError: No module named 'pydantic_core'\\n\" >&2",
+      'exit 1',
+    ]))
+    record(
+      'R5 第三方依赖缺失（pydantic_core）→ environment-error、判卡不合格',
+      thirdPartyModule.ok === false
+        && thirdPartyModule.checks.base.failureClasses.every((entry) => entry.failureClass === 'environment-error')
+        && /environment-error/.test(thirdPartyModule.checks.base.invalidReason ?? ''),
+      JSON.stringify({ ok: thirdPartyModule.ok, classes: thirdPartyModule.checks.base?.failureClasses?.map((entry) => entry.failureClass) }),
+    )
+
+    // R5 反例：第三方客户端 TypeError（无 worktree 调用帧）→ environment-error。
+    const thirdPartyTypeError = runClassify('third-party-type-error', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      "printf \"TypeError: Client.__init__() got an unexpected keyword argument 'proxies'\\n\" >&2",
+      'exit 1',
+    ]))
+    record(
+      'R5 第三方客户端 TypeError（无 worktree 帧）→ environment-error、判卡不合格',
+      thirdPartyTypeError.ok === false
+        && thirdPartyTypeError.checks.base.failureClasses.every((entry) => entry.failureClass === 'environment-error'),
+      JSON.stringify({ ok: thirdPartyTypeError.ok, classes: thirdPartyTypeError.checks.base?.failureClasses?.map((entry) => entry.failureClass) }),
+    )
+
+    // R5 正例：目标函数签名不匹配且调用帧在 worktree 内 → target-symbol-missing。
+    const targetCallSiteTypeError = runClassify('target-call-site-type-error', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      'printf \'Traceback (most recent call last):\\n  File "%s/targetpkg/api.py", line 10, in <module>\\nTypeError: list_diagnoses() takes 3 positional arguments but 4 were given\\n\' "$TASK_CHECKOUT" >&2',
+      'exit 1',
+    ]))
+    record(
+      'R5 worktree 调用帧内的目标函数 TypeError → target-symbol-missing 且有效',
+      targetCallSiteTypeError.ok === true
+        && targetCallSiteTypeError.checks.base.failureClasses.every((entry) => entry.failureClass === 'target-symbol-missing'),
+      JSON.stringify({ ok: targetCallSiteTypeError.ok, classes: targetCallSiteTypeError.checks.base?.failureClasses?.map((entry) => entry.failureClass) }),
+    )
+
     const environmentError = runClassify('environment-error', scriptLines([
       '#!/bin/sh',
       fixedPass,
@@ -840,20 +997,7 @@ function selfTest(asJson) {
         && /environment-error/.test(environmentError.checks.base.invalidReason ?? ''),
       JSON.stringify({ ok: environmentError.ok, classes: environmentError.checks.base?.failureClasses?.map((entry) => entry.failureClass), invalidReason: environmentError.checks.base?.invalidReason }),
     )
-    const inconsistentBase = runClassify('inconsistent-base', scriptLines([
-      '#!/bin/sh',
-      fixedPass,
-      "v=$(od -An -N8 -tu8 /dev/urandom | tr -d ' \n')",
-      'printf "AssertionError: random value %s\n" "$v" >&2',
-      'exit 1',
-    ]))
-    record(
-      'F15 base 稳定内容不一致 → consistent=false 且判卡不合格',
-      inconsistentBase.ok === false
-        && inconsistentBase.checks.base.consistent === false
-        && inconsistentBase.checks.base.failureClasses.every((entry) => entry.failureClass === 'target-assertion-failed'),
-      JSON.stringify({ ok: inconsistentBase.ok, consistent: inconsistentBase.checks.base?.consistent, codes: inconsistentBase.checks.base?.codes }),
-    )
+
     const inconsistentReference = runClassify('inconsistent-reference', scriptLines([
       '#!/bin/sh',
       'if [ "$(cat state.txt)" = fixed ]; then',
@@ -861,7 +1005,7 @@ function selfTest(asJson) {
       '  echo "PASS: random $v"',
       '  exit 0',
       'fi',
-      'printf "AssertionError: expected fixed\n" >&2',
+      'printf "AssertionError: expected fixed\\n" >&2',
       'exit 1',
     ]))
     record(

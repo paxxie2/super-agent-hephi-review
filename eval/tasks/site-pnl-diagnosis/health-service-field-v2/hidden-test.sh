@@ -91,7 +91,7 @@ internal = db_status(db_path).get("error") or ""
 assert internal, "fixture must produce a real internal database error"
 assert internal not in text, "503 must not leak the internal DB error text"
 detail = data.get("detail")
-assert isinstance(detail, str) and detail.strip(), f"detail must be a non-empty public message: {detail!r}"
+assert detail == "database unavailable", f"503 detail must be the fixed public message 'database unavailable': {detail!r}"
 
 # 健康时 detail 不应出现内部错误；200 路径保持。
 healthy = tmp / "healthy.db"
@@ -103,5 +103,5 @@ data_ok = json_body(payload_ok)
 assert status_ok == 200, (status_ok, payload_ok[:300])
 assert data_ok.get("status") == "ok" and data_ok.get("db") == "ok", data_ok
 
-print("PASS: 503 detail does not leak internal DB error (ASGI behavior)")
+print("PASS: 503 detail is fixed 'database unavailable' and does not leak internal DB error (ASGI behavior)")
 PY

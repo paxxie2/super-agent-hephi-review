@@ -27,3 +27,10 @@
 - **full-mode 结果**：`ok:true`；base 3/3 失败（`503 must not leak the internal DB error text: "数据库不可访问: [Errno 20] Not a directory: ..."`，即 base 泄漏内部文本），reference 3/3 通过；`outside=[]`。
 - **限制**：AST 已移除；未启动真实宿主/实例、未做真实模型运行。
 - **校验分类（F15 后的 check-task）**：base 3/3 均为 `target-assertion-failed`（非 environment-error），3 次 `normalizedSha256` 相同；reference 3/3 `codes=[0,0,0]` 且输出一致。
+
+## R7b 整改（第九轮外部审查，2026-11-09）
+
+- **原问题**：本卡 hidden-test 第 93 行附近只断言 `detail` 为非空字符串且不泄漏内部错误；`issue.md` 要求 503 的 detail **固定为 `database unavailable`**。其他非空错误文本也能通过，属于断言减弱（R7b）。
+- **整改**：`hidden-test.sh` 恢复固定值断言 `detail == "database unavailable"`，同时**保留**原有“内部 DB 错误文本不得出现在响应体”的不泄漏断言；未修改 `issue.md`、`reference.patch`（需求与参考实现不变）。
+- **重跑**：`node eval/check-task.mjs <本卡> --repo /Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis --json` → `ok:true`；base 3/3 `target-assertion-failed`（base 503 泄漏内部错误文本，被“不泄漏”断言拦下，退出码 1×3），reference 3/3 通过（输出 `PASS: 503 detail is fixed 'database unavailable' ...`），scope `outside=[]`。
+- `validation.json` 已用上述 full-mode 运行结果覆盖（同一次运行生成，非手写）。
