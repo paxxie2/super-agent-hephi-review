@@ -152,6 +152,7 @@ class Run:
     label_kappa: float | None
     label_batch_id: str | None = None
     labelers: list[str] = field(default_factory=list)
+    labeler_types: dict[str, str] = field(default_factory=dict)
     label_present: bool = False
     model_temperature: object = None
     host_version: str | None = None
@@ -374,6 +375,8 @@ def record_contract_errors(record: dict) -> list[str]:
             expect("label.kappa", kappa is None or (_is_number(kappa) and -1 <= float(kappa) <= 1), "必须是 [-1,1] 数字或 null")
             labelers = label.get("labelers")
             expect("label.labelers", labelers is None or (isinstance(labelers, list) and all(isinstance(item, str) and item for item in labelers)), "labelers 必须是字符串数组")
+            labeler_types_block = label.get("labelerTypes")
+            expect("label.labelerTypes", labeler_types_block is None or (isinstance(labeler_types_block, dict) and all(isinstance(k, str) and v in ("human", "agent") for k, v in labeler_types_block.items())), "labelerTypes 必须是 {labeler: human|agent}；身份必须显式声明，不从名称推断")
     return errors
 
 
@@ -471,6 +474,8 @@ def parse_run(record: dict) -> Run:
         label_kappa=None if kappa is None else float(kappa),
         label_batch_id=(label_block or {}).get("batchId"),
         labelers=list((label_block or {}).get("labelers") or []),
+        labeler_types={str(k): str(v) for k, v in ((label_block or {}).get("labelerTypes") or {}).items()
+                       if isinstance(v, str) and v in ("human", "agent")},
         label_present=label_block is not None,
         model_temperature=(model_block.get("parameters") or {}).get("temperature"),
         host_version=host_block.get("version"),
@@ -1013,17 +1018,29 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
     bound_ids = {run.run_id for run in bound_label_runs}
     missing_kappa_runs = [run.run_id for run in runs if run.run_id not in bound_ids or run.label_kappa is None]
     labelers = sorted({labeler for run in bound_label_runs for labeler in run.labelers})
-    agent_like = re.compile(r"(agent|assistant|ai|bot|delegate|model)", re.IGNORECASE)
+    # F3/N04：评审身份不得从显示名正则推断（名字既不能证明 AI 也不能证明真人；
+    # 真人名含 ai 也曾被误降级）。full 要求**显式身份声明**：labels/导入材料提供
+    # labelerTypes（{labeler: "human"|"agent"}）；未声明的身份按 unknown 处理，
+    # unknown 不具备完整人工校准资格 → degraded-partial。
+    labeler_types: dict[str, str] = {}
+    for run in bound_label_runs:
+        for k, v in (getattr(run, "labeler_types", None) or {}).items():
+            labeler_types[str(k)] = str(v)
     calibration_mode = "missing"
     calibration_partial_reasons: list[str] = []
     if kappa_values:
-        agent_labelers = [labeler for labeler in labelers if agent_like.search(labeler)]
+        agent_labelers = [l for l in labelers if labeler_types.get(l) == "agent"]
+        unknown_labelers = [l for l in labelers if labeler_types.get(l) not in ("human", "agent")]
+        human_labelers = [l for l in labelers if labeler_types.get(l) == "human"]
         if agent_labelers:
             calibration_mode = "degraded-partial"
-            calibration_partial_reasons.append(f"校准包含 agent/AI 身份（{', '.join(agent_labelers)}）：只能作为 approved partial 证据")
-        elif len(labelers) < 2:
+            calibration_partial_reasons.append(f"校准包含已声明 agent 身份（{', '.join(agent_labelers)}）：只能作为 approved partial 证据")
+        elif unknown_labelers:
             calibration_mode = "degraded-partial"
-            calibration_partial_reasons.append(f"labelers 少于 2 个（{labelers}）：按已批准的单人/代标降级模式保留 partial")
+            calibration_partial_reasons.append(f"评审身份未显式声明（{', '.join(unknown_labelers)}）：名称不能证明真人/AI，按 unknown 降级为 partial；在标注材料中提供 labelerTypes 可恢复")
+        elif len(human_labelers) < 2:
+            calibration_mode = "degraded-partial"
+            calibration_partial_reasons.append(f"已声明 human 的评审少于 2 个（{human_labelers}）：按已批准的单人/代标降级模式保留 partial")
         else:
             calibration_mode = "full"
     label_quality = {
@@ -1427,7 +1444,7 @@ def _default_condition_fields(arm: str) -> dict:
             "loadedSha": locked["hephi"],
             "loadedShaReadback": "verified",
         },
-        "label": {"batchId": "selftest", "labelers": ["reviewer-a", "reviewer-b"], "kappa": 0.9},
+        "label": {"batchId": "selftest", "labelers": ["reviewer-a", "reviewer-b"], "labelerTypes": {"reviewer-a": "human", "reviewer-b": "human"}, "kappa": 0.9},
     }
 
 
@@ -1526,7 +1543,7 @@ def _record(task: str, arm: str, *, batch: str = "selftest", repetition: int = 1
     if acceptance is not None:
         record["acceptanceVerdict"] = acceptance
     if kappa is not None:
-        record["label"] = {"batchId": batch, "labelers": ["reviewer-a", "reviewer-b"], "kappa": kappa}
+        record["label"] = {"batchId": batch, "labelers": ["reviewer-a", "reviewer-b"], "labelerTypes": {"reviewer-a": "human", "reviewer-b": "human"}, "kappa": kappa}
     return record
 
 
@@ -1966,17 +1983,22 @@ def self_test(as_json: bool = False) -> int:
         for record in (control, treatment):
             record["label"] = {**record["label"], **label_patch}
         return analyze([parse_run(control), parse_run(treatment)], {"min_pairs": 1, "n_boot": 200})
-    agents_only = _partial_report({"labelers": ["agent:a", "agent:b"]})
+    agents_only = _partial_report({"labelers": ["agent:a", "agent:b"], "labelerTypes": {"agent:a": "agent", "agent:b": "agent"}})
     record("N04-1 反例：labelers 全 agent → meets_prereg_partial，不得 meets_prereg",
            agents_only["decision"]["conclusion"] == "meets_prereg_partial"
            and agents_only["decision"]["meets_prereg"] is False,
            json.dumps({"conclusion": agents_only["decision"]["conclusion"], "meets": agents_only["decision"]["meets_prereg"], "mode": agents_only["label_quality"]["calibration_mode"]}))
-    single_human = _partial_report({"labelers": ["human:a"]})
+    single_human = _partial_report({"labelers": ["human:a"], "labelerTypes": {"human:a": "human"}})
     record("N04-2 反例：仅单人 → meets_prereg_partial，不得 meets_prereg",
            single_human["decision"]["conclusion"] == "meets_prereg_partial"
            and single_human["decision"]["meets_prereg"] is False,
            json.dumps({"conclusion": single_human["decision"]["conclusion"], "mode": single_human["label_quality"]["calibration_mode"]}))
-    human_agent = _partial_report({"labelers": ["human:a", "agent:b"]})
+    human_agent = _partial_report({"labelers": ["human:a", "agent:b"], "labelerTypes": {"human:a": "human", "agent:b": "agent"}})
+    unknown_names = _partial_report({"labelers": ["kimi", "gpt"]})
+    record("N04-5 反例（第十三轮）：未声明身份的两个名称 → degraded-partial，不得 full",
+           unknown_names["label_quality"]["calibration_mode"] == "degraded-partial"
+           and unknown_names["decision"]["meets_prereg"] is False,
+           json.dumps({"mode": unknown_names["label_quality"]["calibration_mode"], "conclusion": unknown_names["decision"]["conclusion"]}))
     record("N04-3 反例：human+agent 混合 → degraded-partial，不得 meets_prereg",
            human_agent["decision"]["conclusion"] == "meets_prereg_partial"
            and human_agent["label_quality"]["calibration_mode"] == "degraded-partial"
@@ -1988,7 +2010,7 @@ def self_test(as_json: bool = False) -> int:
            and foreign["decision"]["conclusion"] == "evidence_insufficient",
            json.dumps({"missing": foreign["label_quality"]["evidence_missing"], "foreign": foreign["label_quality"]["foreign_label_runs"], "conclusion": foreign["decision"]["conclusion"]}))
     # 正例仍为完整 meets_prereg（双 human、batch 绑定、kappa 合格）
-    positive = _partial_report({})
+    positive = _partial_report({"labelerTypes": {"reviewer-a": "human", "reviewer-b": "human"}})
     record("N04 正例：双 human + 当前 batch + kappa=0.9 → 完整 meets_prereg",
            positive["decision"]["conclusion"] == "meets_prereg" and positive["decision"]["meets_prereg"] is True,
            json.dumps({"conclusion": positive["decision"]["conclusion"], "mode": positive["label_quality"]["calibration_mode"]}))

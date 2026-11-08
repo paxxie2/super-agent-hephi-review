@@ -116,6 +116,10 @@ const LOG_TIMESTAMP_DASH_PATTERN = new RegExp(
   'gm',
 )
 
+// F2/N02：日志前缀只证明日志封装，不能把正文变成元数据——正文含断言负载的行，
+// 关联 ID 键值不归一（时间戳前缀仍归一）。
+const ASSERTION_PAYLOAD_IN_LINE = /AssertionError|\bassert\b|actual\s*=|expected\s*=/
+
 function normalizeStableOutput(text) {
   const lines = String(text ?? '').replace(/\r\n?/g, '\n').split('\n')
   return lines.map(line => {
@@ -123,6 +127,7 @@ function normalizeStableOutput(text) {
     if (!isLogLine) return line
     let normalized = line.replace(LOG_TIMESTAMP_BRACKET_PATTERN, '<log-timestamp>$2')
     normalized = normalized.replace(LOG_TIMESTAMP_DASH_PATTERN, '<log-timestamp>$2')
+    if (ASSERTION_PAYLOAD_IN_LINE.test(line)) return normalized
     return normalized.replace(METADATA_KV_PATTERN, '$1<dynamic>')
   }).join('\n')
 }
@@ -364,14 +369,21 @@ function moduleFileInWorktree(worktree, moduleName, packageRoots = []) {
 /** 文件内是否定义/从本地模块导入了 `name`（同名定义只在无关文件不算）。 */
 function fileDefinesOrImportsLocal(filePath, name, worktree, packageRoots) {
   const content = readTextSafe(filePath)
-  if (new RegExp(`^\\s*(?:async\\s+)?def\\s+${name}\\s*\\(`, 'm').test(content)) return { evidence: `def ${name} in ${filePath}` }
-  if (new RegExp(`^\\s*class\\s+${name}\\b`, 'm').test(content)) return { evidence: `class ${name} in ${filePath}` }
+  // F1/N01-B：import 绑定优先；def/class 只认**模块级**（行首无缩进）——
+  // 同文件类方法等同名嵌套定义不构成模块级归属。
   const bindings = importBindings(content)
   const moduleName = bindings.symbols.get(name) ?? bindings.modules.get(name)
   if (moduleName) {
-    const moduleFile = moduleFileInWorktree(worktree, moduleName, packageRoots)
-    if (moduleFile) return { evidence: `import ${name} from local module ${moduleName} (${moduleFile})` }
+    // F1/N01-A：import 绑定同样要过 find_spec 归属——模块解析到 site-packages 等外部
+    // （如真实 httpx vs 无关的 unrelated/httpx.py）时，本地同名文件不构成归属。
+    const origin = resolveModuleOrigin(moduleName.split('.')[0], worktree)
+    if (origin.kind !== 'external') {
+      const moduleFile = moduleFileInWorktree(worktree, moduleName, packageRoots)
+      if (moduleFile) return { evidence: `import ${name} from local module ${moduleName} (${moduleFile})` }
+    }
   }
+  if (new RegExp(`^(?:async\\s+)?def\\s+${name}\\s*\\(`, 'm').test(content)) return { evidence: `module-level def ${name} in ${filePath}` }
+  if (new RegExp(`^class\\s+${name}\\b`, 'm').test(content)) return { evidence: `module-level class ${name} in ${filePath}` }
   return null
 }
 
@@ -400,6 +412,33 @@ function resolveQualifiedModule(expression, frameFile, worktree, packageRoots) {
   return moduleFile ? { moduleName, moduleFile, functionName } : null
 }
 
+/** F1/N01-A：用 Python importlib 实际解析模块来源（worktree / external / not-found），结果缓存。 */
+const moduleOriginCache = new Map()
+function resolveModuleOrigin(moduleName, worktree) {
+  const key = `${worktree}::${moduleName}`
+  if (moduleOriginCache.has(key)) return moduleOriginCache.get(key)
+  let result = { kind: 'not-found', path: null }
+  try {
+    const py = [
+      'import importlib.util, sys, json',
+      `sys.path.insert(0, ${JSON.stringify(String(worktree))})`,
+      `spec = importlib.util.find_spec(${JSON.stringify(moduleName)})`,
+      'print(json.dumps(spec.origin) if spec else "NOT_FOUND")',
+    ].join('; ')
+    const out = execFileSync('python3', ['-c', py], { cwd: String(worktree), encoding: 'utf8', timeout: 10_000 })
+    const origin = JSON.parse(String(out).trim())
+    if (origin && origin !== 'NOT_FOUND') {
+      const normalized = String(origin).replace(/\\/g, '/')
+      const wt = String(worktree).replace(/\\/g, '/').replace(/\/+$/, '')
+      result = (normalized === wt || normalized.startsWith(`${wt}/`))
+        ? { kind: 'worktree', path: origin }
+        : { kind: 'external', path: origin }
+    }
+  } catch { /* python 不可用/超时：fail-closed 维持 not-found，由上层候选决定 */ }
+  moduleOriginCache.set(key, result)
+  return result
+}
+
 function targetSymbolEvidence(text, { worktree, packageRoots = [], sourceIndex = null } = {}) {
   const index = sourceIndex ?? (worktree ? buildSourceIndex(worktree) : { functions: new Map(), classes: new Map(), modules: new Map() })
   const frames = parseTraceback(text)
@@ -420,8 +459,18 @@ function targetSymbolEvidence(text, { worktree, packageRoots = [], sourceIndex =
   if (attributeError) {
     const owner = attributeError[1]
     const basename = owner.split('.').pop()
+    // F1/N01-A：同名模块文件只是候选，不得作为归属依据。归属用 importlib 实际解析
+    //（worktree 环境 find_spec）：解析到 worktree 文件 = 本地模块；解析到 site-packages
+    // 等外部 = 第三方（environment，落到 return null）；完全不存在外部同名时才接受
+    // worktree 内候选文件。无关的 unrelated/httpx.py 因真实 httpx 解析到 site-packages 被拒。
     if (index.modules.has(basename)) {
-      return { reason: `AttributeError on local module '${owner}' loaded from ${index.modules.get(basename).join(', ')}` }
+      const origin = resolveModuleOrigin(basename, worktree)
+      if (origin.kind === 'worktree') {
+        return { reason: `AttributeError on local module '${owner}': importlib resolves '${basename}' to the task worktree (${origin.path})` }
+      }
+      if (origin.kind === 'not-found') {
+        return { reason: `AttributeError on local module '${owner}': no importable '${basename}' outside the worktree; only candidate is ${index.modules.get(basename).join(', ')}` }
+      }
     }
     const frame = worktreeFrames[worktreeFrames.length - 1]
     const defined = frame ? fileDefinesOrImportsLocal(frame.path, basename, worktree, packageRoots) : null
@@ -1301,6 +1350,49 @@ function selfTest(asJson) {
         && new Set(logPrefixMetadata.checks.base.outputSha256).size > 1
         && new Set(logPrefixMetadata.checks.base.normalizedSha256).size === 1,
       JSON.stringify({ ok: logPrefixMetadata.ok, rawHashes: logPrefixMetadata.checks.base?.outputSha256?.map((hash) => hash?.slice(0, 8)), normalizedHashes: logPrefixMetadata.checks.base?.normalizedSha256?.map((hash) => hash?.slice(0, 8)) }),
+    )
+
+    // F2/N02 反例：日志前缀内包裹的断言负载是业务正文，ID 变化必须保留。
+    const logWrappedAssertion = runClassify('log-wrapped-assertion', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      "rid=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \\n')",
+      'printf \'[2026-11-09T00:00:00Z] [ERROR] AssertionError: actual={"requestId":"%s"}\\n\' "$rid" >&2',
+      'exit 1',
+    ]))
+    record(
+      'F2/N02 反例：日志前缀内断言负载的 requestId 变化保留 → 三次不一致',
+      logWrappedAssertion.checks.base.consistent === false,
+      JSON.stringify({ normalizedHashes: logWrappedAssertion.checks.base?.normalizedSha256?.map((hash) => hash?.slice(0, 8)) }),
+    )
+
+    // F1/N01 反例 A：真实第三方模块 AttributeError + worktree 无关同名文件（unrelated/httpx.py）
+    // —— importlib find_spec 解析到 site-packages，必须 environment-error（同名文件不得作为归属）。
+    const attrModuleCollision = (function () {
+      const wt = mkdtempSync(join(tmpdir(), 'n01a-'))
+      mkdirSync(join(wt, 'unrelated'), { recursive: true })
+      writeFileSync(join(wt, 'unrelated', 'httpx.py'), '# unrelated same-name module\n')
+      writeFileSync(join(wt, 'caller.py'), 'import httpx\nhttpx.NoSuchSymbol\n')
+      const text = `Traceback (most recent call last):\n  File "${wt}/caller.py", line 2, in <module>\n    httpx.NoSuchSymbol\nAttributeError: module 'httpx' has no attribute 'NoSuchSymbol'`
+      return targetSymbolEvidence(text, { worktree: wt, packageRoots: [] })
+    })()
+    record(
+      'F1/N01 反例A：unrelated/httpx.py + 真实 httpx AttributeError → environment（不得 target）',
+      attrModuleCollision === null,
+      JSON.stringify({ reason: attrModuleCollision?.reason ?? null }),
+    )
+
+    // F1/N01 反例 B：同文件类内同名方法不构成模块级归属（import httpx.Client 的调用仍 environment）。
+    const methodShadow = (function () {
+      const wt = mkdtempSync(join(tmpdir(), 'n01b-'))
+      writeFileSync(join(wt, 'b.py'), 'from httpx import Client\nclass Unrelated:\n    def Client(self): pass\n')
+      const text = `Traceback (most recent call last):\n  File "${wt}/b.py", line 6, in <module>\n    Client(proxies={})\nTypeError: Client.__init__() got an unexpected keyword argument 'proxies'`
+      return targetSymbolEvidence(text, { worktree: wt, packageRoots: [] })
+    })()
+    record(
+      'F1/N01 反例B：同文件嵌套方法同名 → environment（模块级定义才算归属）',
+      methodShadow === null,
+      JSON.stringify({ reason: methodShadow?.reason ?? null }),
     )
 
     // N02 反例：普通 JSON 行（无日志前缀）的 requestId 变化必须保留。
