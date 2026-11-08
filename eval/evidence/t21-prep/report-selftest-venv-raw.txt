@@ -1,0 +1,12 @@
+PASS CI 已知答案：6 个任务差值恒为 -1 → CI=[-1,-1] :: ci=[-1.0, -1.0]
+PASS 精确 McNemar：改善6/恶化0 → p=2*0.5^6 :: p=0.03125 expected=0.03125
+PASS 主指标判定：显著改善 :: {"improved": true, "worsened": false}
+PASS 精确 McNemar：5/5 → p=1 :: p=1.0
+PASS 精确 McNemar：10/0 → p=0.001953125 :: p=0.001953125
+PASS 非劣效反例：CI 下界 -1 <= -0.05 → 非劣效不成立 :: {"margin": -0.05, "ci_lower": -1.0, "non_inferior": false, "direction": "larger is better\uff08\u5df2\u5f52\u4e00\u5316\uff09"}
+PASS 非劣效正例：差值 0 → CI 下界 0 > -0.05 :: {"margin": -0.05, "ci_lower": 0.0, "non_inferior": true, "direction": "larger is better\uff08\u5df2\u5f52\u4e00\u5316\uff09"}
+PASS 成本超限：native 中位耗时 40 > 上限 30 :: ["median_minutes_max", "very_slow_share_max"]
+PASS 成本未超限：native 中位耗时 10 <= 上限 30 :: []
+PASS 样本不足：n_pairs=1 < min_pairs=5 → evidence_insufficient :: evidence_insufficient
+PASS 输入校验：缺字段抛清晰 ValueError :: 运行记录缺少字段：batch; validationEnvironment.status 必须是 available/unavailable
+SELF-TEST: PASS

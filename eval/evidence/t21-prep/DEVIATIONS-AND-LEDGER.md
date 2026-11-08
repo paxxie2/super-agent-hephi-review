@@ -1,45 +1,52 @@
-# T21 准备阶段偏差登记与成本台账（外部审查整改）
+# T21 偏差登记与成本台账 v2（外部审查第二轮整改）
 
-依据：外部模型对 PR #90 的审查意见（2026-11-09 01:48），逐项整改并如实登记。
+替代 v1（同文件旧版）。依据：REVIEW.md（hephi-e57deda-review，2026-11-09）F1–F5。
 
-## 1. D-9 对照对象偏差（正式登记）
+## 1. 对照对象错误（F1a，实质修复）
 
-**事实**：D-9 一致性校验中，native 侧对照读取的是**既有** B5 试跑投递
-（`paxxie2/b5-native-site-pnl#2`，只读），不是与 off 侧同批次的新投递。原因：新建 native
-Issue 会触发宿主 B（3083，paused）产生真实 ticket/Worker 运行，超出校验窗口的授权范围。
+**问题**：T21 应比较"原系统 vs 本方案整包"，v1.0 误沿旧 B5 的"off vs native"分组。
+**修复**：PREREG 升 **v1.1**（本次提交），§1 Q1 分组定义为：
+- 原系统 = T01 冻结制品：SA `6d24e1b`+`62d7d53`+原配置（g1-ctl 型实例）；
+- 整包 = SA `d0e64d6` + hephi `055491d` + G1 配置（B/g1-exp 型实例）。
+off/native 术语仅保留于 D-9 投递机制描述。新锁 preregSha256 `b0c801f3…`（forced 重写留痕）。
 
-**影响**：taskCard.sha256 一致性判定仍然成立（两侧卡部分逐字节相等）；但"两组同批投递
-机制一致性"未验证，正式实验首轮执行时须做一次同批投递并复验哈希（已写入运行前检查项）。
+## 2. 非同批次（F1b，保留为运行前检查项）
 
-**处置**：不重做校验（避免触发宿主）；作为已知限制随 PR #90 供审查。
+D-9 的 native 侧为既有投递只读读取，非同批。正式首轮执行时同批投递并复验
+taskCard.sha256（不变）。
 
-## 2. 成本漏记（台账补登）
+## 3. D-9 "4 次 API" 口径更正
 
-**事实**：D-9 校验窗口（2026-11-08T16:05–16:11Z）内，off 组 Worker 真实完成了
-`previous-window-order` 任务并创建 PR `paxxie2/b5-off-site-pnl#16`（open，未合并）。
-该运行的模型费用（deepseek-flash）**未计入** PREREG §5 的 100 元总预算账。
+v1 台账沿用了 env-r5 的"共 4 次"——该数字只统计**显式**调用；3093 实例轮询器在
+6 分钟窗口内还消耗了数量未知的额外配额。正确口径：显式 4 次 + 轮询消耗未计量。
+原 `d9-consistency-20261108T1605Z.md` 中的"4 次"表述以本节为准更正。
 
-**补登**：token/费用数值未采集 → 记 `unverified`；按单次运行保守上界（PREREG 单次停止线
-3,000,000 token）预留。正式实验开账时首笔登记此项，防止预算口径漂移。PR #16 保持 open
-不合并，不作为任何实验数据点。
+## 4. 成本台账（F5，如实：零信息，不虚构）
 
-## 3. 任务清单冻结
+- D-9 off Worker 历史运行（PR #16）：**无实测 token/费用数据**（实例 state 随窗口清理，
+  不可恢复）。记 `unknown`；不设任何"上界"（3M 是预注册单次停止阈值，不是消耗证据，
+  不得换算为人民币预留）。
+- 预算状态：100 元门槛的放行条件 = 拿到 provider 实际计费/usage 数据并独立核验；
+  当前不具备放行条件。新增付费调用前必须先建立 usage 采集。
 
-`taskset-manifest-v1.0.json`：40 任务（site-pnl 28 + hephi 12），逐任务
-taskJsonSha256/issueSha256/validationOk，绑定 PREREG preregSha256
-`267d4069…`；变更须按 PREREG §9 升版本。
+## 5. 任务清单（F2，已修）
 
-## 4. 语料结构覆盖（测试覆盖补强）
+`taskset-manifest-v1.1.json`：绑定 v1.1 锁哈希；角色分类 q1-retention 23 /
+q1-devexposed-original 4 / non-q1-tooling 12 / staged-only-q3 1；**23 是合格保留集候选数，
+不是 67 配对数**。validationOk null 的卡未擅改 true，行为验证见 §7。
 
-全量 dry-run sweep：**40 PASS / 0 FAIL**（2026-11-09 01:50，命令见交接包 §4 口径）。
-变体卡的 agent 辅助评审局限仍如实保留（各卡 review.md），不在本轮整改范围内冒充双人评审。
+## 6. 统计参数（F3，已修）
 
-## 5. 统计参数同步
+`report.py`：seed 20261108、min_pairs 67、token 中位/P90 上限 **1000000/2000000**。
+总费用门槛不由 report.py 实现（PREREG §9 声明：CLI 显式参数 + 独立成本台账双重核验）。
+自测环境（可复现）：`/Users/zm/repos/hephi-dev-base/.venv/bin/python`（Python 3.14.2，
+numpy 2.3.4 / scipy 1.16.2 / statsmodels 0.14.5，按 `eval/stats/requirements.txt` 安装），
+原始输出：`report-selftest-venv-raw.txt`（exit 0，SELF-TEST: PASS）。
+系统 python3 缺依赖时 exit 2 属预期（依赖未随系统安装）。
 
-`eval/stats/report.py` 默认值对齐 PREREG v1.0：`DEFAULT_SEED 20261107→20261108`、
-`DEFAULT_MIN_PAIRS 5→67`；`--self-test` exit 0（Python 3.14.2 实测）。
-`b6_known_answers.py` 的 SEED 为该工具自身已知答案的固定种子，不属于预注册默认值，未改动。
+## 7. 行为覆盖（F4，修复中）
 
-## 6. PR 标题范围更正
-
-PR #90 标题由 "T01–T23" 更正为 "T01–T20 + T21 prep"（T22/T23 未开始，交接包 §5 已列）。
+- 弱断言卡（415 文本存在性 / 播种函数仅 callable / SQL 字符串计数 / dotenv stub）：
+  本轮定向加强为行为断言并重跑 full-mode（见随后提交的各卡 validation.json）。
+- q1-retention 23 卡 full-mode 行为验证（base 3×失败 + reference 3×通过）：结果随提交更新。
+  此前 40/40 dry-run 仅结构检查，不作为行为验证结论（v1 表述作废）。

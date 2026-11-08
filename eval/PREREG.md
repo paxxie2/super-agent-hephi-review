@@ -1,9 +1,13 @@
 # B1 预注册（PREREG）— ROADMAP-95 工作线 B
 
-状态：**LOCKED v1.0（2026-11-08）· seed=20261108**。锁定依据：负责人 2026-11-08 口头批准
+状态：**LOCKED v1.1（2026-11-09）· seed=20261108**。v1.0→v1.1 变更（外部审查 F1/F2）：
+① Q1 对照对象更正为"原系统 vs 整包"（v1.0 误沿旧 B5 的 off/native 对照，违反
+`eval/approvals/2026-11-08-minimal-unblocking.md` 的禁止混用）；② 任务集清单冻结改为
+引用 `eval/evidence/t21-prep/taskset-manifest-v1.1.json`（替代"按 b36a4d2 提交冻结"的表述）。
+其余数值与口径不变。锁定依据：负责人 2026-11-08 口头批准
 （`eval/approvals/2026-11-08-owner-approval.md`）+ 负责人委托的 AI 代定参数
-（`eval/approvals/2026-11-08-delegated-b5-parameters.md`，D-3/D-4/D-5/D-8）+ 本轮语料/产能核对
-（Lead，2026-11-08；保留集全新任务约 17 个，67 配对需变体任务卡补足，缺口如实按 §7 记"证据不足"）。
+（`eval/approvals/2026-11-08-delegated-b5-parameters.md`，D-3/D-4/D-5/D-8）+ 外部审查整改指令
+（负责人转发，2026-11-09）。
 锁定后任何数值/口径变化都必须升版本并说明理由。
 
 - 关联：`ROADMAP-95.md` §4 工作线 B（B1–B8）、`eval/tasks/`（任务集）、`eval/schema/run.schema.json`（运行记录）、
@@ -14,7 +18,11 @@
 
 | 编号 | 对照 | 问题 | 安排 |
 | --- | --- | --- | --- |
-| Q1 | 同一任务卡：off（不挂载赫菲） vs native（挂载赫菲 enforce） | 赫菲整体带来多少收益和成本 | **第一轮正式实验，必做** |
+| Q1 | 同一任务卡：**原系统**（T01 冻结制品：SA `6d24e1b`+`62d7d53`+原配置，g1-ctl 型实例） vs **整包**（SA `d0e64d6` + hephi `055491d` + G1 配置，B/g1-exp 型实例） | 本方案整包相对原系统带来多少收益和成本 | **第一轮正式实验，必做** |
+
+v1.1 口径说明：v1.0 的"off（不挂载赫菲） vs native（挂载赫菲）"沿用自旧 B5，属**对照对象错误**
+（见 `eval/approvals/2026-11-08-minimal-unblocking.md` 禁止混用条目）。off/native 术语此后仅用于
+D-9 任务卡投递机制描述，不再是 Q1 分组定义。两组既有完整制品/提示/配置以上表 SHA 为准。
 | Q2 | 普通需求 vs 任务卡需求（都不开赫菲） | 需求表达本身有多少帮助 | 可选，第二轮，不在本版范围 |
 | Q3 | native vs staged（都开赫菲） | 两种执行方式各自适合什么任务 | 单独实验，只用 staged-suitable 任务，不在本版范围 |
 
@@ -126,9 +134,13 @@
   批准链 = 负责人口头批准（owner-approval）+ 委托代定参数（delegated-b5-parameters，D-3/D-4/D-5/D-8）
   + D-1/D-2/D-6/D-7/D-9/D-10 负责人批准；执行 Agent 无权代批，仅在授权范围内同步入档。
 - **锁哈希覆盖面（如实声明）**：`eval/PREREG.lock` 只哈希 `eval/PREREG.md` 与 `eval/decisions-draft.md`
-  两个文件（工具 `prereg-lock.mjs` 的固定输入）。`eval/stats/requirements.txt`、任务集清单
-  （`eval/tasks/` taskId+sha256）与 rubric（`eval/label/RUBRIC.md`）**不在锁哈希内**，
-  以 git 提交 `b36a4d2`（及锁定时的 HEAD）为准冻结；任何后续改动须按本节升版本。
+  两个文件（工具 `prereg-lock.mjs` 的固定输入）。`eval/stats/requirements.txt` 与 rubric
+  （`eval/label/RUBRIC.md`）**不在锁哈希内**，以 git 提交为准冻结。
+  **任务集清单**以 `eval/evidence/t21-prep/taskset-manifest-v1.1.json` 为冻结载体
+  （逐任务 sha256 + 角色分类：q1-retention 23 / q1-devexposed-original 4 / non-q1-tooling 12 /
+  staged-only-q3 1，绑定本版 preregSha256）；任何后续改动须按本节升版本。
+  **总费用硬门槛（100 元）核验方式**：`report.py` 不实现总金额门槛；以 §11 CLI 显式参数
+  （seed/min-pairs/margin）+ 独立成本台账（实际计费数据）双重核验，禁止用阈值换算冒充实测消耗。
 - 版本记录：每次变更升 `v0.x`，写明变更点、理由、是否影响已跑数据；锁定后变更需负责人批准。
 - D-8（执行模式）：**normal 模式**，不等 P4 shadow、不新增开发；差异在运行记录 `executionMode` 如实披露。
 - D-9（off 组投递）：off 独立 profile 实例（不挂载赫菲、不打 `hephi/delivery`），与 native 投**同一任务卡**；
