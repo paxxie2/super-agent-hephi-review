@@ -3,7 +3,11 @@
 //
 // 校验内容：
 //   1) 结构：task.json / issue.md / hidden-test.sh / review.md / reference.patch 存在性与字段口径；
-//   2) 有效性（完整模式，需要 git 仓库）：隐藏测试在 base 上失败、在参考修复上通过，各连续 3 次一致；
+//   2) 有效性（完整模式，需要 git 仓库）：隐藏测试在 base 上失败、在参考修复上通过；
+//      “连续 3 次一致”同时比较退出码与归一化后的稳定输出（F15：剔除 requestId/时间戳/UUID/pid 等动态字段，
+//      规则见 NORMALIZATION；原始 stdout/stderr 与 outputSha256 仍保留在报告中）；
+//      base 失败会分类为 target-assertion-failed / target-symbol-missing / environment-error；
+//      只有前两类算有效 base 失败，environment-error（依赖/环境故障、不可归类）判卡不合格。
 //   3) 范围：参考修复改动的文件必须落在 task.json.allowedFiles 内。
 //
 // 用法：
@@ -73,6 +77,97 @@ function sha256(text) {
 
 function sameIds(list) {
   return list.length > 0 && list.every((id) => id === list[0])
+}
+
+// ---- 输出稳定性归一化与 base 失败分类（F15）--------------------------------
+// “三次一致”不能只比退出码：还要比较每次运行的稳定输出内容。以下归一化规则只剔除
+// 已确认的动态字段；原始 stdout/stderr 与 outputSha256 始终保留，归一化规则写入
+// validation 报告（顶层 normalization 及 checks.{base,reference}.normalization）。
+const NORMALIZATION = {
+  version: 1,
+  scope: 'stdout+stderr',
+  rules: [
+    'CRLF/CR → LF',
+    'ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>',
+    'UUID → <uuid>',
+    'requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>',
+    'pid=数字 → pid=<pid>',
+  ],
+  note: '仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。',
+}
+
+function normalizeStableOutput(text) {
+  let out = String(text ?? '').replace(/\r\n?/g, '\n')
+  out = out.replace(/\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\b/g, '<timestamp>')
+  out = out.replace(/\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g, '<uuid>')
+  // requestId 可能以 Python/JSON repr 出现（'requestId': 'hex'）或 key=value 形式，
+  // 因此键名与冒号之间允许一个可选引号。
+  out = out.replace(/(\brequest[_-]?id\b['"]?\s*[:=]\s*['"]?)[0-9A-Za-z_-]{8,}/gi, '$1<request-id>')
+  out = out.replace(/\bpid\s*[:=]\s*['"]?\d+/gi, 'pid=<pid>')
+  return out
+}
+
+const VALID_BASE_FAILURE_CLASSES = new Set(['target-assertion-failed', 'target-symbol-missing'])
+const ENV_ERROR_PATTERNS = [
+  /command not found/i,
+  /permission denied/i,
+  /\b(?:EACCES|ENOSPC|ECONNREFUSED|ETIMEDOUT|ENETUNREACH|EAI_AGAIN)\b/,
+  /\b(?:npm|pnpm|yarn)\b[^\n]*\bERR!?/i,
+  /No module named ['"](?:pytest|numpy|pandas|scipy|statsmodels|pydantic|fastapi|sqlalchemy|requests|httpx|uvicorn|starlette|yaml|dotenv)['"]/i,
+]
+const ASSERTION_PATTERNS = [
+  /AssertionError/,
+  /\bassert(?:ion)?\b[^\n]*(?:fail|expected|got|actual|raise)/i,
+  /^\s*FAIL(?:ED)?\b/mi,
+  /\bexpected\b[^\n]*\b(?:got|but|actual)\b/i,
+  /\b(?:hidden[-_ ]?check|assertion|test)\s+failed\b/i,
+  /期望/,
+]
+const SYMBOL_PATTERNS = [
+  /ModuleNotFoundError: No module named/i,
+  /ImportError: (?:cannot import name|No module named)/i,
+  /Cannot find module/i,
+  /has no attribute/i,
+]
+
+// 分类顺序：进程异常/126/127 → 环境标记 → 断言标记 → 目标符号缺失 → （工作区内
+// FileNotFoundError/ENOENT）目标符号缺失 → 其余非零按环境错误 fail-closed。
+function classifyBaseFailure(run, worktree) {
+  if (run.signal !== null && run.signal !== undefined) {
+    return { failureClass: 'environment-error', reason: `process signal=${run.signal}` }
+  }
+  if (run.code === null || run.code === undefined) {
+    return { failureClass: 'environment-error', reason: 'process did not exit normally (timeout/error)' }
+  }
+  if (run.code === 126 || run.code === 127) {
+    return { failureClass: 'environment-error', reason: `exit code ${run.code} (not executable / command missing)` }
+  }
+  const text = `${run.stdout ?? ''}\n${run.stderr ?? ''}`
+  for (const pattern of ENV_ERROR_PATTERNS) {
+    if (pattern.test(text)) return { failureClass: 'environment-error', reason: `environment marker: ${pattern}` }
+  }
+  for (const pattern of ASSERTION_PATTERNS) {
+    if (pattern.test(text)) return { failureClass: 'target-assertion-failed', reason: `assertion marker: ${pattern}` }
+  }
+  for (const pattern of SYMBOL_PATTERNS) {
+    if (pattern.test(text)) return { failureClass: 'target-symbol-missing', reason: `symbol/import marker: ${pattern}` }
+  }
+  if (worktree && text.includes(worktree) && /FileNotFoundError|No such file or directory/i.test(text)) {
+    return { failureClass: 'target-symbol-missing', reason: 'FileNotFoundError/ENOENT on task checkout path (target file/symbol missing)' }
+  }
+  return { failureClass: 'environment-error', reason: 'unclassified non-zero base failure（fail-closed：按环境错误判无效）' }
+}
+
+function summarizeConsistency(runs) {
+  const codes = runs.map((run) => run.code)
+  const outputSha256 = runs.map((run) => run.outputSha256 ?? null)
+  const normalizedSha256 = runs.map((run) => run.normalizedSha256 ?? null)
+  return {
+    codes,
+    outputSha256,
+    normalizedSha256,
+    consistent: sameIds(codes.map(String)) && sameIds(normalizedSha256.map(String)),
+  }
 }
 
 function readJson(file) {
@@ -332,21 +427,22 @@ function runHidden(worktree, hiddenPath, timeoutMs) {
     timeout: timeoutMs,
     env: { ...process.env, TASK_CHECKOUT: worktree },
   })
+  const rawText = `${result.status}\n${result.stdout ?? ''}\n${result.stderr ?? ''}`
+  const stableText = normalizeStableOutput(`${result.stdout ?? ''}\n${result.stderr ?? ''}`)
   return {
     code: result.status,
     signal: result.signal ?? null,
+    // 原始输出保留（截尾 2000 字符仅用于报告体积；sha256 基于完整输出）。
     stdout: (result.stdout ?? '').slice(-2000),
     stderr: (result.stderr ?? '').slice(-2000),
-    outputSha256: sha256(`${result.status}\n${result.stdout ?? ''}\n${result.stderr ?? ''}`),
+    outputSha256: sha256(rawText),
+    // 归一化稳定内容的 hash：consistent 判定用它比较三次输出，动态字段规则见 NORMALIZATION。
+    normalizedSha256: sha256(`${result.status}\n${stableText}`),
   }
 }
 
 function repeatRuns(worktree, hiddenPath, repeats, timeoutMs) {
   return Array.from({ length: repeats }, () => runHidden(worktree, hiddenPath, timeoutMs))
-}
-
-function describeRuns(runs) {
-  return runs.map((run) => run.code)
 }
 
 export function validateTask(options) {
@@ -357,6 +453,8 @@ export function validateTask(options) {
     taskDir,
     structure: { ok: structure.ok, errors: structure.errors, warnings: structure.warnings },
     checks: {},
+    // 归一化规则随 validation 报告落盘，便于复核“三次一致”比较的到底是什么。
+    normalization: NORMALIZATION,
     ok: false,
   }
   if (!structure.ok) return report
@@ -410,12 +508,25 @@ export function validateTask(options) {
       report.checks.environment = { offline: false, declared: structure.environment !== null, ok: true }
     }
     const baseRuns = repeatRuns(worktree, hiddenPath, repeats, timeoutMs)
+    const baseConsistency = summarizeConsistency(baseRuns)
+    const failureClasses = baseRuns.map((run) => ({ code: run.code, ...classifyBaseFailure(run, worktree) }))
+    const invalidFailure = failureClasses.find((entry) => !VALID_BASE_FAILURE_CLASSES.has(entry.failureClass))
     report.checks.base = {
       expected: 'fail',
       runs: baseRuns,
-      codes: describeRuns(baseRuns),
-      consistent: sameIds(baseRuns.map((run) => String(run.code))),
-      ok: baseRuns.every((run) => run.code !== 0) && sameIds(baseRuns.map((run) => String(run.code))),
+      codes: baseConsistency.codes,
+      outputSha256: baseConsistency.outputSha256,
+      normalizedSha256: baseConsistency.normalizedSha256,
+      consistent: baseConsistency.consistent,
+      failureClasses,
+      validFailureClasses: [...VALID_BASE_FAILURE_CLASSES],
+      normalization: NORMALIZATION,
+      ok: baseRuns.every((run) => run.code !== 0)
+        && baseConsistency.consistent
+        && failureClasses.every((entry) => VALID_BASE_FAILURE_CLASSES.has(entry.failureClass)),
+      ...(invalidFailure
+        ? { invalidReason: `base 失败分类为 ${invalidFailure.failureClass}（${invalidFailure.reason}）；只有 target-assertion-failed/target-symbol-missing 算有效 base 失败，environment-error 判卡不合格` }
+        : {}),
     }
 
     const untrackedBefore = new Set(
@@ -450,12 +561,16 @@ export function validateTask(options) {
         ok: outside.length === 0,
       }
       const referenceRuns = repeatRuns(worktree, hiddenPath, repeats, timeoutMs)
+      const referenceConsistency = summarizeConsistency(referenceRuns)
       report.checks.reference = {
         expected: 'pass',
         runs: referenceRuns,
-        codes: describeRuns(referenceRuns),
-        consistent: sameIds(referenceRuns.map((run) => String(run.code))),
-        ok: referenceRuns.every((run) => run.code === 0) && sameIds(referenceRuns.map((run) => String(run.code))),
+        codes: referenceConsistency.codes,
+        outputSha256: referenceConsistency.outputSha256,
+        normalizedSha256: referenceConsistency.normalizedSha256,
+        consistent: referenceConsistency.consistent,
+        normalization: NORMALIZATION,
+        ok: referenceRuns.every((run) => run.code === 0) && referenceConsistency.consistent,
       }
     }
 
@@ -623,6 +738,137 @@ function selfTest(asJson) {
       JSON.stringify(relativeLockStructure.errors ?? relativeLockStructure.warnings),
     )
 
+    // ---- F15: 稳定内容一致性 + base 失败分类（自测合成夹具，不改仓库）----
+    const classifyRepo = join(root, 'repo-classify')
+    mkdirSync(classifyRepo, { recursive: true })
+    writeFileSync(join(classifyRepo, 'state.txt'), 'base\n', 'utf8')
+    git(classifyRepo, ['init', '--quiet'])
+    git(classifyRepo, ['add', '-A'])
+    git(classifyRepo, ['-c', 'user.name=B2 Self Test', '-c', 'user.email=b2@example.invalid', 'commit', '--quiet', '-m', 'classify base'])
+    const classifyBase = git(classifyRepo, ['rev-parse', 'HEAD']).trim()
+    const classifyPatch = join(root, 'classify-reference.patch')
+    writeFileSync(classifyPatch, [
+      'diff --git a/state.txt b/state.txt',
+      '--- a/state.txt',
+      '+++ b/state.txt',
+      '@@ -1 +1 @@',
+      '-base',
+      '+fixed',
+      '',
+    ].join('\n'), 'utf8')
+    const scriptLines = (lines) => `${lines.join('\n')}\n`
+    const makeClassifyCard = (name, hiddenBody) => {
+      const dir = join(root, `classify-card-${name}`)
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'issue.md'), '# classify\n\n## 任务\n合成分类自测。\n\n## 验收\n见 hidden-test。\n\n## 合法范围\n仅 state.txt。\n', 'utf8')
+      writeFileSync(join(dir, 'review.md'), '合法范围：仅 state.txt；本文件是 self-test 合成夹具，不是真实任务卡或实验记录。\n', 'utf8')
+      writeFileSync(join(dir, 'hidden-test.sh'), hiddenBody, 'utf8')
+      writeFileSync(join(dir, 'reference.patch'), readFileSync(classifyPatch), 'utf8')
+      writeFileSync(join(dir, 'task.json'), `${JSON.stringify({
+        schemaVersion: 1,
+        taskId: `classify-${name}`,
+        repo: 'synthetic',
+        base: null,
+        category: 'new-feature',
+        referenceFix: 'reference.patch',
+        allowedFiles: ['state.txt'],
+        issue: 'issue.md',
+        hiddenTest: 'hidden-test.sh',
+        review: 'review.md',
+        stagedSuitable: false,
+        contamination: { mergedAfterTrainingCutoff: false, private: true, cutoff: null, notes: 'self-test fixture' },
+        checks: { baseMustFail: true, referenceMustPass: true },
+      }, null, 2)}\n`, 'utf8')
+      return dir
+    }
+    const runClassify = (name, hiddenBody) => validateTask({
+      taskDir: makeClassifyCard(name, hiddenBody),
+      repo: classifyRepo,
+      base: classifyBase,
+      reference: join(root, `classify-card-${name}`, 'reference.patch'),
+      hiddenTest: join(root, `classify-card-${name}`, 'hidden-test.sh'),
+      repeats: 3,
+    })
+    const fixedPass = 'if [ "$(cat state.txt)" = fixed ]; then echo "PASS: stable"; exit 0; fi'
+    const dynamicAssertion = runClassify('dynamic-assertion', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      "rid=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')",
+      'ts=$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)',
+      'printf "AssertionError: expected fixed but got requestId=%s at %s\n" "$rid" "$ts" >&2',
+      'exit 1',
+    ]))
+    record(
+      'F15 动态字段归一化：base 三次稳定内容一致且分类 target-assertion-failed',
+      dynamicAssertion.ok === true
+        && dynamicAssertion.checks.base.consistent === true
+        && new Set(dynamicAssertion.checks.base.outputSha256).size > 1
+        && new Set(dynamicAssertion.checks.base.normalizedSha256).size === 1
+        && dynamicAssertion.checks.base.failureClasses.every((entry) => entry.failureClass === 'target-assertion-failed')
+        && dynamicAssertion.checks.base.runs.every((run) => typeof run.stdout === 'string' && typeof run.stderr === 'string')
+        && (dynamicAssertion.checks.base.normalization?.rules?.length ?? 0) > 0
+        && (dynamicAssertion.normalization?.rules?.length ?? 0) > 0,
+      JSON.stringify({ ok: dynamicAssertion.ok, codes: dynamicAssertion.checks.base?.codes, classes: dynamicAssertion.checks.base?.failureClasses?.map((entry) => entry.failureClass), rawHashes: dynamicAssertion.checks.base?.outputSha256?.map((hash) => hash?.slice(0, 8)), normalizedHashes: dynamicAssertion.checks.base?.normalizedSha256?.map((hash) => hash?.slice(0, 8)) }),
+    )
+    const symbolMissing = runClassify('symbol-missing', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      "printf \"ModuleNotFoundError: No module named 'backend.app.validation_summary'\\n\" >&2",
+      'exit 1',
+    ]))
+    record(
+      'F15 base 目标符号缺失 → 分类 target-symbol-missing 且有效',
+      symbolMissing.ok === true
+        && symbolMissing.checks.base.consistent === true
+        && symbolMissing.checks.base.failureClasses.every((entry) => entry.failureClass === 'target-symbol-missing'),
+      JSON.stringify({ ok: symbolMissing.ok, classes: symbolMissing.checks.base?.failureClasses?.map((entry) => entry.failureClass) }),
+    )
+    const environmentError = runClassify('environment-error', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      "echo 'sh: 1: deploy-tool: command not found' >&2",
+      'exit 127',
+    ]))
+    record(
+      'F15 base environment-error → 判卡不合格（invalidReason 指出分类）',
+      environmentError.ok === false
+        && environmentError.checks.base.ok === false
+        && environmentError.checks.base.failureClasses.every((entry) => entry.failureClass === 'environment-error')
+        && /environment-error/.test(environmentError.checks.base.invalidReason ?? ''),
+      JSON.stringify({ ok: environmentError.ok, classes: environmentError.checks.base?.failureClasses?.map((entry) => entry.failureClass), invalidReason: environmentError.checks.base?.invalidReason }),
+    )
+    const inconsistentBase = runClassify('inconsistent-base', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      "v=$(od -An -N8 -tu8 /dev/urandom | tr -d ' \n')",
+      'printf "AssertionError: random value %s\n" "$v" >&2',
+      'exit 1',
+    ]))
+    record(
+      'F15 base 稳定内容不一致 → consistent=false 且判卡不合格',
+      inconsistentBase.ok === false
+        && inconsistentBase.checks.base.consistent === false
+        && inconsistentBase.checks.base.failureClasses.every((entry) => entry.failureClass === 'target-assertion-failed'),
+      JSON.stringify({ ok: inconsistentBase.ok, consistent: inconsistentBase.checks.base?.consistent, codes: inconsistentBase.checks.base?.codes }),
+    )
+    const inconsistentReference = runClassify('inconsistent-reference', scriptLines([
+      '#!/bin/sh',
+      'if [ "$(cat state.txt)" = fixed ]; then',
+      "  v=$(od -An -N8 -tu8 /dev/urandom | tr -d ' \n')",
+      '  echo "PASS: random $v"',
+      '  exit 0',
+      'fi',
+      'printf "AssertionError: expected fixed\n" >&2',
+      'exit 1',
+    ]))
+    record(
+      'F15 reference 稳定内容不一致 → consistent=false 且判卡不合格',
+      inconsistentReference.ok === false
+        && inconsistentReference.checks.base.consistent === true
+        && inconsistentReference.checks.reference.consistent === false,
+      JSON.stringify({ ok: inconsistentReference.ok, baseConsistent: inconsistentReference.checks.base?.consistent, referenceConsistent: inconsistentReference.checks.reference?.consistent }),
+    )
+
     const ok = steps.every((step) => step.ok)
     if (asJson) {
       console.log(JSON.stringify({ selfTest: ok, steps }, null, 2))
@@ -650,7 +896,12 @@ function printHuman(report) {
     }
     for (const warning of report.structure?.warnings ?? []) lines.push(`WARN ${warning}`)
     if (report.checks.base) {
-      lines.push(`${report.checks.base.ok ? 'PASS' : 'FAIL'} base-hidden-test :: codes=${JSON.stringify(report.checks.base.codes)} expected fail, consistent=${report.checks.base.consistent}`)
+      const baseClasses = (report.checks.base.failureClasses ?? []).map((entry) => entry.failureClass)
+      lines.push(`${report.checks.base.ok ? 'PASS' : 'FAIL'} base-hidden-test :: codes=${JSON.stringify(report.checks.base.codes)} expected fail, consistent=${report.checks.base.consistent}, failureClasses=${JSON.stringify(baseClasses)}`)
+      if (report.checks.base.invalidReason) lines.push(`FAIL base-classification :: ${report.checks.base.invalidReason}`)
+    }
+    if (report.normalization) {
+      lines.push(`[check-task] normalization=v${report.normalization.version} scope=${report.normalization.scope} rules=${report.normalization.rules.length}（原始 stdout/stderr 与 outputSha256 保留）`)
     }
     if (report.checks.scope) {
       lines.push(`${report.checks.scope.ok ? 'PASS' : 'FAIL'} allowed-scope :: changed=${JSON.stringify(report.checks.scope.changedFiles)} outside=${JSON.stringify(report.checks.scope.outside)}`)

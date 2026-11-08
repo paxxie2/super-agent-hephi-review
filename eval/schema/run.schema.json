@@ -316,6 +316,14 @@
             "null"
           ],
           "minimum": 0
+        },
+        "cacheWrite": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "写入缓存的 token 数；不可得时写 null。与 PREREG §5 主口径（input+output+cacheRead+cacheWrite 去重）一致"
         }
       }
     },
