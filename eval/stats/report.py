@@ -1022,17 +1022,24 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
     # 真人名含 ai 也曾被误降级）。full 要求**显式身份声明**：labels/导入材料提供
     # labelerTypes（{labeler: "human"|"agent"}）；未声明的身份按 unknown 处理，
     # unknown 不具备完整人工校准资格 → degraded-partial。
-    labeler_types: dict[str, str] = {}
+    # F14-02：同一评审者跨记录的身份声明收集为集合；冲突（同身份出现 human+agent）
+    # 是顺序无关的确定事实——任何冲突都使该身份不可信，不得最后一条覆盖、不得静默择一。
+    labeler_type_sets: dict[str, set[str]] = {}
     for run in bound_label_runs:
         for k, v in (getattr(run, "labeler_types", None) or {}).items():
-            labeler_types[str(k)] = str(v)
+            labeler_type_sets.setdefault(str(k), set()).add(str(v))
+    conflicted_labelers = sorted(name for name, types in labeler_type_sets.items() if len(types) > 1)
+    labeler_types = {name: sorted(types)[0] for name, types in labeler_type_sets.items()}
     calibration_mode = "missing"
     calibration_partial_reasons: list[str] = []
     if kappa_values:
         agent_labelers = [l for l in labelers if labeler_types.get(l) == "agent"]
         unknown_labelers = [l for l in labelers if labeler_types.get(l) not in ("human", "agent")]
         human_labelers = [l for l in labelers if labeler_types.get(l) == "human"]
-        if agent_labelers:
+        if conflicted_labelers:
+            calibration_mode = "degraded-partial"
+            calibration_partial_reasons.append(f"评审身份声明冲突（{', '.join(conflicted_labelers)}：同一评审者被声明为 human 与 agent）：冲突身份不可作为完整人工校准证据")
+        elif agent_labelers:
             calibration_mode = "degraded-partial"
             calibration_partial_reasons.append(f"校准包含已声明 agent 身份（{', '.join(agent_labelers)}）：只能作为 approved partial 证据")
         elif unknown_labelers:
@@ -2009,6 +2016,24 @@ def self_test(as_json: bool = False) -> int:
            foreign["label_quality"]["evidence_missing"] is True
            and foreign["decision"]["conclusion"] == "evidence_insufficient",
            json.dumps({"missing": foreign["label_quality"]["evidence_missing"], "foreign": foreign["label_quality"]["foreign_label_runs"], "conclusion": foreign["decision"]["conclusion"]}))
+    # F14-02 反例：同一评审者跨记录声明冲突（agent+human）——任意顺序都必须 degraded-partial。
+    def _conflict_report(order):
+        control, treatment = _meets_pair_records("f1402")
+        control["label"] = {**control["label"], "labelers": ["reviewer-a", "reviewer-b"],
+                            "labelerTypes": {"reviewer-a": "agent", "reviewer-b": "human"}}
+        treatment["label"] = {**treatment["label"], "labelers": ["reviewer-a", "reviewer-b"],
+                              "labelerTypes": {"reviewer-a": "human", "reviewer-b": "human"}}
+        runs = [control, treatment] if order == "forward" else [treatment, control]
+        return analyze([parse_run(r) for r in runs], {"min_pairs": 1, "n_boot": 200})
+    conflict_fwd = _conflict_report("forward")
+    conflict_rev = _conflict_report("reverse")
+    record("F14-02 反例：身份声明冲突 → 任意顺序均 degraded-partial 且不得 meets",
+           conflict_fwd["label_quality"]["calibration_mode"] == "degraded-partial"
+           and conflict_rev["label_quality"]["calibration_mode"] == "degraded-partial"
+           and conflict_fwd["decision"]["meets_prereg"] is False
+           and conflict_rev["decision"]["meets_prereg"] is False,
+           json.dumps({"fwd": conflict_fwd["label_quality"]["calibration_mode"], "rev": conflict_rev["label_quality"]["calibration_mode"]}))
+
     # 正例仍为完整 meets_prereg（双 human、batch 绑定、kappa 合格）
     positive = _partial_report({"labelerTypes": {"reviewer-a": "human", "reviewer-b": "human"}})
     record("N04 正例：双 human + 当前 batch + kappa=0.9 → 完整 meets_prereg",

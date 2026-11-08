@@ -377,7 +377,7 @@ function fileDefinesOrImportsLocal(filePath, name, worktree, packageRoots) {
     // F1/N01-A：import 绑定同样要过 find_spec 归属——模块解析到 site-packages 等外部
     // （如真实 httpx vs 无关的 unrelated/httpx.py）时，本地同名文件不构成归属。
     const origin = resolveModuleOrigin(moduleName.split('.')[0], worktree)
-    if (origin.kind !== 'external') {
+    if (origin.kind !== 'external' && origin.kind !== 'ambiguous') {
       const moduleFile = moduleFileInWorktree(worktree, moduleName, packageRoots)
       if (moduleFile) return { evidence: `import ${name} from local module ${moduleName} (${moduleFile})` }
     }
@@ -415,26 +415,48 @@ function resolveQualifiedModule(expression, frameFile, worktree, packageRoots) {
 /** F1/N01-A：用 Python importlib 实际解析模块来源（worktree / external / not-found），结果缓存。 */
 const moduleOriginCache = new Map()
 function resolveModuleOrigin(moduleName, worktree) {
+  // F14-03：另起的进程不能代表失败进程的 sys.path（测试可能换解释器/路径/动态加载）。
+  // 只用两个受控环境回答"这个模块名可能解析到哪里"：
+  //   isolated = python3 -I（隔离模式：无 cwd、无用户 site）→ 外部安装的权威解析；
+  //   withWorktree = 隔离模式 + worktree 置于 sys.path 首位 → worktree 同名文件的遮蔽解析。
+  // 决策（顺序无关、fail-closed）：
+  //   isolated=external 且 withWorktree=worktree（同名遮蔽歧义，无法证明失败进程加载的是哪份）→ ambiguous
+  //   两环境一致 external → external；一致/仅 worktree → worktree；仅 not-found → not-found。
   const key = `${worktree}::${moduleName}`
   if (moduleOriginCache.has(key)) return moduleOriginCache.get(key)
-  let result = { kind: 'not-found', path: null }
-  try {
-    const py = [
-      'import importlib.util, sys, json',
-      `sys.path.insert(0, ${JSON.stringify(String(worktree))})`,
-      `spec = importlib.util.find_spec(${JSON.stringify(moduleName)})`,
-      'print(json.dumps(spec.origin) if spec else "NOT_FOUND")',
-    ].join('; ')
-    const out = execFileSync('python3', ['-c', py], { cwd: String(worktree), encoding: 'utf8', timeout: 10_000 })
-    const origin = JSON.parse(String(out).trim())
-    if (origin && origin !== 'NOT_FOUND') {
-      const normalized = String(origin).replace(/\\/g, '/')
-      const wt = String(worktree).replace(/\\/g, '/').replace(/\/+$/, '')
-      result = (normalized === wt || normalized.startsWith(`${wt}/`))
-        ? { kind: 'worktree', path: origin }
-        : { kind: 'external', path: origin }
-    }
-  } catch { /* python 不可用/超时：fail-closed 维持 not-found，由上层候选决定 */ }
+  const classifyOrigin = (origin, wt) => {
+    if (!origin) return 'not-found'
+    const normalized = String(origin).replace(/\\/g, '/')
+    const w = String(wt).replace(/\\/g, '/').replace(/\/+$/, '')
+    return (normalized === w || normalized.startsWith(`${w}/`)) ? 'worktree' : 'external'
+  }
+  const probe = (extraArgs, insertWorktree) => {
+    try {
+      const py = [
+        'import importlib.util, sys, json',
+        insertWorktree ? `sys.path.insert(0, ${JSON.stringify(String(worktree))})` : 'pass',
+        `spec = importlib.util.find_spec(${JSON.stringify(moduleName)})`,
+        'print(json.dumps(spec.origin) if spec else "NOT_FOUND")',
+      ].join('; ')
+      // 中性 cwd（系统临时目录）：避免本进程 cwd 遮蔽；不用 -I（会把 user-site 一并隔离），
+      // 两环境共用同一 PATH 解释器，差异只在是否把 worktree 插到 sys.path 首位。
+      const out = execFileSync('python3', ['-c', py], { cwd: tmpdir(), encoding: 'utf8', timeout: 10_000 })
+      const origin = JSON.parse(String(out).trim())
+      return origin === 'NOT_FOUND' ? 'not-found' : classifyOrigin(origin, worktree)
+    } catch { return 'unknown' }
+  }
+  const isolated = probe([], false)
+  const withWorktree = probe([], true)
+  let result
+  if (isolated === 'external' && withWorktree === 'worktree') {
+    result = { kind: 'ambiguous', path: null }
+  } else if (isolated === 'external' || withWorktree === 'external') {
+    result = { kind: 'external', path: null }
+  } else if (isolated === 'worktree' || withWorktree === 'worktree') {
+    result = { kind: 'worktree', path: null }
+  } else {
+    result = { kind: 'not-found', path: null }
+  }
   moduleOriginCache.set(key, result)
   return result
 }
@@ -471,6 +493,7 @@ function targetSymbolEvidence(text, { worktree, packageRoots = [], sourceIndex =
       if (origin.kind === 'not-found') {
         return { reason: `AttributeError on local module '${owner}': no importable '${basename}' outside the worktree; only candidate is ${index.modules.get(basename).join(', ')}` }
       }
+      // ambiguous（外部安装 + worktree 同名遮蔽）：无法证明失败进程加载的是哪一份 → fail-closed environment
     }
     const frame = worktreeFrames[worktreeFrames.length - 1]
     const defined = frame ? fileDefinesOrImportsLocal(frame.path, basename, worktree, packageRoots) : null

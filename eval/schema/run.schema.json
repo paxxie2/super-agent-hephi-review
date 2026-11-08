@@ -662,6 +662,17 @@
           ],
           "minimum": -1,
           "maximum": 1
+        },
+        "labelerTypes": {
+          "type": "object",
+          "description": "F14-01/N04：评审身份显式声明（名称不能推断真人/AI）；键为 labelers 中的评审名，值只能是 human 或 agent；同一评审者跨记录的声明冲突会被统计端拒绝",
+          "additionalProperties": {
+            "type": "string",
+            "enum": [
+              "human",
+              "agent"
+            ]
+          }
         }
       }
     },
