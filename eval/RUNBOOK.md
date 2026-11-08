@@ -14,13 +14,13 @@
 | **native** | 挂载赫菲插件（enforce 模式），Issue 走 `hephi/delivery` → Ticket → Worker，产生合同与检查记录 | `arm=native` |
 | **legacy-system（原系统组）** | 以 T01 冻结制品运行（HEPHI `6d24e1b` + SA `62d7d53` + 原配置，含旧赫菲），使用与整包组**逐字节相同**的任务卡 | `arm=legacy-system` |
 | **staged** | 挂载赫菲且使用 staged 执行方式；**只用于 Q3 单独实验**、只用 `staged-suitable` 任务 | `arm=staged` |
-| **shadow** | 执行机制，不是分组：Worker 完全不受影响，同时按同一套规则记录违规（P4）。**只允许 `arm=off` + `executionMode=shadow`** | `executionMode=shadow` |
+| **shadow** | 执行机制，不是分组：Worker 完全不受影响，同时按同一套规则记录违规（P4）。**只允许对照组（旧 B5 `arm=off`；现行 `arm=legacy-system`）+ `executionMode=shadow`** | `executionMode=shadow` |
 
 硬性规则：
 
 1. `arm` 是**分析分组**，`executionMode` 是**执行机制**；两者不得互相替代。
 2. 原系统组严禁出现任何新制品（新插件 SHA/新提示/新配置）；出现即该运行无效（记录保留，标 `invalid`）。旧 B5 的"off 不挂赫菲"规则自 v1.2 废弃（原系统组合法包含旧赫菲）。
-3. shadow 只有在 P4 影子模式经负责人确认可用后才可启用；不可用时 off 组按普通模式运行，
+3. shadow 只有在 P4 影子模式经负责人确认可用后才可启用；不可用时对照组按普通模式运行，
    `executionMode=normal`，并在报告中注明“未用 shadow，机械指标可能不同口径”。
 4. 不得为了凑数把 staged 运行并入 native 分析。
 
@@ -43,8 +43,8 @@
 | 宿主 | 实载版本回读/正式 hostVersion/排空字段语义等外部解阻项 | **未解阻**；R3.7 blocked。**不得把 R3.7/P8 当作已通过** |
 | 环境隔离 | 全新检出目录 + 全新 Session；构建只在隔离克隆执行 | 运行纪律见 §6 |
 
-> **P4 shadow 现状**：`hephi` 侧影子模式代码存在（P4），但 off 组要用 shadow 需要宿主配置与
-> 负责人确认；未确认前 off 组按普通模式记录，机械指标口径差异写进报告。
+> **P4 shadow 现状**：`hephi` 侧影子模式代码存在（P4），但对照组要用 shadow 需要宿主配置与
+> 负责人确认；未确认前对照组按普通模式记录，机械指标口径差异写进报告。
 
 ## 4. 任务卡投递机制（**计划审查 P1-1，必须 review**）
 
@@ -52,7 +52,7 @@
 
 - 每个任务的任务卡就是 `eval/tasks/<repo>/<taskId>/issue.md` 的**逐字节内容**。
 - 运行时对任务卡计算 `sha256`，写入 `run.taskCard.sha256`；
-  **off 组与 native 组必须使用同一个 sha256**（`taskCard.verifiedEqual=true`）。
+  **原系统组与整包组必须使用同一个 sha256**（`taskCard.verifiedEqual=true`）。
 - 任务卡中**不得**出现组别信息（“这是对照组/实验组”、分支名、赫菲字样）；
   导出盲评材料前 `eval/label/export.mjs` 会再次扫描并 fail-closed。
 
@@ -62,16 +62,17 @@
 2. 等 Trigger → Ticket → Worker，按赫菲合同流程运行；
 3. 记录 Issue 编号/URL、`taskCard.sha256`、`deliveryMechanism=issue-body`、`verifiedEqual=true`。
 
-### 4.3 off 组投递（本版方案：**固定 Trigger 文本注入同一任务卡**）
+### 4.3 原系统组（legacy-system）投递（v0.2：**同文 Issue body 注入同一任务卡**）
 
-off 组不挂插件、不产生赫菲合同。为了让 Worker 收到的任务文本与 native 组**完全一致**，采用以下
-两种等效机制（按宿主能力选一种，**默认 A**）：
+原系统组以 T01 冻结制品运行（**含旧赫菲**：HEPHI `6d24e1b` + SA `62d7d53` + 原配置），
+旧版"off 不挂插件/无赫菲合同"要求自 PREREG v1.2 废弃。投递只要求：Worker 收到的任务文本与
+整包组（full-package）**完全一致**。机制按宿主能力选一种，**默认 A**：
 
 **A. 同文 Issue body（首选）**
 
-- 用与 native **完全相同的任务卡原文**创建 Issue（同一正文、同一标题前缀），**不打** `hephi/delivery`；
-- 让该 Issue 走 Super Agent 的原生 Issue → Ticket → Worker 路径；
-- 记录 `deliveryMechanism=issue-body`、`taskCard.sha256`（必须与 native 相同）。
+- 用与整包组**完全相同的任务卡原文**创建 Issue（同一正文、同一标题前缀）；标签/合同行为遵循原系统自身配置，不人为增删；
+- 让该 Issue 走该实例的原生 Issue → Ticket → Worker 路径；
+- 记录 `deliveryMechanism=issue-body`、`taskCard.sha256`（必须与整包组相同）。
 
 **B. 固定 Trigger 文本注入（宿主要求显式 Trigger 时）**
 
@@ -85,13 +86,13 @@ off 组不挂插件、不产生赫菲合同。为了让 Worker 收到的任务�
 
 - 除该模板外**不得**添加任何说明/提示（尤其不得写“这是对照组/请比平时更谨慎”等改变行为的文字）；
 - 记录 `deliveryMechanism=trigger-text`、`taskCard.sha256`；
-- 复核者必须核对：native Issue body 的 sha256 == off Trigger 注入文本中任务卡部分的 sha256。
+- 复核者必须核对：整包组 Issue body 的 sha256 == 原系统组注入文本中任务卡部分的 sha256。
 
 **C. task-file 注入（兜底，需负责人批准）**
 
 - 仅当 A/B 都不可行时：把同一任务卡文件挂到 Worker 工作区（路径记录在 `taskCard.sourcePath`），
   并让 Worker 只读该文件作为任务来源；
-- 记录 `deliveryMechanism=task-file`；必须人工核对文件 sha256 与 native 任务卡一致。
+- 记录 `deliveryMechanism=task-file`；必须人工核对文件 sha256 与整包组任务卡一致。
 
 ### 4.4 投递一致性校验（每次运行必做）
 
@@ -99,10 +100,10 @@ off 组不挂插件、不产生赫菲合同。为了让 Worker 收到的任务�
 | --- | --- | --- |
 | 任务卡同文 | 两组的 `taskCard.sha256` 相等；`verifiedEqual=true` | 运行无效，不得进入效果分析 |
 | 无组别痕迹 | 任务卡/注入文本扫描（“对照组/实验组/赫菲/hephi/分支名”） | 重做投递；不得带痕迹运行 |
-| off 组无赫菲 | 检查该 Issue/Ticket 无 `hephi/delivery`、无合同、无检查记录 | 运行无效，记录原因 |
-| 注入文本唯一 | off Issue 中除任务卡模板外无额外指令评论 | 运行无效 |
+| 原系统组无新制品 | 该实例实载 SHA/提示/配置与 §1 冻结值一致（含旧赫菲；出现新制品即无效） | 运行无效，记录原因 |
+| 注入文本唯一 | 原系统组 Issue 中除任务卡模板外无额外指令评论 | 运行无效 |
 
-> **为什么不能“off 组直接人写一句简短需求”**：那会同时改变任务内容和需求表达，混淆 Q1 的
+> **为什么不能“对照组直接人写一句简短需求”**：那会同时改变任务内容和需求表达，混淆 Q1 的
 > 因果解释；P1-1 的核心就是保证两组的**唯一差异是是否挂载赫菲**。方案 B 的固定 Trigger 文本
 > 必须由负责人 review 后方可使用（见 §11 D-2）。
 

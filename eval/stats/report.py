@@ -213,6 +213,11 @@ def load_runs(document) -> list[Run]:
     for run in runs:
         if run.arm not in ("legacy-system", "full-package", "off", "native", "staged"):
             raise ValueError(f"arm 非法：{run.arm}")
+    # PREREG v1.2：禁止新旧对照对象混配（off/native=旧B5，legacy-system/full-package=现行）。
+    # 同一输入同时出现两代 arm 值即拒绝，防止旧批次 off 与新批次 full-package 被配成一对。
+    arms = {run.arm for run in runs}
+    if arms & {"off", "native"} and arms & {"legacy-system", "full-package"}:
+        raise ValueError("arm 混代：off/native（旧 B5 对照）与 legacy-system/full-package（PREREG v1.2 现行对照）不得混入同一输入")
     return runs
 
 
@@ -504,7 +509,7 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
             "environment_unavailable": len(excluded_runs),
             "task_card_mismatch": len(task_card_mismatch),
             "paired_tasks": n_pairs,
-            "by_arm": {arm: sum(1 for run in runs if run.arm == arm) for arm in ("off", "native", "staged")},
+            "by_arm": {arm: sum(1 for run in runs if run.arm == arm) for arm in ("legacy-system", "full-package", "off", "native", "staged")},
         },
         "environment_unavailable_runs": [
             {"runId": run.run_id, "taskId": run.task_id, "arm": run.arm, "reason": run.env_reason}
@@ -554,7 +559,7 @@ def render_markdown(report: dict, source: str) -> str:
         "# ROADMAP-95 B6 统计报告（骨架）",
         "",
         f"- 输入：`{source}`",
-        f"- 运行数：{counts['runs']}（off={counts['by_arm']['off']}，native={counts['by_arm']['native']}，staged={counts['by_arm']['staged']}）；有效={counts['effect_runs']}，环境不可用={counts['environment_unavailable']}；配对任务={counts['paired_tasks']}",
+        f"- 运行数：{counts['runs']}（legacy-system={counts['by_arm']['legacy-system']}，full-package={counts['by_arm']['full-package']}，off={counts['by_arm']['off']}，native={counts['by_arm']['native']}，staged={counts['by_arm']['staged']}）；有效={counts['effect_runs']}，环境不可用={counts['environment_unavailable']}；配对任务={counts['paired_tasks']}",
         f"- bootstrap：seed={config['seed']}，n_boot={config['n_boot']}（按任务重抽样）；非劣效界值={config['noninferiority_margin']}；min_pairs={config['min_pairs']}；分析 repetition={config['repetition']}",
         "",
         "> 本报告是**统计骨架输出**：正式结论须在 PREREG 锁定后按同一口径复核；成本上限与非劣效界值当前是占位值（见 eval/PREREG.md §5、§6）。",
