@@ -65,9 +65,9 @@ except ImportError as exc:  # pragma: no cover - 环境相关
 
 # ---- 常量（占位值必须由负责人确认，见 eval/PREREG.md） ----------------------
 
-DEFAULT_SEED = 20261107
+DEFAULT_SEED = 20261108
 DEFAULT_N_BOOT = 10000
-DEFAULT_MIN_PAIRS = 5
+DEFAULT_MIN_PAIRS = 67
 DEFAULT_NONINFERIORITY_MARGIN = -0.05
 
 PRIMARY_METRICS = [
