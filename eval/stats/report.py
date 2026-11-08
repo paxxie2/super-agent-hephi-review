@@ -218,6 +218,9 @@ def load_runs(document) -> list[Run]:
     arms = {run.arm for run in runs}
     if arms & {"off", "native"} and arms & {"legacy-system", "full-package"}:
         raise ValueError("arm 混代：off/native（旧 B5 对照）与 legacy-system/full-package（PREREG v1.2 现行对照）不得混入同一输入")
+    batches = {run.batch for run in runs}
+    if len(batches) > 1:
+        raise ValueError(f"多批次输入：{sorted(batches)}；本统计入口一次只接受一个 batch（防跨批虚增独立任务数/重复关联），跨批汇总不在本工具范围")
     return runs
 
 
@@ -558,6 +561,9 @@ def fmt(value, digits=3):
 
 def render_markdown(report: dict, source: str) -> str:
     counts = report["counts"]
+    # 按输入代际选择表头：新代=原系统组/整包组；旧代数据保留 off/native 标签，不改写历史含义
+    new_era = (counts["by_arm"]["legacy-system"] + counts["by_arm"]["full-package"]) > 0
+    label_c, label_t = ("原系统组", "整包组") if new_era else ("off(旧B5对照)", "native(旧B5处理)")
     config = report["config"]
     lines = [
         "# ROADMAP-95 B6 统计报告（骨架）",
@@ -570,7 +576,7 @@ def render_markdown(report: dict, source: str) -> str:
         "",
         "## 1. 主指标（越小越好）",
         "",
-        "| 指标 | 原系统组 率 (Wilson 95% CI) | 整包组 率 (Wilson 95% CI) | 绝对差 | 相对变化 | 95% bootstrap CI | 精确 McNemar (改善/恶化, p) | 结论 |",
+        f"| 指标 | {label_c} 率 (Wilson 95% CI) | {label_t} 率 (Wilson 95% CI) | 绝对差 | 相对变化 | 95% bootstrap CI | 精确 McNemar (改善/恶化, p) | 结论 |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for key, entry in report["primary"].items():
@@ -594,7 +600,7 @@ def render_markdown(report: dict, source: str) -> str:
         "",
         "## 2. 守护指标（必须非劣效；方向已归一化为“越大越好”）",
         "",
-        "| 指标 | 原系统组 率 | 整包组 率 | 绝对差 | 95% bootstrap CI | CI 下界 vs 界值 | 非劣效 | 精确 McNemar (改善/恶化, p) |",
+        f"| 指标 | {label_c} 率 | {label_t} 率 | 绝对差 | 95% bootstrap CI | CI 下界 vs 界值 | 非劣效 | 精确 McNemar (改善/恶化, p) |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for key, entry in report["guardrails"].items():
@@ -615,7 +621,7 @@ def render_markdown(report: dict, source: str) -> str:
         "",
         "## 3. 成本指标与上限",
         "",
-        "| 指标 | 整包组 值 | 上限 | 是否超限 |",
+        f"| 指标 | {label_t} 值 | 上限 | 是否超限 |",
         "| --- | --- | --- | --- |",
         f"| 耗时中位数（分钟） | {fmt(values['native_median_minutes'])} | {fmt(cost['caps']['median_minutes_max'])} | {'超限' if not cost['checks']['median_minutes_max'] else '未超限'} |",
         f"| 耗时 P90（分钟） | {fmt(values['native_p90_minutes'])} | {fmt(cost['caps']['p90_minutes_max'])} | {'超限' if not cost['checks']['p90_minutes_max'] else '未超限'} |",
