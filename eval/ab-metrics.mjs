@@ -225,13 +225,33 @@ export function aggregateByTask(runs) {
     const outcomes = group.map(run => run.sevenDayOutcome).filter(value => ['clean', 'rework'].includes(value))
     const sevenDayOutcome = outcomes.includes('rework') ? 'rework' : outcomes.includes('clean') ? 'clean' : null
     const candidates = group.filter(run => run.firstReviewCandidate?.head && run.finalCandidate?.head)
+    // R3: ticket-level completeness is a separate property. A ticket with an
+    // unknown acceptance/candidate/outcome must not be silently dropped by the
+    // task aggregate; the metric is incomplete for the whole task.
+    const acceptanceComplete = group.every(run => ['passed', 'failed', 'invalid'].includes(run.acceptanceVerdict))
+    const firstReviewComplete = group.every(run => Boolean(run.firstReviewCandidate?.head && run.finalCandidate?.head))
+    const sevenDayOutcomeComplete = group.every(run => ['clean', 'rework'].includes(run.sevenDayOutcome))
+    const knownTickets = {
+      acceptanceRate: group.filter(run => ['passed', 'failed', 'invalid'].includes(run.acceptanceVerdict)).length,
+      firstReviewPassRate: group.filter(run => Boolean(run.firstReviewCandidate?.head && run.finalCandidate?.head)).length,
+      reworkRate: group.filter(run => ['clean', 'rework'].includes(run.sevenDayOutcome)).length,
+      queueWaitSeconds: group.filter(run => typeof run.queueWaitSeconds === 'number' && Number.isFinite(run.queueWaitSeconds)).length,
+      reviewWaitSeconds: group.filter(run => typeof run.reviewWaitSeconds === 'number' && Number.isFinite(run.reviewWaitSeconds)).length,
+      wallClockSeconds: group.filter(run => typeof run.wallClockSeconds === 'number' && Number.isFinite(run.wallClockSeconds)).length,
+      tokensTotal: group.filter(run => typeof run.tokens?.total === 'number' && Number.isFinite(run.tokens.total)).length,
+    }
     tasks.push({
       taskId,
       runs: group.length,
       ticketIds,
+      ticketTotal: group.length,
+      knownTickets,
       delivery: readyRuns.length === group.length ? 'ready-pr-created' : group.some(run => run.delivery === 'ready-pr-created') ? 'partially-delivered' : 'not-delivered',
       ready: readyRuns.length > 0,
       acceptance,
+      acceptanceComplete,
+      firstReviewComplete,
+      sevenDayOutcomeComplete,
       merged,
       sevenDayOutcome,
       firstReviewPass: candidates.length === 0 ? null : candidates.every(run => run.firstReviewCandidate.head === run.finalCandidate.head),
@@ -256,10 +276,10 @@ export function computeMetrics(runs, { now = new Date() } = {}) {
   const reasons = []
 
   const taskHas = {
-    acceptanceRate: task => task.acceptance !== null,
+    acceptanceRate: task => task.acceptance !== null && task.acceptanceComplete === true,
     mergeRate: task => task.ready === true,
-    firstReviewPassRate: task => task.firstReviewPass !== null,
-    reworkRate: task => task.sevenDayOutcome !== null,
+    firstReviewPassRate: task => task.firstReviewPass !== null && task.firstReviewComplete === true,
+    reworkRate: task => task.sevenDayOutcome !== null && task.sevenDayOutcomeComplete === true,
     queueWaitSeconds: task => finite(task.queueWaitSeconds) !== null,
     reviewWaitSeconds: task => finite(task.reviewWaitSeconds) !== null,
     wallClockSeconds: task => finite(task.wallClockSeconds) !== null,
@@ -289,8 +309,23 @@ export function computeMetrics(runs, { now = new Date() } = {}) {
   // A task that never became ready has no merge disposition to report, not missing
   // data: mergeRate's denominator is the ready subset (no F07 incompleteness).
   knownCounts.mergeRate = tasks.length
+  // R3: completeness is judged over every included ticket, not only over tasks
+  // whose aggregate happens to keep a known value.
+  const totalTickets = tasks.reduce((sum, task) => sum + task.ticketTotal, 0)
+  const knownTicketCounts = {
+    acceptanceRate: tasks.reduce((sum, task) => sum + task.knownTickets.acceptanceRate, 0),
+    mergeRate: totalTickets,
+    firstReviewPassRate: tasks.reduce((sum, task) => sum + task.knownTickets.firstReviewPassRate, 0),
+    reworkRate: tasks.reduce((sum, task) => sum + task.knownTickets.reworkRate, 0),
+    queueWaitSeconds: tasks.reduce((sum, task) => sum + task.knownTickets.queueWaitSeconds, 0),
+    reviewWaitSeconds: tasks.reduce((sum, task) => sum + task.knownTickets.reviewWaitSeconds, 0),
+    wallClockSeconds: tasks.reduce((sum, task) => sum + task.knownTickets.wallClockSeconds, 0),
+    tokensTotal: tasks.reduce((sum, task) => sum + task.knownTickets.tokensTotal, 0),
+  }
 
-  // F08: per-task observation sufficiency, never the earliest merge in the batch.
+  // F08/R3: observation sufficiency is per ticket, never the earliest merge in
+  // the task or batch. A ticket that is fresh/pending must not be hidden by a
+  // mature ticket of the same task.
   const runsByTask = new Map()
   for (const run of runs) {
     const taskId = run.taskId ?? run.task
@@ -299,34 +334,56 @@ export function computeMetrics(runs, { now = new Date() } = {}) {
     runsByTask.get(taskId).push(run)
   }
   const endTime = now instanceof Date ? now.getTime() : Date.parse(now)
+  const ticketObservations = []
+  let ticketIndex = 0
+  for (const [taskId, group] of runsByTask) {
+    for (const run of group) {
+      ticketIndex += 1
+      const ticketIds = Array.isArray(run.ticketIds) && run.ticketIds.length > 0 ? run.ticketIds : [run.runId ?? `${taskId}#${ticketIndex}`]
+      const mergeTime = typeof run.mergedAt === 'string' && run.mergedAt !== '' ? Date.parse(run.mergedAt) : NaN
+      const observedDays = Number.isNaN(mergeTime) || Number.isNaN(endTime) ? null : round2((endTime - mergeTime) / 86400000)
+      const problems = []
+      if (!Number.isFinite(mergeTime)) problems.push('not merged / no parseable mergedAt')
+      else if (observedDays === null || observedDays < OBSERVATION_DAYS_REQUIRED) problems.push(`observed ${observedDays} day(s) < ${OBSERVATION_DAYS_REQUIRED} day(s)`)
+      if (!['clean', 'rework'].includes(run.sevenDayOutcome)) problems.push('7-day outcome is pending/unknown')
+      for (const ticketId of ticketIds) {
+        ticketObservations.push({
+          taskId,
+          ticketId,
+          runId: typeof run.runId === 'string' ? run.runId : null,
+          observedDays,
+          sevenDayOutcome: ['clean', 'rework'].includes(run.sevenDayOutcome) ? run.sevenDayOutcome : null,
+          sufficient: problems.length === 0,
+          problems,
+        })
+      }
+    }
+  }
   const taskObservations = tasks.map(task => {
-    const group = runsByTask.get(task.taskId) ?? []
-    const mergeTimes = group.map(run => run.mergedAt).filter(value => typeof value === 'string' && value !== '')
-      .map(value => Date.parse(value)).filter(value => !Number.isNaN(value))
-    const earliestMergeTime = mergeTimes.length > 0 ? Math.min(...mergeTimes) : null
-    const observedDays = earliestMergeTime === null || Number.isNaN(endTime) ? null : round2((endTime - earliestMergeTime) / 86400000)
-    const problems = []
-    if (task.merged !== true || earliestMergeTime === null) problems.push('not merged / no parseable mergedAt')
-    else if (observedDays === null || observedDays < OBSERVATION_DAYS_REQUIRED) problems.push(`observed ${observedDays} day(s) < ${OBSERVATION_DAYS_REQUIRED} day(s)`)
-    if (task.sevenDayOutcome === null) problems.push('7-day outcome is pending/unknown')
+    const tickets = ticketObservations.filter(ticket => ticket.taskId === task.taskId)
+    const badTickets = tickets.filter(ticket => !ticket.sufficient)
+    const observedDays = tickets.length === 0 || tickets.some(ticket => ticket.observedDays === null)
+      ? null
+      : round2(Math.min(...tickets.map(ticket => ticket.observedDays)))
     return {
       taskId: task.taskId,
       merged: task.merged,
       observedDays,
       sevenDayOutcome: task.sevenDayOutcome,
-      sufficient: problems.length === 0,
-      problems,
+      sufficient: tickets.length > 0 && badTickets.length === 0,
+      problems: badTickets.map(ticket => `${ticket.ticketId}: ${ticket.problems.join('; ')}`),
     }
   })
   const insufficientTasks = taskObservations.filter(task => !task.sufficient)
+  const insufficientTickets = ticketObservations.filter(ticket => !ticket.sufficient)
   const observedDays = tasks.length === 0
     ? null
     : taskObservations.every(task => task.observedDays !== null)
       ? round2(Math.min(...taskObservations.map(task => task.observedDays)))
       : null
   const insufficientObservation = tasks.length === 0 || insufficientTasks.length > 0
-  for (const task of insufficientTasks) {
-    reasons.push(`AT-64/F08: task ${task.taskId}: ${task.problems.join('; ')}; the batch total is withheld`)
+  for (const ticket of insufficientTickets) {
+    reasons.push(`AT-64/F08/R3: task ${ticket.taskId} ticket ${ticket.ticketId}: ${ticket.problems.join('; ')}; the batch total is withheld`)
   }
   if (tasks.length === 0) reasons.push('AT-64: no task-level records, so no total score can be produced')
 
@@ -334,14 +391,15 @@ export function computeMetrics(runs, { now = new Date() } = {}) {
     const anchor = METRIC_ANCHORS[name]
     const value = finite(values[name])
     const known = knownCounts[name] ?? 0
-    const missing = tasks.length - known
+    const knownTickets = knownTicketCounts[name] ?? 0
+    const missingTickets = totalTickets - knownTickets
     let status
     if (insufficientObservation && name === 'reworkRate') status = '证据不足'
-    else if (known === 0) status = 'unknown'
-    else if (missing > 0) status = 'incomplete'
+    else if (knownTickets === 0) status = 'unknown'
+    else if (missingTickets > 0) status = 'incomplete'
     else status = 'ok'
     const score = status === 'ok' ? anchorScore(name, value) : null
-    return { name, label: anchor.label, unit: anchor.unit, direction: anchor.direction, zero: anchor.zero, full: anchor.full, value: value === null ? null : round2(value), score, status, knownTasks: known, missingTasks: missing }
+    return { name, label: anchor.label, unit: anchor.unit, direction: anchor.direction, zero: anchor.zero, full: anchor.full, value: value === null ? null : round2(value), score, status, knownTasks: known, missingTasks: tasks.length - known, knownTickets, missingTickets }
   })
   const incompleteMetrics = metrics.filter(metric => metric.status === 'incomplete').map(metric => metric.name)
   const unknownMetrics = metrics.filter(metric => metric.status === 'unknown' && !(insufficientObservation && metric.name === 'reworkRate')).map(metric => metric.name)
@@ -352,6 +410,13 @@ export function computeMetrics(runs, { now = new Date() } = {}) {
     mergedTasks: tasks.filter(task => task.merged === true).length,
     sufficient: !insufficientObservation,
     insufficientTasks: insufficientTasks.map(task => task.taskId),
+    insufficientTickets: insufficientTickets.map(ticket => ({
+      taskId: ticket.taskId,
+      ticketId: ticket.ticketId,
+      observedDays: ticket.observedDays,
+      sevenDayOutcome: ticket.sevenDayOutcome,
+      problems: ticket.problems,
+    })),
   }
   if (insufficientObservation) {
     return { observation, aggregation, metrics, totalScore: null, verdict: '证据不足', reasons }
@@ -600,6 +665,41 @@ export function selfTest() {
   pass(results, 'T04 F17 same arm+batch multi-ticket merging is preserved',
     agg.taskCount === 2 && agg.ticketCount === 3 && computeMetrics(fixtureRuns, { now: afterBatch }).verdict === 'scored',
     JSON.stringify({ taskCount: agg.taskCount, ticketCount: agg.ticketCount }))
+
+  // R3 counterexample 1: same task, two tickets; one ticket passed with candidates,
+  // the other has unknown acceptance and no candidates. The old aggregate dropped
+  // the unknown ticket and scored 95.68; per-ticket completeness must mark incomplete.
+  const sharedTaskRuns = [
+    ticket({ taskId: 'task-shared', ticketIds: ['ticket-good'] }),
+    ticket({ taskId: 'task-shared', ticketIds: ['ticket-unknown'], acceptanceVerdict: null, firstReviewCandidate: null, finalCandidate: null }),
+  ]
+  const sharedResult = computeMetrics(sharedTaskRuns, { now: afterBatch })
+  const sharedNames = sharedResult.metrics.filter(metric => metric.status === 'incomplete').map(metric => metric.name)
+  pass(results, 'T04 R3 same-task unknown ticket is not hidden by the known ticket',
+    sharedResult.verdict === '证据不足' && sharedResult.totalScore === null,
+    `verdict=${sharedResult.verdict} total=${sharedResult.totalScore}`)
+  pass(results, 'T04 R3 same-task acceptance/first-review completeness is per ticket',
+    sharedNames.includes('acceptanceRate') && sharedNames.includes('firstReviewPassRate'),
+    JSON.stringify(sharedNames))
+  pass(results, 'T04 R3 same-task aggregate fields keep the incomplete marker',
+    sharedResult.aggregation.tasks[0]?.acceptanceComplete === false && sharedResult.aggregation.tasks[0]?.firstReviewComplete === false,
+    JSON.stringify(sharedResult.aggregation.tasks[0]))
+
+  // R3 counterexample 2: same task, one ticket merged 8 days ago clean, the other
+  // merged today pending. The old task-level earliest-merge window let this score;
+  // per-ticket observation must withhold the total.
+  const eightDaysAgo = new Date(freshNow.getTime() - 8 * 86400000)
+  const sharedObservationRuns = [
+    ticket({ taskId: 'task-shared-observation', ticketIds: ['ticket-old'], mergedAt: eightDaysAgo.toISOString(), sevenDayOutcome: 'clean' }),
+    ticket({ taskId: 'task-shared-observation', ticketIds: ['ticket-fresh'], mergedAt: freshNow.toISOString(), sevenDayOutcome: 'pending' }),
+  ]
+  const sharedObservation = computeMetrics(sharedObservationRuns, { now: freshNow })
+  pass(results, 'T04 R3 same-task fresh/pending ticket withholds the batch total',
+    sharedObservation.observation.sufficient === false && sharedObservation.totalScore === null && sharedObservation.verdict === '证据不足',
+    JSON.stringify(sharedObservation.observation))
+  pass(results, 'T04 R3 same-task fresh ticket is named in insufficientTickets',
+    sharedObservation.observation.insufficientTickets.some(ticket => ticket.ticketId === 'ticket-fresh') && sharedObservation.observation.insufficientTasks.includes('task-shared-observation'),
+    JSON.stringify(sharedObservation.observation.insufficientTickets))
 
   for (const line of results) console.log(line)
   const failed = results.filter(line => line.startsWith('FAIL')).length
