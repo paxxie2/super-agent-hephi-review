@@ -35,10 +35,10 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync,
+  existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -110,9 +110,46 @@ function readJson(file) {
   return JSON.parse(readFileSync(file, 'utf8'))
 }
 
+// L02：仅比较词法路径会让 outside-alias（目录符号链接→公开材料目录）绕过隔离，
+// 私有 mapping 实际写进 blind 目录。这里解析真实路径（含父目录链接与悬空文件链接）后比较。
+function realpathLoose(target) {
+  const absolute = resolve(target)
+  try {
+    return realpathSync(absolute)
+  } catch {
+    // 路径不存在或悬空符号链接：若是链接则先解析链接目标，再继续按最深已存在祖先解析。
+  }
+  try {
+    if (lstatSync(absolute).isSymbolicLink()) {
+      const link = readlinkSync(absolute)
+      return realpathLoose(resolve(dirname(absolute), link))
+    }
+  } catch {
+    // 不存在：走已存在祖先解析。
+  }
+  let current = absolute
+  const suffix = []
+  while (true) {
+    const parent = dirname(current)
+    if (parent === current) break
+    suffix.unshift(basename(current))
+    current = parent
+    try {
+      return join(realpathSync(current), ...suffix)
+    } catch {
+      // 继续向上。
+    }
+  }
+  return absolute
+}
+
 function ensureOutside(target, dir) {
-  const t = resolve(target)
-  const d = resolve(dir)
+  // 词法路径在材料目录内一律拒绝（保持既有隔离语义），再按真实路径核对父目录/最终目标。
+  const lexicalTarget = resolve(target)
+  const lexicalDir = resolve(dir)
+  if (lexicalTarget === lexicalDir || lexicalTarget.startsWith(`${lexicalDir}${sep}`)) return false
+  const t = realpathLoose(target)
+  const d = realpathLoose(dir)
   return t !== d && !t.startsWith(`${d}${sep}`)
 }
 
@@ -331,17 +368,26 @@ function runExport(options) {
     note: '本清单不含组别、taskId、runId；盲评结束后用私有映射还原。',
   }
   const exportManifestText = `${JSON.stringify(exportManifest, null, 2)}\n`
+  const exportIdentity = { caseCount: manifestCases.length, manifestSha256: sha256(exportManifestText) }
   writeFileSync(join(out, 'manifest.json'), exportManifestText, 'utf8')
-  writeFileSync(join(out, 'labels.template.json'), `${JSON.stringify({ batch: manifest.batch, labeler: null, cases: templateCases }, null, 2)}\n`, 'utf8')
+  // L01：标签模板也携带导出身份；import 用它核对 labels/manifest/mapping 三方一致，
+  // 同批新导出不会再接受旧 labels（旧格式默认拒绝，历史兼容需显式 --allow-legacy-mapping）。
+  writeFileSync(join(out, 'labels.template.json'), `${JSON.stringify({
+    batch: manifest.batch,
+    caseCount: exportIdentity.caseCount,
+    manifestSha256: exportIdentity.manifestSha256,
+    labeler: null,
+    cases: templateCases,
+  }, null, 2)}\n`, 'utf8')
 
   mkdirSync(dirname(mappingPath), { recursive: true })
   writeFileSync(mappingPath, `${JSON.stringify({
     schemaVersion: 1,
     batch: manifest.batch,
     seed,
-    // F05：导出清单身份；import 用它核对“同批多次导出”时 case-001 编号复用的错配。
-    caseCount: manifestCases.length,
-    manifestSha256: sha256(exportManifestText),
+    // F05/L01：导出清单身份；labels 模板携带同一身份，import 做三方一致核对。
+    caseCount: exportIdentity.caseCount,
+    manifestSha256: exportIdentity.manifestSha256,
     note: '私有映射：只在盲评结束后打开；不得与材料一起分发。',
     mapping,
   }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
@@ -415,6 +461,55 @@ function selfTest(asJson) {
       : ['manifest 缺失']
     record('导出清单不含组别/taskId/runId 键', leakedKeys.length === 0, JSON.stringify(leakedKeys))
     record('私有映射与材料目录分离', existsSync(cleanMapping) && ensureOutside(cleanMapping, cleanOut), cleanMapping)
+
+    // L01：标签模板必须携带与 blind manifest / 私有 mapping 一致的导出身份。
+    const templateJson = existsSync(join(cleanOut, 'labels.template.json')) ? JSON.parse(readFileSync(join(cleanOut, 'labels.template.json'), 'utf8')) : null
+    const cleanMappingJson = existsSync(cleanMapping) ? JSON.parse(readFileSync(cleanMapping, 'utf8')) : null
+    const cleanManifestRaw = existsSync(join(cleanOut, 'manifest.json')) ? readFileSync(join(cleanOut, 'manifest.json'), 'utf8') : ''
+    record('L01 标签模板携带与 manifest/mapping 一致的导出身份',
+      Boolean(templateJson) && Boolean(cleanMappingJson)
+        && templateJson.caseCount === 1
+        && templateJson.manifestSha256 === sha256(cleanManifestRaw)
+        && templateJson.caseCount === cleanMappingJson.caseCount
+        && templateJson.manifestSha256 === cleanMappingJson.manifestSha256,
+      `template=${JSON.stringify({ caseCount: templateJson?.caseCount, manifestSha256: templateJson?.manifestSha256 })} mapping=${JSON.stringify({ caseCount: cleanMappingJson?.caseCount, manifestSha256: cleanMappingJson?.manifestSha256 })}`)
+
+    // L02：符号链接绕过隔离必须拒绝；正常（含指向外部的链接）路径仍通过。
+    const symlinkOut = join(root, 'out-symlink-l02')
+    mkdirSync(symlinkOut, { recursive: true })
+    const outsideAlias = join(root, 'outside-alias')
+    symlinkSync(symlinkOut, outsideAlias, 'dir')
+    const symlinkMappingRun = runCliSafe(['--manifest', manifest, '--out', symlinkOut, '--mapping', join(outsideAlias, 'private.json')])
+    record('L02 负例：--mapping 经目录符号链接实际落入材料目录 → 拒绝（exit 2，不写文件）',
+      symlinkMappingRun.status === 2 && !existsSync(join(symlinkOut, 'private.json')),
+      `exit=${symlinkMappingRun.status} leaked=${existsSync(join(symlinkOut, 'private.json'))}`)
+
+    const nestedOut = join(root, 'out-nested-l02')
+    mkdirSync(nestedOut, { recursive: true })
+    const nestedAlias = join(root, 'nested-alias-l02')
+    symlinkSync(nestedOut, nestedAlias, 'dir')
+    const nestedSymlinkRun = runCliSafe(['--manifest', manifest, '--out', nestedOut, '--mapping', join(nestedAlias, 'sub', 'private.json')])
+    record('L02 负例：--mapping 父目录链接（含不存在子目录）指向材料目录 → 拒绝（exit 2）',
+      nestedSymlinkRun.status === 2 && !existsSync(join(nestedOut, 'sub', 'private.json')),
+      `exit=${nestedSymlinkRun.status}`)
+
+    const danglingOut = join(root, 'out-dangling-l02')
+    mkdirSync(danglingOut, { recursive: true })
+    const danglingMapping = join(root, 'mapping-dangling.json')
+    symlinkSync(join(danglingOut, 'actual.json'), danglingMapping)
+    const danglingRun = runCliSafe(['--manifest', manifest, '--out', danglingOut, '--mapping', danglingMapping])
+    record('L02 负例：--mapping 是悬空符号链接且目标在材料目录内 → 拒绝（exit 2）',
+      danglingRun.status === 2 && !existsSync(join(danglingOut, 'actual.json')),
+      `exit=${danglingRun.status} leaked=${existsSync(join(danglingOut, 'actual.json'))}`)
+
+    const outsideTarget = join(root, 'outside-mapping-target')
+    mkdirSync(outsideTarget, { recursive: true })
+    const outsideOkAlias = join(root, 'outside-alias-ok')
+    symlinkSync(outsideTarget, outsideOkAlias, 'dir')
+    const outsideAliasRun = runCliSafe(['--manifest', manifest, '--out', join(root, 'out-alias-ok'), '--mapping', join(outsideOkAlias, 'private.json')])
+    record('L02 正例：--mapping 经符号链接指向材料目录之外 → 允许（exit 0）',
+      outsideAliasRun.status === 0 && existsSync(join(outsideTarget, 'private.json')),
+      `exit=${outsideAliasRun.status}`)
 
     const insideMapping = runCliSafe(['--manifest', manifest, '--out', join(root, 'out-inside'), '--mapping', join(root, 'out-inside', 'mapping.json')])
     record('负例：映射放进材料目录 → 拒绝（exit 2）', insideMapping.status === 2, `exit=${insideMapping.status}`)
