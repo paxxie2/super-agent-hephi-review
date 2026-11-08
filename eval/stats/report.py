@@ -277,17 +277,21 @@ def p90(values: list[float]) -> float | None:
 
 
 def paired_tasks(runs: list[Run], repetition: int) -> dict[str, dict[str, Run]]:
-    """按 taskId 配对 off/native 的 repetition 指定运行；同组同任务取第一条。"""
-    pairs: dict[str, dict[str, Run]] = {}
+    """按 (taskId, batch) 配对两臂的 repetition 指定运行；跨批次不得配对；
+    同 (taskId, batch, arm) 出现多条主记录时 fail-closed 拒绝（不静默取第一条）。"""
+    pairs: dict[tuple[str, str], dict[str, Run]] = {}
     for run in runs:
         if run.repetition != repetition:
             continue
         arm = normalize_arm(run.arm)
         if arm not in ("control", "treatment"):
             continue
-        bucket = pairs.setdefault(run.task_id, {})
-        bucket.setdefault(arm, run)
-    return {task: arms for task, arms in pairs.items() if "control" in arms and "treatment" in arms}
+        key = (run.task_id, run.batch)
+        bucket = pairs.setdefault(key, {})
+        if arm in bucket:
+            raise ValueError(f"重复主记录：task={run.task_id} batch={run.batch} arm={run.arm} 出现多条 repetition={repetition} 运行；拒绝静默取第一条")
+        bucket[arm] = run
+    return {key: arms for key, arms in pairs.items() if "control" in arms and "treatment" in arms}
 
 
 def evaluate_metric(pairs: dict[str, dict[str, Run]], metric_key: str, direction: str,
@@ -566,7 +570,7 @@ def render_markdown(report: dict, source: str) -> str:
         "",
         "## 1. 主指标（越小越好）",
         "",
-        "| 指标 | off 率 (Wilson 95% CI) | native 率 (Wilson 95% CI) | 绝对差 | 相对变化 | 95% bootstrap CI | 精确 McNemar (改善/恶化, p) | 结论 |",
+        "| 指标 | 原系统组 率 (Wilson 95% CI) | 整包组 率 (Wilson 95% CI) | 绝对差 | 相对变化 | 95% bootstrap CI | 精确 McNemar (改善/恶化, p) | 结论 |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for key, entry in report["primary"].items():
@@ -590,7 +594,7 @@ def render_markdown(report: dict, source: str) -> str:
         "",
         "## 2. 守护指标（必须非劣效；方向已归一化为“越大越好”）",
         "",
-        "| 指标 | off 率 | native 率 | 绝对差 | 95% bootstrap CI | CI 下界 vs 界值 | 非劣效 | 精确 McNemar (改善/恶化, p) |",
+        "| 指标 | 原系统组 率 | 整包组 率 | 绝对差 | 95% bootstrap CI | CI 下界 vs 界值 | 非劣效 | 精确 McNemar (改善/恶化, p) |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for key, entry in report["guardrails"].items():
@@ -611,7 +615,7 @@ def render_markdown(report: dict, source: str) -> str:
         "",
         "## 3. 成本指标与上限",
         "",
-        "| 指标 | native 值 | 上限 | 是否超限 |",
+        "| 指标 | 整包组 值 | 上限 | 是否超限 |",
         "| --- | --- | --- | --- |",
         f"| 耗时中位数（分钟） | {fmt(values['native_median_minutes'])} | {fmt(cost['caps']['median_minutes_max'])} | {'超限' if not cost['checks']['median_minutes_max'] else '未超限'} |",
         f"| 耗时 P90（分钟） | {fmt(values['native_p90_minutes'])} | {fmt(cost['caps']['p90_minutes_max'])} | {'超限' if not cost['checks']['p90_minutes_max'] else '未超限'} |",

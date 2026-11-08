@@ -11,7 +11,7 @@
 
 | 名词 | 定义 | 记录字段 |
 | --- | --- | --- |
-| **native** | 挂载赫菲插件（enforce 模式），Issue 走 `hephi/delivery` → Ticket → Worker，产生合同与检查记录 | `arm=native` |
+| **full-package（整包组）** | 以 v1.2 锁定的新制品全集运行（HEPHI `055491d` + SA `d0e64d6` + G1 配置），Issue 走 `hephi/delivery` → Ticket → Worker，产生合同与检查记录 | `arm=full-package` |
 | **legacy-system（原系统组）** | 以 T01 冻结制品运行（HEPHI `6d24e1b` + SA `62d7d53` + 原配置，含旧赫菲），使用与整包组**逐字节相同**的任务卡 | `arm=legacy-system` |
 | **staged** | 挂载赫菲且使用 staged 执行方式；**只用于 Q3 单独实验**、只用 `staged-suitable` 任务 | `arm=staged` |
 | **shadow** | 执行机制，不是分组：Worker 完全不受影响，同时按同一套规则记录违规（P4）。**只允许对照组（旧 B5 `arm=off`；现行 `arm=legacy-system`）+ `executionMode=shadow`** | `executionMode=shadow` |
@@ -104,7 +104,7 @@
 | 注入文本唯一 | 原系统组 Issue 中除任务卡模板外无额外指令评论 | 运行无效 |
 
 > **为什么不能“对照组直接人写一句简短需求”**：那会同时改变任务内容和需求表达，混淆 Q1 的
-> 因果解释；P1-1 的核心就是保证两组的**唯一差异是是否挂载赫菲**。方案 B 的固定 Trigger 文本
+> 因果解释；P1-1 的核心是保证两组的**唯一差异是制品版本**（原系统=旧赫菲+旧 SA+原配置，整包=新制品全集）；同一批次投递、同一任务卡 sha256。方案 B 的固定 Trigger 文本
 > 必须由负责人 review 后方可使用（见 §11 D-2）。
 
 ## 5. 运行计划生成约束（B5）
