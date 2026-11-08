@@ -82,11 +82,13 @@
     "arm": {
       "type": "string",
       "enum": [
+        "legacy-system",
+        "full-package",
         "off",
         "native",
         "staged"
       ],
-      "description": "分析分组：off=不挂载赫菲；native=挂载赫菲 enforce；staged=单独实验，只用于 staged-suitable 任务"
+      "description": "分析分组（PREREG v1.2）：legacy-system=原系统组（含旧赫菲）；full-package=整包组；off/native 为旧 B5 历史值（只用于既有记录，新运行禁用）；staged=单独实验"
     },
     "executionMode": {
       "type": "string",

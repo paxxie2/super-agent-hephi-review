@@ -1,8 +1,14 @@
 {
-  "version": "v1.1",
-  "frozenAt": "2026-11-09T01:50:00+08:00",
-  "preregSha256": "b0c801f3f59d31a7a078264ed3cbca928e01b022fe97616ec76c4ff859d06802",
-  "note": "PREREG v1.0 §9 要求的任务集清单冻结：taskId+sha256，随 git 提交冻结；变更须按 PREREG §9 升版本",
+  "version": "v1.2",
+  "frozenAt": "2026-11-08T18:07:02.269Z",
+  "preregSha256": "bed885fd631dc94e5ceeab69281b9881a640074cde647a07436da9323e50c3e1",
+  "note": "bound to PREREG v1.2 lock; regenerated with fresh hashes after review-r2 card edits (v1.1 hashes went stale after 415-card body change); role change vs v1.1: previous-window-order -> q1-devexposed-original (8 trial runs + D-9 exposure), retention 23->22",
+  "roleCounts": {
+    "non-q1-tooling": 12,
+    "q1-devexposed-original": 5,
+    "q1-retention": 22,
+    "staged-only-q3": 1
+  },
   "count": 40,
   "tasks": [
     {
@@ -151,9 +157,10 @@
       "category": "new-feature",
       "group": "site-pnl-diagnosis",
       "taskJsonSha256": "4488a6d763868019075f6004570eaf98ab36ea14138998ad8aaebe463bd3b1e8",
-      "issueSha256": "ca80177ac6a27b7900bdbb85f043f138eedd65b8b53e93ea68f9c59574b80270",
+      "issueSha256": "c273cf5af35d29d38bef0b6f0dce65bddd8748da50c1d8ccd071d5c25de29cca",
       "validationOk": true,
-      "role": "q1-retention"
+      "role": "q1-retention",
+      "revision": "requirement revised in review-r2 F4 (Content-Type guard makes 415 reachable); frozen at this hash as task revision"
     },
     {
       "taskId": "backend-validation-messages",
@@ -293,7 +300,8 @@
       "taskJsonSha256": "d7ed91ce6aa039efcddba7db75d50bc9fdb29e3db9a1fec59b38a4632b5b3bf2",
       "issueSha256": "f91d1b6afb6e1d97c6132c7537afd06b548c058886248b01405e0e095b0d3497",
       "validationOk": true,
-      "role": "q1-retention"
+      "role": "q1-devexposed-original",
+      "devExposure": "8 B5 dev trial runs + D-9 delivery (PR#16 off run)"
     },
     {
       "taskId": "previous-window-order-v2",
@@ -332,7 +340,7 @@
       "group": "site-pnl-diagnosis",
       "taskJsonSha256": "1cff576013e165586b8bd3178b3238eb808dbd37ace333a5ab9cdf2968903fec",
       "issueSha256": "0f2b06631ffd2f70e698bdaf18c49f382a84893b9b331e9d4cbde1dccb561187",
-      "validationOk": null,
+      "validationOk": true,
       "role": "q1-retention"
     },
     {
@@ -392,7 +400,7 @@
       "group": "site-pnl-diagnosis",
       "taskJsonSha256": "8ab6d3a8ac3c4f95e7025d3bc5b0c0205bf37af0b4070a0b32afe5dc4e9aad63",
       "issueSha256": "e3143aad1941e4b83fbd25cdf31426a97a6ec554140314d48dd26cd23176c928",
-      "validationOk": null,
+      "validationOk": true,
       "role": "q1-retention"
     },
     {
@@ -405,13 +413,5 @@
       "validationOk": null,
       "role": "q1-retention"
     }
-  ],
-  "lockNote": "bound to PREREG v1.1 lock (b0c801f3... full value in preregSha256); v1.0 manifest mistakenly bound the pre-correction lock 267d4069, v1.1-rc mistakenly bound c91516c3 — both superseded",
-  "roleCounts": {
-    "non-q1-tooling": 12,
-    "q1-devexposed-original": 4,
-    "q1-retention": 23,
-    "staged-only-q3": 1
-  },
-  "note2": "q1-retention=合格保留集候选（原未用5+变体18）；q1-devexposed=开发期已曝光原卡（排除出保留集）；non-q1-tooling=PREREG D-7 排除出 Q1 主分析；validationOk=null 表示卡内无 full-mode validation.json 记录，须行为验证后才能改 true，本次未擅改"
+  ]
 }

@@ -1,19 +1,59 @@
 #!/bin/sh
 set -eu
 python3 -B - <<'PY'
-"""GET /api/diagnoses 可选 siteId 过滤的服务层行为断言：真实 SQLite 临时库 + 真实服务函数。"""
+"""GET /api/diagnoses 可选 siteId 过滤的服务层与 HTTP 路由行为断言。
+
+真实临时 SQLite + 真实服务函数；并用标准库 asyncio/json 直接驱动仓库 ASGI 应用
+（不联网、不起服务），断言 HTTP 路由把 siteId query 参数正确传给服务层。
+"""
+import asyncio
 import json
 import os
 import sqlite3
 import sys
 import tempfile
+import urllib.parse
 
 sys.path.insert(0, "backend")
 from app.db import init_db  # noqa: E402
 from app.services import diagnoses as service  # noqa: E402
+from app.main import app  # noqa: E402
 
 COMPLETENESS = json.dumps({"sources": {}, "unknownComponents": [], "comparisonComplete": None, "notes": []})
 EMPTY_LIST = "[]"
+
+
+def call_get(params: dict[str, str] | None = None) -> tuple[int, dict]:
+    """直接以 ASGI 接口发起 GET /api/diagnoses 请求，返回 (status, JSON body)。"""
+    query = urllib.parse.urlencode(params or {}).encode()
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": "/api/diagnoses",
+        "raw_path": b"/api/diagnoses",
+        "query_string": query,
+        "root_path": "",
+        "headers": [(b"accept", b"application/json")],
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+        "state": {},
+    }
+    captured = {"status": None, "body": b""}
+
+    async def receive() -> dict:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict) -> None:
+        if message["type"] == "http.response.start":
+            captured["status"] = message["status"]
+        elif message["type"] == "http.response.body":
+            captured["body"] += message.get("body", b"")
+
+    asyncio.run(app(scope, receive, send))
+    return int(captured["status"]), json.loads(captured["body"].decode())
 
 
 def insert_site(conn: sqlite3.Connection, site_id: str, name: str) -> None:
@@ -74,5 +114,30 @@ with tempfile.TemporaryDirectory() as tmp:
     assert [item.id for item in first.items] == ["d_s01_new"] and first.total == 2
     assert [item.id for item in second.items] == ["d_s01_old"] and second.total == 2
 
-print("PASS: optional siteId filtering with unchanged unfiltered behavior")
+    # ---- HTTP route: the real GET /api/diagnoses passes siteId to the service ----
+    app.state.db_path = db
+
+    status, body = call_get()
+    assert status == 200, (status, body)
+    assert body["total"] == 3 and len(body["items"]) == 3, body
+    assert {item["siteId"] for item in body["items"]} == {"S01", "S02"}
+    assert body["limit"] == 20 and body["offset"] == 0, body
+
+    status, body = call_get({"siteId": "S01"})
+    assert status == 200, (status, body)
+    assert body["total"] == 2 and len(body["items"]) == 2, body
+    assert [item["id"] for item in body["items"]] == ["d_s01_new", "d_s01_old"], body
+    assert all(item["siteId"] == "S01" for item in body["items"])
+
+    status, body = call_get({"siteId": "S99"})
+    assert status == 200, (status, body)
+    assert body["total"] == 0 and body["items"] == [], body
+
+    status, body = call_get({"siteId": "S01", "limit": "1", "offset": "1"})
+    assert status == 200, (status, body)
+    assert body["total"] == 2 and len(body["items"]) == 1, body
+    assert body["items"][0]["id"] == "d_s01_old", body
+    assert body["limit"] == 1 and body["offset"] == 1, body
+
+print("PASS: optional siteId filtering (service and HTTP route) with unchanged unfiltered behavior")
 PY

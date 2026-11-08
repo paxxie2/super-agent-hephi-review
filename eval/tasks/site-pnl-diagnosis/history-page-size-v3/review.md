@@ -16,3 +16,6 @@
 
 ## F4 整改记录（外部审查）
 原 hidden-test 只做静态/桩断言（文件存在与 callable、AST/SQL 字符串计数、dotenv 模块 stub）。F4 整改改为真实行为断言：真实临时 SQLite + 真实服务/播种函数调用、真实临时 git 仓库的 `git check-ignore`、真实临时 `.env` 文件；断言覆盖参数化读取、优先级、缺省回退与幂等。需求点语义与 allowedFiles 未变，reference.patch 未改动。
+
+## 第三轮整改记录（外部审查）
+补充 HTTP 路由级断言：用标准库 asyncio/json 直接驱动仓库 ASGI 应用（不联网、不起服务），对真实 `GET /api/diagnoses` 请求无 siteId（total=3 且行为不变）、`siteId=S01`（total=2、仅 S01、顺序不变）、`siteId=S99`（空页）、`siteId=S01&limit=1&offset=1`（分页字段与条目一致），验证路由把 query 参数正确传给服务层；task.json/reference.patch/需求语义未改。

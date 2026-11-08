@@ -50,3 +50,14 @@ numpy 2.3.4 / scipy 1.16.2 / statsmodels 0.14.5，按 `eval/stats/requirements.t
   本轮定向加强为行为断言并重跑 full-mode（见随后提交的各卡 validation.json）。
 - q1-retention 23 卡 full-mode 行为验证（base 3×失败 + reference 3×通过）：结果随提交更新。
   此前 40/40 dry-run 仅结构检查，不作为行为验证结论（v1 表述作废）。
+
+## 8. 第三轮整改（2026-11-09，REVIEW hephi-81af84a-review）
+
+1. **分组规则冲突**：PREREG v1.2 全文统一为"原系统组（含旧赫菲：HEPHI 6d24e1b + SA 62d7d53）/整包组"；
+   §3/§6/§7/§9 与 run.schema.json（group 枚举加 legacy-system/full-package，off/native 降为历史值禁用于新运行）同步。
+2. **版本表归属更正**：v1.1 误把 6d24e1b 写成 SA；v1.2 更正为 HEPHI=6d24e1b、SA=62d7d53。
+3. **previous-window-order 移出保留集**（8 次开发试跑 + D-9 曝光，含 off 运行 PR#16）；保留集 23→22，manifest v1.2 记 devExposure。
+4. **415 卡需求修订冻结**：manifest v1.2 该卡 entry 带 revision 字段（Content-Type 守卫使 415 可达，语义扩展如实登记）；issue 哈希 c273cf5a… 与评审实测一致。
+5. **manifest 哈希失效根因闭环**：v1.1 生成于 F4 卡正文修改之前；v1.2 在全部卡修改完成后重新生成并绑定 v1.2 锁（bed885fd…）。流程规则：任何卡文件改动后必须重新生成 manifest。
+6. **分页 HTTP 路由断言补齐**：history-page-size-v3 增加 ASGI 直驱 GET /api/diagnoses 的 siteId 转发验证（无参行为不变/S01 过滤+排序/S99 空页/与 limit/offset 组合）；full-mode ok:true。
+   22 张保留卡中其余卡的目标行为覆盖以各卡 validation.json 为准；"23/23"（现 22/22 口径）不概括为全需求行为穷尽。
