@@ -14,3 +14,18 @@
 
 ## 未验证项
 未做真实模型运行、未做人类双评审、未验证该提交在完整仓库工具链下的全部回归测试（hidden-test 只覆盖本任务目标断言）；污染门槛未达标（见 task.json.contamination）。
+
+
+## F14 整改（Stream D2，外部审查）
+
+- **原缺口**：hidden-test 只调用 `validation_messages.py` 的纯函数，未验证 issue 要求的 `schemas.py` / `main.py` 接入路径（真实校验失败 → 响应含该模块消息）。
+- **现行为覆盖**：用标准库 `asyncio` 的 ASGI 直驱真实 HTTP 请求到 `POST /api/diagnoses/{id}/scenarios`（写请求；临时 app，无外部服务）：
+  1. 缺 `kind` → 400 `VALIDATION_ERROR`，`fieldErrors.kind` 含中文“测算类型为必填”；
+  2. 非法 `kind` → `fieldErrors.kind` 为中文且响应不出现 Pydantic 英文默认 `Input should be`；
+  3. `monthlyRentCents` 传字符串 → `fieldErrors.monthlyRentCents` 含“必须为整数”（自定义校验器经 `value_error` 路径）；
+  4. 统一错误体结构 `{code,message,fieldErrors,requestId}` 保持。
+  端点校验在真实 FastAPI 请求链中执行（`RequestValidationError` 处理器经新模块转换），非直接调用纯函数。
+- **reference.patch 改动**：无（历史补丁已含接入路径；未改语义）。
+- **full-mode 结果**：`ok:true`；base 3/3 失败（`{'kind': 'Field required'}`，即 base 无中文消息/模块），reference 3/3 通过；`outside=[]`。
+- **限制**：ASGI 直驱为进程内真实请求，但不是真实部署端到端；AST 已移除；未做真实模型运行。
+- **校验分类（F15 后的 check-task）**：base 3/3 均为 `target-assertion-failed`（非 environment-error），3 次 `normalizedSha256` 相同；reference 3/3 `codes=[0,0,0]` 且输出一致。

@@ -22,22 +22,25 @@
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 11, in <module>\nAssertionError: schemas must import ConfigDict from pydantic\n",
-          "outputSha256": "26dd6dd661bd8516078dd67e4a2dedc544a50e92b812c60e00eb7282d208d48f"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 80, in <module>\nAssertionError: error response must point at the unknown field: {\"code\":\"VALIDATION_ERROR\",\"message\":\"请求参数不合法\",\"fieldErrors\":{\"siteId\":\"Field required\"},\"requestId\":\"e2134b9c59a542a3bc2c27551e405240\"}\n",
+          "outputSha256": "6c9e89233efe25ff2e6dca3490e8c51a59628348f9eb39473abb44f8d68abdd9",
+          "normalizedSha256": "5d27fa04b1be5d9fe55eace4f92424d3b8eccebb50cb0635f0c51fa14cca034a"
         },
         {
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 11, in <module>\nAssertionError: schemas must import ConfigDict from pydantic\n",
-          "outputSha256": "26dd6dd661bd8516078dd67e4a2dedc544a50e92b812c60e00eb7282d208d48f"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 80, in <module>\nAssertionError: error response must point at the unknown field: {\"code\":\"VALIDATION_ERROR\",\"message\":\"请求参数不合法\",\"fieldErrors\":{\"siteId\":\"Field required\"},\"requestId\":\"71d2683a026a451fb26e6ad3c470dd8d\"}\n",
+          "outputSha256": "9d1e5ca9557e81e6c913268450ba8d182793475c9158b6c48b3432a6f14b2d95",
+          "normalizedSha256": "5d27fa04b1be5d9fe55eace4f92424d3b8eccebb50cb0635f0c51fa14cca034a"
         },
         {
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 11, in <module>\nAssertionError: schemas must import ConfigDict from pydantic\n",
-          "outputSha256": "26dd6dd661bd8516078dd67e4a2dedc544a50e92b812c60e00eb7282d208d48f"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 80, in <module>\nAssertionError: error response must point at the unknown field: {\"code\":\"VALIDATION_ERROR\",\"message\":\"请求参数不合法\",\"fieldErrors\":{\"siteId\":\"Field required\"},\"requestId\":\"84ea29dfee184358902979d00cc56def\"}\n",
+          "outputSha256": "eb4cf4e4f3c9fc9d2df992526b6946700e8f22a470ca7c4012f6cdcb43ffef14",
+          "normalizedSha256": "5d27fa04b1be5d9fe55eace4f92424d3b8eccebb50cb0635f0c51fa14cca034a"
         }
       ],
       "codes": [
@@ -45,7 +48,50 @@
         1,
         1
       ],
+      "outputSha256": [
+        "6c9e89233efe25ff2e6dca3490e8c51a59628348f9eb39473abb44f8d68abdd9",
+        "9d1e5ca9557e81e6c913268450ba8d182793475c9158b6c48b3432a6f14b2d95",
+        "eb4cf4e4f3c9fc9d2df992526b6946700e8f22a470ca7c4012f6cdcb43ffef14"
+      ],
+      "normalizedSha256": [
+        "5d27fa04b1be5d9fe55eace4f92424d3b8eccebb50cb0635f0c51fa14cca034a",
+        "5d27fa04b1be5d9fe55eace4f92424d3b8eccebb50cb0635f0c51fa14cca034a",
+        "5d27fa04b1be5d9fe55eace4f92424d3b8eccebb50cb0635f0c51fa14cca034a"
+      ],
       "consistent": true,
+      "failureClasses": [
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        },
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        },
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        }
+      ],
+      "validFailureClasses": [
+        "target-assertion-failed",
+        "target-symbol-missing"
+      ],
+      "normalization": {
+        "version": 1,
+        "scope": "stdout+stderr",
+        "rules": [
+          "CRLF/CR → LF",
+          "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+          "UUID → <uuid>",
+          "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+          "pid=数字 → pid=<pid>"
+        ],
+        "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
+      },
       "ok": true
     },
     "scope": {
@@ -64,23 +110,26 @@
         {
           "code": 0,
           "signal": null,
-          "stdout": "PASS: request bodies reject unknown fields\n",
+          "stdout": "PASS: unknown request fields are rejected and named (ASGI behavior)\n",
           "stderr": "",
-          "outputSha256": "53cefb119d2b581b7d588160733ca6db14b1add52e3d354dae728b8f2c5a69d2"
+          "outputSha256": "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031",
+          "normalizedSha256": "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031"
         },
         {
           "code": 0,
           "signal": null,
-          "stdout": "PASS: request bodies reject unknown fields\n",
+          "stdout": "PASS: unknown request fields are rejected and named (ASGI behavior)\n",
           "stderr": "",
-          "outputSha256": "53cefb119d2b581b7d588160733ca6db14b1add52e3d354dae728b8f2c5a69d2"
+          "outputSha256": "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031",
+          "normalizedSha256": "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031"
         },
         {
           "code": 0,
           "signal": null,
-          "stdout": "PASS: request bodies reject unknown fields\n",
+          "stdout": "PASS: unknown request fields are rejected and named (ASGI behavior)\n",
           "stderr": "",
-          "outputSha256": "53cefb119d2b581b7d588160733ca6db14b1add52e3d354dae728b8f2c5a69d2"
+          "outputSha256": "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031",
+          "normalizedSha256": "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031"
         }
       ],
       "codes": [
@@ -88,9 +137,43 @@
         0,
         0
       ],
+      "outputSha256": [
+        "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031",
+        "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031",
+        "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031"
+      ],
+      "normalizedSha256": [
+        "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031",
+        "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031",
+        "a281bf5c0b88262010846adc21079f4987db2a831c8c952c6b88abe4ff555031"
+      ],
       "consistent": true,
+      "normalization": {
+        "version": 1,
+        "scope": "stdout+stderr",
+        "rules": [
+          "CRLF/CR → LF",
+          "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+          "UUID → <uuid>",
+          "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+          "pid=数字 → pid=<pid>"
+        ],
+        "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
+      },
       "ok": true
     }
+  },
+  "normalization": {
+    "version": 1,
+    "scope": "stdout+stderr",
+    "rules": [
+      "CRLF/CR → LF",
+      "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+      "UUID → <uuid>",
+      "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+      "pid=数字 → pid=<pid>"
+    ],
+    "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
   },
   "ok": true,
   "baseSha": "e00f338b098546adc40156dc15b4b6559e19835d",

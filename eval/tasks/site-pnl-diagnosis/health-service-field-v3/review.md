@@ -13,3 +13,17 @@
 
 ## 未验证项
 未做真实模型运行、未做人类双评审、未验证该补丁在完整仓库工具链下的全部回归测试（hidden-test 只覆盖本任务目标断言）；污染门槛未达标（见 task.json.contamination）。
+
+
+## F14 整改（Stream D2，外部审查）
+
+- **原缺口**：hidden-test 只查同步函数装饰器与返回字面量，未验证路由真实 200、是否间接访问 DB，且会误拒合法的 `async def` 实现。
+- **现行为覆盖**：用标准库 `asyncio` 的 ASGI 直驱真实请求：
+  1. 计数 stub 包住 `app.main.db_status` 与 `app.db.connect`（明确标注为测试 stub）；
+  2. 对照调用 `GET /api/health` → 计数增加，证明 stub 能观测真实 DB 访问；
+  3. 清零后调用 `GET /api/health/live` → 断言 **200**、`{"status":"ok"}`，且两个计数均为 **0**（零 DB 访问）；
+  4. ASGI 驱动对 `async def` 路由同样 `await`，合法的 async 实现不会被误拒；不依赖装饰器写法/函数名。
+- **reference.patch 改动**：无。
+- **full-mode 结果**：`ok:true`；base 3/3 失败（`(404, {"code":"NOT_FOUND"...})`，即端点不存在），reference 3/3 通过；`outside=[]`。
+- **限制**：stub 仅用于观测 DB 调用次数并在代码中注明；AST 已移除；未启动真实宿主/实例。
+- **校验分类（F15 后的 check-task）**：base 3/3 均为 `target-assertion-failed`（非 environment-error），3 次 `normalizedSha256` 相同；reference 3/3 `codes=[0,0,0]` 且输出一致。

@@ -22,22 +22,25 @@
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 13, in <module>\nAssertionError: expected exactly one GET /api/health/live route, got 0\n",
-          "outputSha256": "7742c529fa9458651ba092c254b3005ae2fb3559cbfbdcf3324f16f32d1bc679"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 100, in <module>\nAssertionError: (404, b'{\"code\":\"NOT_FOUND\",\"message\":\"\\xe6\\x8e\\xa5\\xe5\\x8f\\xa3\\xe4\\xb8\\x8d\\xe5\\xad\\x98\\xe5\\x9c\\xa8\",\"fieldErrors\":{},\"requestId\":\"6cf42b936004425b921ba3817412d5c0\"}')\n",
+          "outputSha256": "8fcc7ba92a9016d2a0bd1fc02b2a82759641a450837d32993f958ea825a74fcf",
+          "normalizedSha256": "93dc23b4d308869c15a24b183856f2d1d9c3ae775a8eb9875b9438378b18715a"
         },
         {
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 13, in <module>\nAssertionError: expected exactly one GET /api/health/live route, got 0\n",
-          "outputSha256": "7742c529fa9458651ba092c254b3005ae2fb3559cbfbdcf3324f16f32d1bc679"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 100, in <module>\nAssertionError: (404, b'{\"code\":\"NOT_FOUND\",\"message\":\"\\xe6\\x8e\\xa5\\xe5\\x8f\\xa3\\xe4\\xb8\\x8d\\xe5\\xad\\x98\\xe5\\x9c\\xa8\",\"fieldErrors\":{},\"requestId\":\"52161b7f288d4043a2763ee4b7d9acac\"}')\n",
+          "outputSha256": "12ea791065466af0e1490fb5ce65d3864fe8cbc1fac213f4519565fef8fa0117",
+          "normalizedSha256": "93dc23b4d308869c15a24b183856f2d1d9c3ae775a8eb9875b9438378b18715a"
         },
         {
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 13, in <module>\nAssertionError: expected exactly one GET /api/health/live route, got 0\n",
-          "outputSha256": "7742c529fa9458651ba092c254b3005ae2fb3559cbfbdcf3324f16f32d1bc679"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 100, in <module>\nAssertionError: (404, b'{\"code\":\"NOT_FOUND\",\"message\":\"\\xe6\\x8e\\xa5\\xe5\\x8f\\xa3\\xe4\\xb8\\x8d\\xe5\\xad\\x98\\xe5\\x9c\\xa8\",\"fieldErrors\":{},\"requestId\":\"d070b9eb0329420da5ed5ccb10a3d516\"}')\n",
+          "outputSha256": "def82e7be50a9224caf63b564414482e4a06efd2bb5f8c1c736a8f8ad7a6d041",
+          "normalizedSha256": "93dc23b4d308869c15a24b183856f2d1d9c3ae775a8eb9875b9438378b18715a"
         }
       ],
       "codes": [
@@ -45,7 +48,50 @@
         1,
         1
       ],
+      "outputSha256": [
+        "8fcc7ba92a9016d2a0bd1fc02b2a82759641a450837d32993f958ea825a74fcf",
+        "12ea791065466af0e1490fb5ce65d3864fe8cbc1fac213f4519565fef8fa0117",
+        "def82e7be50a9224caf63b564414482e4a06efd2bb5f8c1c736a8f8ad7a6d041"
+      ],
+      "normalizedSha256": [
+        "93dc23b4d308869c15a24b183856f2d1d9c3ae775a8eb9875b9438378b18715a",
+        "93dc23b4d308869c15a24b183856f2d1d9c3ae775a8eb9875b9438378b18715a",
+        "93dc23b4d308869c15a24b183856f2d1d9c3ae775a8eb9875b9438378b18715a"
+      ],
       "consistent": true,
+      "failureClasses": [
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        },
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        },
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        }
+      ],
+      "validFailureClasses": [
+        "target-assertion-failed",
+        "target-symbol-missing"
+      ],
+      "normalization": {
+        "version": 1,
+        "scope": "stdout+stderr",
+        "rules": [
+          "CRLF/CR → LF",
+          "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+          "UUID → <uuid>",
+          "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+          "pid=数字 → pid=<pid>"
+        ],
+        "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
+      },
       "ok": true
     },
     "scope": {
@@ -64,23 +110,26 @@
         {
           "code": 0,
           "signal": null,
-          "stdout": "PASS: liveness endpoint\n",
+          "stdout": "PASS: /api/health/live returns 200 with zero DB access (ASGI behavior)\n",
           "stderr": "",
-          "outputSha256": "89171f393b14be09fd249a53774a7781f5f6fa813fe65b0058cbf66f5d53b816"
+          "outputSha256": "05f00228ef599cf192d8ad886a03de021b96b6a5731ab9ea4b095d99b8234180",
+          "normalizedSha256": "05f00228ef599cf192d8ad886a03de021b96b6a5731ab9ea4b095d99b8234180"
         },
         {
           "code": 0,
           "signal": null,
-          "stdout": "PASS: liveness endpoint\n",
+          "stdout": "PASS: /api/health/live returns 200 with zero DB access (ASGI behavior)\n",
           "stderr": "",
-          "outputSha256": "89171f393b14be09fd249a53774a7781f5f6fa813fe65b0058cbf66f5d53b816"
+          "outputSha256": "05f00228ef599cf192d8ad886a03de021b96b6a5731ab9ea4b095d99b8234180",
+          "normalizedSha256": "05f00228ef599cf192d8ad886a03de021b96b6a5731ab9ea4b095d99b8234180"
         },
         {
           "code": 0,
           "signal": null,
-          "stdout": "PASS: liveness endpoint\n",
+          "stdout": "PASS: /api/health/live returns 200 with zero DB access (ASGI behavior)\n",
           "stderr": "",
-          "outputSha256": "89171f393b14be09fd249a53774a7781f5f6fa813fe65b0058cbf66f5d53b816"
+          "outputSha256": "05f00228ef599cf192d8ad886a03de021b96b6a5731ab9ea4b095d99b8234180",
+          "normalizedSha256": "05f00228ef599cf192d8ad886a03de021b96b6a5731ab9ea4b095d99b8234180"
         }
       ],
       "codes": [
@@ -88,9 +137,43 @@
         0,
         0
       ],
+      "outputSha256": [
+        "05f00228ef599cf192d8ad886a03de021b96b6a5731ab9ea4b095d99b8234180",
+        "05f00228ef599cf192d8ad886a03de021b96b6a5731ab9ea4b095d99b8234180",
+        "05f00228ef599cf192d8ad886a03de021b96b6a5731ab9ea4b095d99b8234180"
+      ],
+      "normalizedSha256": [
+        "05f00228ef599cf192d8ad886a03de021b96b6a5731ab9ea4b095d99b8234180",
+        "05f00228ef599cf192d8ad886a03de021b96b6a5731ab9ea4b095d99b8234180",
+        "05f00228ef599cf192d8ad886a03de021b96b6a5731ab9ea4b095d99b8234180"
+      ],
       "consistent": true,
+      "normalization": {
+        "version": 1,
+        "scope": "stdout+stderr",
+        "rules": [
+          "CRLF/CR → LF",
+          "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+          "UUID → <uuid>",
+          "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+          "pid=数字 → pid=<pid>"
+        ],
+        "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
+      },
       "ok": true
     }
+  },
+  "normalization": {
+    "version": 1,
+    "scope": "stdout+stderr",
+    "rules": [
+      "CRLF/CR → LF",
+      "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+      "UUID → <uuid>",
+      "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+      "pid=数字 → pid=<pid>"
+    ],
+    "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
   },
   "ok": true,
   "baseSha": "e00f338b098546adc40156dc15b4b6559e19835d",

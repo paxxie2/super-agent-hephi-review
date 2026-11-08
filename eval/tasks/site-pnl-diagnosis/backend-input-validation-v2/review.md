@@ -13,3 +13,17 @@
 
 ## 未验证项
 未做真实模型运行、未做人类双评审、未验证该补丁在完整仓库工具链下的全部回归测试（hidden-test 只覆盖本任务目标断言）；污染门槛未达标（见 task.json.contamination）。
+
+
+## F14 整改（Stream D2，外部审查）
+
+- **原缺口**：hidden-test 仅 AST 检查 `ConfigDict(extra="forbid")`，未验证真实请求会被拒绝，也无法区分“形状正确但行为错误”的实现，且会误拒等价实现。
+- **现行为覆盖**：用标准库 `asyncio` 的极简 ASGI 直驱（临时目录/临时 app，无外部服务）实际发送写请求：
+  1. `POST /api/diagnoses` 带未知字段 `bogusField` → 断言 400/422、`code=VALIDATION_ERROR`、响应文本包含 `bogusField`；
+  2. `POST /api/diagnoses/{id}/scenarios` 带未知字段 → 同样断言响应指向未知字段；
+  3. 仅含已知字段（只缺必填项）的请求 → 断言不被报成“不支持的字段”。
+  等价实现（不用 ConfigDict、行为正确）可通过；AST 已完全移除，不再作为判据。
+- **reference.patch 改动（语义不变）**：原补丁用 `ConfigDict(extra="forbid")`，但 pydantic 的 `extra_forbidden` 错误 `loc` 只有 `body`，响应不携带未知字段名，无法满足 issue“错误指向未知字段”。现补丁改为 `StrictRequestModel`（`ConfigDict(extra="forbid")` + before `model_validator` 显式列出未知字段并写入中文消息），行为仍是“拒绝未知字段”，仅补齐字段名定位；补丁已重新生成。
+- **full-mode 结果**：`ok:true`；base 3/3 失败（`error response must point at the unknown field: {"fieldErrors":{"siteId":"Field required"}...}`，即 base 不报未知字段），reference 3/3 通过且退出码一致；`outside=[]`。
+- **限制**：AST 不再使用；未做变异测试、未做真实模型运行。
+- **校验分类（F15 后的 check-task）**：base 3/3 均为 `target-assertion-failed`（非 environment-error），3 次 `normalizedSha256` 相同；reference 3/3 `codes=[0,0,0]` 且输出一致。

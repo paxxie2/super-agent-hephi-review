@@ -13,3 +13,15 @@
 
 ## 未验证项
 未做真实模型运行、未做人类双评审、未验证该补丁在完整仓库工具链下的全部回归测试（hidden-test 只覆盖本任务目标断言）；污染门槛未达标（见 task.json.contamination）。
+
+
+## F14 整改（Stream D2，外部审查）
+
+- **原缺口**：hidden-test 只做 AST/正则（要求特定 `has_more` 写法），未验证 HTTP 响应中 `hasMore` 在末页/空页/offset 推移下的行为，也会误拒等价实现。
+- **现行为覆盖**：真实临时 SQLite（`init_db` + 插入 3 条 diagnosis，临时目录）上，用标准库 `asyncio` 的 ASGI 直驱 `GET /api/diagnoses`：
+  - `limit=2,offset=0` → `hasMore=true`；`offset=2`（末页剩 1 条）→ `false`；`offset=3/4`（空页/越界）→ `false`；`limit=3,offset=0`（一次取完）→ `false`；`offset=1` 推移后 → 按实际条数正确；
+  - 每个响应都按中性不变量断言 `hasMore == (offset + len(items) < total)`，不绑定实现写法；等价实现可通过对 DB/路由/服务/序列化的真实链路。
+- **reference.patch 改动**：无。
+- **full-mode 结果**：`ok:true`；base 3/3 失败（`response must expose hasMore, got keys ['items','limit','offset','total']`），reference 3/3 通过；`outside=[]`。
+- **限制**：使用临时 DB 夹具（已注明），未启动真实宿主；AST/正则已移除。
+- **校验分类（F15 后的 check-task）**：base 3/3 均为 `target-assertion-failed`（非 environment-error），3 次 `normalizedSha256` 相同；reference 3/3 `codes=[0,0,0]` 且输出一致。

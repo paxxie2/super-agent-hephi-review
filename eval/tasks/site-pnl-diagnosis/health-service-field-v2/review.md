@@ -13,3 +13,17 @@
 
 ## 未验证项
 未做真实模型运行、未做人类双评审、未验证该补丁在完整仓库工具链下的全部回归测试（hidden-test 只覆盖本任务目标断言）；污染门槛未达标（见 task.json.contamination）。
+
+
+## F14 整改（Stream D2，外部审查）
+
+- **原缺口**：hidden-test 只查固定字符串/日志调用形状，未验证 DB 故障时真实 503 响应是否泄漏内部错误文本。
+- **现行为覆盖**：用标准库 `asyncio` 的 ASGI 直驱真实请求（临时目录；无 mock/无外部服务）：
+  1. 构造真实 SQLite 故障（DB 父路径是普通文件）→ `GET /api/health` 必须返回 **503**，`status="error"`、`db="error"`；
+  2. 取得真实内部错误文本 `db_status(...)["error"]`，断言它**不出现在**响应体中，且 `detail` 是非空字符串（不指定唯一文案，等价实现可通过）；
+  3. 健康 DB 时 `GET /api/health` 返回 **200**，原有字段语义保持。
+  请求路径/响应均为真实进程内 HTTP ASGI 调用；只有 app 与临时 DB 是本地测试夹具，已在代码中注明。
+- **reference.patch 改动**：无（现有补丁已满足行为；未改语义）。
+- **full-mode 结果**：`ok:true`；base 3/3 失败（`503 must not leak the internal DB error text: "数据库不可访问: [Errno 20] Not a directory: ..."`，即 base 泄漏内部文本），reference 3/3 通过；`outside=[]`。
+- **限制**：AST 已移除；未启动真实宿主/实例、未做真实模型运行。
+- **校验分类（F15 后的 check-task）**：base 3/3 均为 `target-assertion-failed`（非 environment-error），3 次 `normalizedSha256` 相同；reference 3/3 `codes=[0,0,0]` 且输出一致。

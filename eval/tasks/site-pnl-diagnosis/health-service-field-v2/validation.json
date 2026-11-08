@@ -22,22 +22,25 @@
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 7, in <module>\nAssertionError: 503 detail must be the fixed public message\n",
-          "outputSha256": "332618b462ecb1ea87cb72ef04212691124294f42cc14706f4c56bb40cc50f8b"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 89, in <module>\nAssertionError: 503 must not leak the internal DB error text\n",
+          "outputSha256": "1893f65ee84d033875ee1106f56ea744ce3af81958d929fcfa979abcebcdfe83",
+          "normalizedSha256": "1893f65ee84d033875ee1106f56ea744ce3af81958d929fcfa979abcebcdfe83"
         },
         {
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 7, in <module>\nAssertionError: 503 detail must be the fixed public message\n",
-          "outputSha256": "332618b462ecb1ea87cb72ef04212691124294f42cc14706f4c56bb40cc50f8b"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 89, in <module>\nAssertionError: 503 must not leak the internal DB error text\n",
+          "outputSha256": "1893f65ee84d033875ee1106f56ea744ce3af81958d929fcfa979abcebcdfe83",
+          "normalizedSha256": "1893f65ee84d033875ee1106f56ea744ce3af81958d929fcfa979abcebcdfe83"
         },
         {
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 7, in <module>\nAssertionError: 503 detail must be the fixed public message\n",
-          "outputSha256": "332618b462ecb1ea87cb72ef04212691124294f42cc14706f4c56bb40cc50f8b"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 89, in <module>\nAssertionError: 503 must not leak the internal DB error text\n",
+          "outputSha256": "1893f65ee84d033875ee1106f56ea744ce3af81958d929fcfa979abcebcdfe83",
+          "normalizedSha256": "1893f65ee84d033875ee1106f56ea744ce3af81958d929fcfa979abcebcdfe83"
         }
       ],
       "codes": [
@@ -45,7 +48,50 @@
         1,
         1
       ],
+      "outputSha256": [
+        "1893f65ee84d033875ee1106f56ea744ce3af81958d929fcfa979abcebcdfe83",
+        "1893f65ee84d033875ee1106f56ea744ce3af81958d929fcfa979abcebcdfe83",
+        "1893f65ee84d033875ee1106f56ea744ce3af81958d929fcfa979abcebcdfe83"
+      ],
+      "normalizedSha256": [
+        "1893f65ee84d033875ee1106f56ea744ce3af81958d929fcfa979abcebcdfe83",
+        "1893f65ee84d033875ee1106f56ea744ce3af81958d929fcfa979abcebcdfe83",
+        "1893f65ee84d033875ee1106f56ea744ce3af81958d929fcfa979abcebcdfe83"
+      ],
       "consistent": true,
+      "failureClasses": [
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        },
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        },
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        }
+      ],
+      "validFailureClasses": [
+        "target-assertion-failed",
+        "target-symbol-missing"
+      ],
+      "normalization": {
+        "version": 1,
+        "scope": "stdout+stderr",
+        "rules": [
+          "CRLF/CR → LF",
+          "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+          "UUID → <uuid>",
+          "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+          "pid=数字 → pid=<pid>"
+        ],
+        "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
+      },
       "ok": true
     },
     "scope": {
@@ -64,23 +110,26 @@
         {
           "code": 0,
           "signal": null,
-          "stdout": "PASS: fixed 503 detail without leaking internals\n",
+          "stdout": "PASS: 503 detail does not leak internal DB error (ASGI behavior)\n",
           "stderr": "",
-          "outputSha256": "4de87e114c7cb617c2ee4936fcc1804fd5b9d7fc93644121e5ab6a2fa774fc52"
+          "outputSha256": "5df2cf9cf97c9a0539c902b6066cbc3e33a727a3843b11247cb7ed4d105d1d1e",
+          "normalizedSha256": "5df2cf9cf97c9a0539c902b6066cbc3e33a727a3843b11247cb7ed4d105d1d1e"
         },
         {
           "code": 0,
           "signal": null,
-          "stdout": "PASS: fixed 503 detail without leaking internals\n",
+          "stdout": "PASS: 503 detail does not leak internal DB error (ASGI behavior)\n",
           "stderr": "",
-          "outputSha256": "4de87e114c7cb617c2ee4936fcc1804fd5b9d7fc93644121e5ab6a2fa774fc52"
+          "outputSha256": "5df2cf9cf97c9a0539c902b6066cbc3e33a727a3843b11247cb7ed4d105d1d1e",
+          "normalizedSha256": "5df2cf9cf97c9a0539c902b6066cbc3e33a727a3843b11247cb7ed4d105d1d1e"
         },
         {
           "code": 0,
           "signal": null,
-          "stdout": "PASS: fixed 503 detail without leaking internals\n",
+          "stdout": "PASS: 503 detail does not leak internal DB error (ASGI behavior)\n",
           "stderr": "",
-          "outputSha256": "4de87e114c7cb617c2ee4936fcc1804fd5b9d7fc93644121e5ab6a2fa774fc52"
+          "outputSha256": "5df2cf9cf97c9a0539c902b6066cbc3e33a727a3843b11247cb7ed4d105d1d1e",
+          "normalizedSha256": "5df2cf9cf97c9a0539c902b6066cbc3e33a727a3843b11247cb7ed4d105d1d1e"
         }
       ],
       "codes": [
@@ -88,9 +137,43 @@
         0,
         0
       ],
+      "outputSha256": [
+        "5df2cf9cf97c9a0539c902b6066cbc3e33a727a3843b11247cb7ed4d105d1d1e",
+        "5df2cf9cf97c9a0539c902b6066cbc3e33a727a3843b11247cb7ed4d105d1d1e",
+        "5df2cf9cf97c9a0539c902b6066cbc3e33a727a3843b11247cb7ed4d105d1d1e"
+      ],
+      "normalizedSha256": [
+        "5df2cf9cf97c9a0539c902b6066cbc3e33a727a3843b11247cb7ed4d105d1d1e",
+        "5df2cf9cf97c9a0539c902b6066cbc3e33a727a3843b11247cb7ed4d105d1d1e",
+        "5df2cf9cf97c9a0539c902b6066cbc3e33a727a3843b11247cb7ed4d105d1d1e"
+      ],
       "consistent": true,
+      "normalization": {
+        "version": 1,
+        "scope": "stdout+stderr",
+        "rules": [
+          "CRLF/CR → LF",
+          "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+          "UUID → <uuid>",
+          "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+          "pid=数字 → pid=<pid>"
+        ],
+        "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
+      },
       "ok": true
     }
+  },
+  "normalization": {
+    "version": 1,
+    "scope": "stdout+stderr",
+    "rules": [
+      "CRLF/CR → LF",
+      "ISO-8601 时间戳（含纳秒/Z/时区）→ <timestamp>",
+      "UUID → <uuid>",
+      "requestId / request_id 键值（JSON/Python repr 或 key=value 形式，允许键名后引号）→ <request-id>",
+      "pid=数字 → pid=<pid>"
+    ],
+    "note": "仅剔除动态字段，其余内容逐字符比较；出现未归一的动态输出时 consistent=false（fail-closed）。原始输出不删除。"
   },
   "ok": true,
   "baseSha": "e00f338b098546adc40156dc15b4b6559e19835d",
