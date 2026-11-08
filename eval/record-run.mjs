@@ -328,6 +328,10 @@ function validateRecordSemantics(data) {
   if (known(total) && known(output) && total < output) {
     errors.push({ path: 'tokens.total', message: `total(${total}) 不能小于 output(${output})（主口径合计不可能小于分量）` })
   }
+  // N05：input 已知时独立核验 total>=input，不依赖 output 是否存在。
+  if (known(total) && known(input) && total < input) {
+    errors.push({ path: 'tokens.total', message: `total(${total}) 不能小于 input(${input})（主口径合计不可能小于分量）` })
+  }
   if (known(total) && known(input) && known(output) && total < input + output) {
     errors.push({ path: 'tokens.total', message: `total(${total}) 不能小于 input+output(${input + output})（去重关系矛盾）` })
   }
@@ -721,6 +725,7 @@ function selfTestB302(root, add) {
     ['tokens.input 类型（字符串）', data => { data.tokens.input = '1234'; return data }, 'tokens.input'],
     ['S05 tokens.total 小于 output（算术矛盾）', data => { data.tokens = { input: 4000000, output: 4000000, total: 100, cacheRead: 0 }; return data }, 'tokens.total'],
     ['S05 tokens.total 小于 input+output', data => { data.tokens = { input: 900, output: 400, total: 1000, cacheRead: 0 }; return data }, 'tokens.total'],
+    ['N05 output=null 但 total 小于已知 input', data => { data.tokens = { input: 4000000, output: null, total: 100, cacheRead: 0 }; return data }, 'tokens.total'],
     ['implementationDefect.verdict 非法 enum', data => {
       data.implementationDefect = { verdict: 'ok', notes: null }
       return data

@@ -150,6 +150,7 @@ class Run:
     acceptance_invalid: bool
     test_weakening: bool | None
     label_kappa: float | None
+    label_batch_id: str | None = None
     labelers: list[str] = field(default_factory=list)
     label_present: bool = False
     model_temperature: object = None
@@ -318,9 +319,11 @@ def record_contract_errors(record: dict) -> list[str]:
         total = tokens.get("total")
         input_tokens = tokens.get("input")
         output_tokens = tokens.get("output")
-        # S05：可确定的算术约束（至少 total<output 必拒；三值已知时 total>=input+output）。
+        # S05/N05：每个已知分量独立核验下界，不依赖另一分量是否存在。
         if _is_int(total) and _is_int(output_tokens):
             expect("tokens.total", total >= output_tokens, f"total({total}) 不能小于 output({output_tokens})")
+        if _is_int(total) and _is_int(input_tokens):
+            expect("tokens.total", total >= input_tokens, f"total({total}) 不能小于 input({input_tokens})")
         if _is_int(total) and _is_int(input_tokens) and _is_int(output_tokens):
             expect("tokens.total", total >= input_tokens + output_tokens, f"total({total}) 不能小于 input+output({input_tokens + output_tokens})")
 
@@ -466,6 +469,7 @@ def parse_run(record: dict) -> Run:
         acceptance_invalid=acceptance == "invalid",
         test_weakening=test_weakening,
         label_kappa=None if kappa is None else float(kappa),
+        label_batch_id=(label_block or {}).get("batchId"),
         labelers=list((label_block or {}).get("labelers") or []),
         label_present=label_block is not None,
         model_temperature=(model_block.get("parameters") or {}).get("temperature"),
@@ -892,16 +896,25 @@ def evaluate_frozen_conditions(run: Run) -> dict:
     if run.model != LOCKED_MODEL_ID:
         reasons.append(f"model.id={run.model!r} 与锁定 {LOCKED_MODEL_ID!r} 不符")
         invalid = True
-    hephi_values = [value for value in (run.plugin_loaded, run.plugin_candidate) if value is not None]
-    if not hephi_values:
-        reasons.append("plugin.loadedSha/candidateSha 缺失，无法核对 HEPHI 制品")
-        unverified = True
-    elif any(not _sha_matches(value, expected["hephi"]) for value in hephi_values):
-        reasons.append(f"HEPHI 制品 {hephi_values} 与 {side} 组锁定 {expected['hephi']} 不符")
-        invalid = True
-    if run.plugin_readback != "verified":
-        reasons.append(f"plugin.loadedShaReadback={run.plugin_readback!r}，未提供真实回读证据")
-        unverified = True
+    # N03：candidateSha 只是计划制品，永远不能补足实载证据；只核对 loadedSha。
+    loaded = run.plugin_loaded
+    if run.plugin_readback == "verified":
+        if loaded is None:
+            reasons.append("plugin.loadedShaReadback=verified 但 plugin.loadedSha=null（candidateSha 不能替代实载证据）")
+            invalid = True
+        elif not _sha_matches(loaded, expected["hephi"]):
+            reasons.append(f"实载 HEPHI {loaded} 与 {side} 组锁定 {expected['hephi']} 不符")
+            invalid = True
+    else:
+        if loaded is None:
+            reasons.append(f"plugin.loadedSha 缺失且 loadedShaReadback={run.plugin_readback!r}，无法核对实载制品")
+            unverified = True
+        elif not _sha_matches(loaded, expected["hephi"]):
+            reasons.append(f"实载 HEPHI {loaded} 与 {side} 组锁定 {expected['hephi']} 不符")
+            invalid = True
+        else:
+            reasons.append(f"plugin.loadedShaReadback={run.plugin_readback!r}，未提供真实回读证据")
+            unverified = True
     sa_sha = _sa_sha_from_host(run.host_version)
     if sa_sha is None:
         reasons.append("host.version 缺少 SA source SHA，无法核对锁定 SA 制品")
@@ -990,24 +1003,34 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
         pairs[key] = arms
     n_pairs = len(pairs)
 
-    # F16/S04：批次级标注一致性证据。显式 kappa<0.7 与“缺失/无定义”同等降级；
-    # 批准的降级模式（单真人/agent + AI 代标）保留 partial 标记，但不得把未知证据当通过。
-    kappa_values = [(run.run_id, run.label_kappa) for run in runs if run.label_kappa is not None]
+    # F16/S04/N04：批次级标注一致性证据。校准证据必须绑定当前 batchId；
+    # 全 human+双人+有效 kappa 才是 full；任何 agent 参与或单人 → degraded-partial；
+    # degraded-partial 必须改变机器可读结论（不得 meets_prereg）。
+    bound_label_runs = [run for run in runs if run.label_present and run.label_batch_id == run.batch]
+    foreign_label_runs = [run.run_id for run in runs if run.label_present and run.label_batch_id != run.batch]
+    kappa_values = [(run.run_id, run.label_kappa) for run in bound_label_runs if run.label_kappa is not None]
     low_kappa = [(run_id, value) for run_id, value in kappa_values if value < MIN_LABEL_KAPPA]
-    missing_kappa_runs = [run.run_id for run in runs if run.label_kappa is None]
-    labelers = sorted({labeler for run in runs for labeler in run.labelers})
+    bound_ids = {run.run_id for run in bound_label_runs}
+    missing_kappa_runs = [run.run_id for run in runs if run.run_id not in bound_ids or run.label_kappa is None]
+    labelers = sorted({labeler for run in bound_label_runs for labeler in run.labelers})
     agent_like = re.compile(r"(agent|assistant|ai|bot|delegate|model)", re.IGNORECASE)
-    calibration_mode = "full"
+    calibration_mode = "missing"
     calibration_partial_reasons: list[str] = []
-    if labelers and all(agent_like.search(labeler) for labeler in labelers):
-        calibration_mode = "degraded-partial"
-        calibration_partial_reasons.append("所有 labelers 均为 agent/AI 标识：批准记录允许描述性/部分证据，不得当完整人工一致性")
-    elif kappa_values and len(labelers) < 2:
-        calibration_mode = "degraded-partial"
-        calibration_partial_reasons.append(f"labelers 少于 2 个（{labelers}）：按已批准的单人/代标降级模式保留 partial")
+    if kappa_values:
+        agent_labelers = [labeler for labeler in labelers if agent_like.search(labeler)]
+        if agent_labelers:
+            calibration_mode = "degraded-partial"
+            calibration_partial_reasons.append(f"校准包含 agent/AI 身份（{', '.join(agent_labelers)}）：只能作为 approved partial 证据")
+        elif len(labelers) < 2:
+            calibration_mode = "degraded-partial"
+            calibration_partial_reasons.append(f"labelers 少于 2 个（{labelers}）：按已批准的单人/代标降级模式保留 partial")
+        else:
+            calibration_mode = "full"
     label_quality = {
         "checked": len(kappa_values),
         "defined_runs": len(kappa_values),
+        "bound_label_runs": len(bound_label_runs),
+        "foreign_label_runs": foreign_label_runs,
         "missing_kappa_runs": missing_kappa_runs,
         "min_kappa": min((value for _, value in kappa_values), default=None),
         "threshold": MIN_LABEL_KAPPA,
@@ -1017,6 +1040,7 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
         "calibration_mode": calibration_mode,
         "calibration_partial_reasons": calibration_partial_reasons,
         "labelers": labelers,
+        "note": "校准证据只在 label.batchId == 当前 batch 时计入；外批/缺 batchId 的证据视为缺失，不能当成全批校准。",
     }
 
     primary = {}
@@ -1084,7 +1108,13 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
         conclusion = "unacceptable_fault"
         fault_runs = ", ".join(f"`{entry['runId']}`" for entry in faults)
         conclusion_note = f"存在不可接受故障（V1–V3）：{fault_runs}；立即暂停/作废结论，证据不足状态={bool(evidence_reasons)}。"
-    if label_quality["calibration_mode"] != "full":
+    if conclusion == "meets_prereg" and label_quality["calibration_mode"] != "full":
+        conclusion = "meets_prereg_partial"
+        conclusion_note += (
+            f"（标注模式 {label_quality['calibration_mode']}：{'；'.join(label_quality['calibration_partial_reasons'])}；"
+            "正式机器结论为 meets_prereg_partial，不得当作完整 meets_prereg）"
+        )
+    if label_quality["calibration_mode"] != "full" and conclusion != "meets_prereg_partial":
         conclusion_note += f"（标注模式 {label_quality['calibration_mode']}：{'；'.join(label_quality['calibration_partial_reasons'])}）"
 
     strata = {}
@@ -1170,6 +1200,8 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
             "cost_ok": cost["within_caps"],
             "cost_evidence_insufficient": cost["evidence_insufficient"],
             "label_quality_ok": not label_quality["failed"],
+            "meets_prereg": conclusion == "meets_prereg",
+            "meets_prereg_partial": conclusion == "meets_prereg_partial",
             "calibration_mode": label_quality["calibration_mode"],
             "unacceptable_fault": bool(faults),
             "evidence_insufficient": bool(evidence_reasons),
@@ -1395,7 +1427,7 @@ def _default_condition_fields(arm: str) -> dict:
             "loadedSha": locked["hephi"],
             "loadedShaReadback": "verified",
         },
-        "label": {"batchId": "selftest-batch", "labelers": ["reviewer-a", "reviewer-b"], "kappa": 0.9},
+        "label": {"batchId": "selftest", "labelers": ["reviewer-a", "reviewer-b"], "kappa": 0.9},
     }
 
 
@@ -1494,7 +1526,7 @@ def _record(task: str, arm: str, *, batch: str = "selftest", repetition: int = 1
     if acceptance is not None:
         record["acceptanceVerdict"] = acceptance
     if kappa is not None:
-        record["label"] = {"batchId": f"{batch}-labels", "labelers": ["reviewer-a", "reviewer-b"], "kappa": kappa}
+        record["label"] = {"batchId": batch, "labelers": ["reviewer-a", "reviewer-b"], "kappa": kappa}
     return record
 
 
@@ -1912,6 +1944,59 @@ def self_test(as_json: bool = False) -> int:
            and fault_report["decision"]["evidence_insufficient"] is True
            and len(fault_report["faults"]) == 1,
            json.dumps({"conclusion": fault_report["decision"]["conclusion"], "faults": fault_report["faults"]}))
+
+    # ---- N03：verified 必须有实载 SHA；candidateSha 不得补足 ----
+    def _meets_pair_records(task="n03", **treatment_overrides):
+        control = _record(task, "legacy-system", out_of_scope=True, unrelated=True, objective="changed-to-other")
+        treatment = _record(task, "full-package", out_of_scope=False, **treatment_overrides)
+        return control, treatment
+
+    control, treatment = _meets_pair_records()
+    loaded_null = {"plugin": {**treatment["plugin"], "loadedSha": None, "candidateSha": LOCKED_ARTIFACTS["treatment"]["hephi"], "loadedShaReadback": "verified"}}
+    treatment = {**treatment, **loaded_null}
+    loaded_null_report = analyze([parse_run(control), parse_run(treatment)], {"min_pairs": 1, "n_boot": 200})
+    record("N03 反例：readback=verified + loadedSha=null + candidateSha 正确 → condition_invalid、不得 meets",
+           loaded_null_report["counts"]["condition_invalid"] == 1
+           and loaded_null_report["decision"]["conclusion"] != "meets_prereg",
+           json.dumps({"invalid": loaded_null_report["counts"]["condition_invalid"], "conclusion": loaded_null_report["decision"]["conclusion"]}))
+
+    # ---- N04：校准批次绑定 + partial 改变正式结论 ----
+    def _partial_report(label_patch):
+        control, treatment = _meets_pair_records("n04")
+        for record in (control, treatment):
+            record["label"] = {**record["label"], **label_patch}
+        return analyze([parse_run(control), parse_run(treatment)], {"min_pairs": 1, "n_boot": 200})
+    agents_only = _partial_report({"labelers": ["agent:a", "agent:b"]})
+    record("N04-1 反例：labelers 全 agent → meets_prereg_partial，不得 meets_prereg",
+           agents_only["decision"]["conclusion"] == "meets_prereg_partial"
+           and agents_only["decision"]["meets_prereg"] is False,
+           json.dumps({"conclusion": agents_only["decision"]["conclusion"], "meets": agents_only["decision"]["meets_prereg"], "mode": agents_only["label_quality"]["calibration_mode"]}))
+    single_human = _partial_report({"labelers": ["human:a"]})
+    record("N04-2 反例：仅单人 → meets_prereg_partial，不得 meets_prereg",
+           single_human["decision"]["conclusion"] == "meets_prereg_partial"
+           and single_human["decision"]["meets_prereg"] is False,
+           json.dumps({"conclusion": single_human["decision"]["conclusion"], "mode": single_human["label_quality"]["calibration_mode"]}))
+    human_agent = _partial_report({"labelers": ["human:a", "agent:b"]})
+    record("N04-3 反例：human+agent 混合 → degraded-partial，不得 meets_prereg",
+           human_agent["decision"]["conclusion"] == "meets_prereg_partial"
+           and human_agent["label_quality"]["calibration_mode"] == "degraded-partial"
+           and human_agent["decision"]["meets_prereg"] is False,
+           json.dumps({"conclusion": human_agent["decision"]["conclusion"], "mode": human_agent["label_quality"]["calibration_mode"]}))
+    foreign = _partial_report({"batchId": "another-experiment"})
+    record("N04-4 反例：label.batchId 与运行批次不符 → 校准证据缺失、evidence_insufficient",
+           foreign["label_quality"]["evidence_missing"] is True
+           and foreign["decision"]["conclusion"] == "evidence_insufficient",
+           json.dumps({"missing": foreign["label_quality"]["evidence_missing"], "foreign": foreign["label_quality"]["foreign_label_runs"], "conclusion": foreign["decision"]["conclusion"]}))
+    # 正例仍为完整 meets_prereg（双 human、batch 绑定、kappa 合格）
+    positive = _partial_report({})
+    record("N04 正例：双 human + 当前 batch + kappa=0.9 → 完整 meets_prereg",
+           positive["decision"]["conclusion"] == "meets_prereg" and positive["decision"]["meets_prereg"] is True,
+           json.dumps({"conclusion": positive["decision"]["conclusion"], "mode": positive["label_quality"]["calibration_mode"]}))
+
+    # ---- N05：output 未知时已知 input 仍独立核验 ----
+    missing_output = _record("n05", "legacy-system", total=100, tokens_in=4_000_000, tokens_out=None)
+    expect_value_error("N05 反例：output=null 但 total<input（100 < 4,000,000）→ report 拒绝",
+                       lambda: parse_run(missing_output), "tokens.total")
 
     ok = all(step["ok"] for step in steps)
     if as_json:
