@@ -77,6 +77,10 @@ def normalize_arm(arm: str) -> str:
 DEFAULT_N_BOOT = 10000
 DEFAULT_MIN_PAIRS = 67
 DEFAULT_NONINFERIORITY_MARGIN = -0.05
+# F16：标注一致性（Cohen's kappa）显式低于该阈值时，报告不得给出 meets_prereg。
+MIN_LABEL_KAPPA = 0.7
+# F04：整包组 token 缺失覆盖率超过该比例时，成本结论判“证据不足”（已知部分仍描述性展示）。
+MAX_UNKNOWN_TOKEN_RATIO = 0.2
 
 PRIMARY_METRICS = [
     # (key, 名称, 方向, 取值函数名)
@@ -124,11 +128,17 @@ class Run:
     required_complete: bool | None
     defect_free: bool | None
     delivered: bool
-    minutes: float
+    minutes: float | None
     tokens: int | None
+    tokens_input: int | None
+    tokens_output: int | None
     timeout: bool
     human_interventions: int
     task_card_ok: bool
+    task_sha256: str | None
+    base: str | None
+    acceptance_invalid: bool
+    label_kappa: float | None
     faults: list[str] = field(default_factory=list)
 
 
@@ -178,7 +188,25 @@ def parse_run(record: dict) -> Run:
     tokens = tokens_block.get("total")
     if tokens is not None and not isinstance(tokens, int):
         raise ValueError("tokens.total 必须是整数或 null")
+    tokens_input = tokens_block.get("input")
+    tokens_output = tokens_block.get("output")
+    for name, value in (("tokens.input", tokens_input), ("tokens.output", tokens_output)):
+        if value is not None and not isinstance(value, int):
+            raise ValueError(f"{name} 必须是整数或 null")
     task_card = record.get("taskCard") or {}
+    card_sha = task_card.get("sha256")
+    if card_sha is not None and not isinstance(card_sha, str):
+        raise ValueError("taskCard.sha256 必须是字符串或 null")
+    label = record.get("label") or {}
+    kappa = label.get("kappa")
+    if kappa is not None and not isinstance(kappa, (int, float)):
+        raise ValueError("label.kappa 必须是数字或 null")
+    if isinstance(kappa, bool):
+        raise ValueError("label.kappa 必须是数字或 null")
+    acceptance = record.get("acceptanceVerdict")
+    wall_clock = record.get("wallClockSeconds")
+    if wall_clock is not None and not isinstance(wall_clock, (int, float)):
+        raise ValueError("wallClockSeconds 必须是数字或 null")
     return Run(
         run_id=str(_require(record, "runId", str)),
         batch=str(_require(record, "batch", str)),
@@ -196,20 +224,26 @@ def parse_run(record: dict) -> Run:
         required_complete=required_complete,
         defect_free=defect_free,
         delivered=delivery == "ready-pr-created",
-        minutes=float(record.get("wallClockSeconds") or 0.0),
+        # F03：记录单位是秒，比较与展示统一用分钟。
+        minutes=None if wall_clock is None else float(wall_clock) / 60.0,
         tokens=tokens,
+        tokens_input=tokens_input,
+        tokens_output=tokens_output,
         timeout=bool(record.get("timeout", False)),
         human_interventions=int((record.get("humanIntervention") or {}).get("count") or 0),
         task_card_ok=task_card.get("verifiedEqual") is True,
+        task_sha256=card_sha,
+        base=record.get("base") if isinstance(record.get("base"), str) else None,
+        acceptance_invalid=acceptance == "invalid",
+        label_kappa=None if kappa is None else float(kappa),
         faults=fault_list,
     )
 
 
-def load_runs(document) -> list[Run]:
-    records = document.get("runs") if isinstance(document, dict) else document
-    if not isinstance(records, list) or not records:
-        raise ValueError("输入必须是运行记录数组，或 {\"runs\": [...]} 且非空")
-    runs = [parse_run(record) for record in records]
+def validate_runs(runs: list[Run]) -> list[Run]:
+    """F09：单批/混代/任务同一性/重复记录的输入级校验；CLI 与直接 analyze() 共用同一公共路径。"""
+    if not runs:
+        raise ValueError("输入必须包含至少一条运行记录")
     for run in runs:
         if run.arm not in ("legacy-system", "full-package", "off", "native", "staged"):
             raise ValueError(f"arm 非法：{run.arm}")
@@ -221,7 +255,35 @@ def load_runs(document) -> list[Run]:
     batches = {run.batch for run in runs}
     if len(batches) > 1:
         raise ValueError(f"多批次输入：{sorted(batches)}；本统计入口一次只接受一个 batch（防跨批虚增独立任务数/重复关联），跨批汇总不在本工具范围")
+    # F10：输入级检查全部 repetition 的 (task, arm, repetition) 唯一性；重复记录一律拒绝。
+    seen: dict[tuple[str, str, str, int], str] = {}
+    for run in runs:
+        key = (run.task_id, run.batch, normalize_arm(run.arm), run.repetition)
+        if key in seen:
+            raise ValueError(
+                f"重复运行记录：task={run.task_id} batch={run.batch} arm={run.arm} repetition={run.repetition} "
+                f"同时出现在 {seen[key]} 与 {run.run_id}；拒绝静默覆盖（含 repetition>=2）"
+            )
+        seen[key] = run.run_id
+    # F02：同一 taskId 的冻结条件（repo/base/model）必须一致；不一致即拒绝，不把人工布尔值当全部证据。
+    by_task: dict[tuple[str, str], list[Run]] = {}
+    for run in runs:
+        by_task.setdefault((run.task_id, run.batch), []).append(run)
+    for (task_id, batch), group in by_task.items():
+        for name in ("repo", "base", "model"):
+            values = {getattr(run, name) for run in group if getattr(run, name) is not None}
+            if len(values) > 1:
+                raise ValueError(
+                    f"同 taskId 的 {name} 不一致：task={task_id} batch={batch} -> {sorted(values)}；两臂不可配对"
+                )
     return runs
+
+
+def load_runs(document) -> list[Run]:
+    records = document.get("runs") if isinstance(document, dict) else document
+    if not isinstance(records, list) or not records:
+        raise ValueError("输入必须是运行记录数组，或 {\"runs\": [...]} 且非空")
+    return validate_runs([parse_run(record) for record in records])
 
 
 def outcome(run: Run, metric_key: str) -> bool | None:
@@ -297,6 +359,30 @@ def paired_tasks(runs: list[Run], repetition: int) -> dict[str, dict[str, Run]]:
     return {key: arms for key, arms in pairs.items() if "control" in arms and "treatment" in arms}
 
 
+def pair_labels_complete(arms: dict[str, Run]) -> bool:
+    """F01：M1-M3 与 G1-G3 所需标签在配对两臂都齐全才算有效配对。
+
+    主指标 M1 outOfScope 与 G3 delivered 是必填布尔；其余标签（unrelated、
+    objectiveChanged、requiredFunctionImplemented、implementationDefect）缺失即不完整。
+    """
+    required = ("unrelated", "objective_changed", "required_complete", "defect_free")
+    return all(getattr(arms[arm], name) is not None for arm in ("control", "treatment") for name in required)
+
+
+def pair_identity_problem(arms: dict[str, Run]) -> str | None:
+    """F02：两臂任务卡 sha256 必须可核对且一致；矛盾一律拒绝。"""
+    control = arms["control"].task_sha256
+    treatment = arms["treatment"].task_sha256
+    if control is not None and treatment is not None and control != treatment:
+        raise ValueError(
+            f"任务卡 sha256 矛盾：task={arms['control'].task_id} "
+            f"control={control} treatment={treatment}；两臂不是同一任务卡，拒绝配对"
+        )
+    if control is None or treatment is None:
+        return "taskCard.sha256 缺失，无法核对两臂任务卡同一性"
+    return None
+
+
 def evaluate_metric(pairs: dict[str, dict[str, Run]], metric_key: str, direction: str,
                     n_boot: int, seed: int, margin: float) -> dict:
     """返回某指标的配对统计（off/native 两臂、绝对差、bootstrap CI、精确 McNemar）。"""
@@ -318,10 +404,11 @@ def evaluate_metric(pairs: dict[str, dict[str, Run]], metric_key: str, direction
         native_success += int(native_value)
         differences.append(float(native_value) - float(off_value))
         if direction == "smaller":
-            improvement = (not off_value) and native_value
-            worsening = off_value and (not native_value)
+            # F12：越小越好指标，control true → treatment false 才是改善。
+            improvement = off_value and (not native_value)
+            worsening = (not off_value) and native_value
         else:
-            # “越大越好”：native 成功且 off 失败 = 改善；反之 = 恶化。
+            # “越大越好”：control false → treatment true = 改善；反之 = 恶化。
             improvement = (not off_value) and native_value
             worsening = off_value and (not native_value)
         improved_pairs += int(improvement)
@@ -359,48 +446,107 @@ def evaluate_metric(pairs: dict[str, dict[str, Run]], metric_key: str, direction
     return result
 
 
-def evaluate_cost(pairs: dict[str, dict[str, Run]], runs: list[Run], caps: dict) -> dict:
-    # PREREG §7：环境不可用/任务卡不一致等被排除出**效果指标**的运行，记录保留并计入成本/稳定性。
-    # 因此成本统计包含全部运行（不再按 env_available 过滤）；效果指标仍只用有效配对。
+def evaluate_cost(runs: list[Run], caps: dict) -> dict:
+    """成本/稳定性统计（F03/F04/F11/F13）。
+
+    - 成本包含全部运行（含 repetition>=2、环境不可用、acceptanceVerdict=invalid 的运行）；
+    - 耗时记录单位是秒，统一除以 60 得到分钟；
+    - token 硬门槛只在覆盖率足够时判定，覆盖率不足标“证据不足”，已知部分仍描述性展示；
+    - 极慢运行基准用全部原系统组运行（含重复/环境排除）建立同任务中位数，再统计整包组占比，
+      无基准的运行明确计缺失；
+    - 另给无 cache 口径（input+output）的描述性分位数，主口径仍是 total。
+    """
     native_runs = [run for run in runs if normalize_arm(run.arm) == "treatment"]
     off_runs = [run for run in runs if normalize_arm(run.arm) == "control"]
-    native_minutes = [run.minutes for run in native_runs]
-    off_minutes = [run.minutes for run in off_runs]
+    native_minutes = [run.minutes for run in native_runs if run.minutes is not None]
+    off_minutes = [run.minutes for run in off_runs if run.minutes is not None]
     native_tokens = [float(run.tokens) for run in native_runs if run.tokens is not None]
+    # F13：无 cache 描述口径（input+output）；两者任一未知则不参与已知部分统计。
+    native_uncached = [
+        float(run.tokens_input + run.tokens_output)  # type: ignore[operator]
+        for run in native_runs
+        if run.tokens_input is not None and run.tokens_output is not None
+    ]
+    # F04：token 完整性门禁：缺失比例超过阈值时不得判成本达标。
+    token_total = len(native_runs)
+    token_known = len(native_tokens)
+    token_unknown_ratio = ((token_total - token_known) / token_total) if token_total else None
+    token_evidence_insufficient = token_total == 0 or token_unknown_ratio is None or token_unknown_ratio > MAX_UNKNOWN_TOKEN_RATIO
     timeout_rate = (sum(1 for run in native_runs if run.timeout) / len(native_runs)) if native_runs else None
     human_median = median([float(run.human_interventions) for run in native_runs]) if native_runs else None
-    very_slow = []
-    for arms in pairs.values():
-        control = arms["control"].minutes
-        if control > 0:
-            very_slow.append(arms["treatment"].minutes > 3 * control)
-    very_slow_share = (sum(very_slow) / len(very_slow)) if very_slow else None
+
+    # F11：同任务原系统组中位数基准（全部相关成本运行，含重复与环境排除运行）。
+    control_minutes_by_task: dict[str, list[float]] = {}
+    for run in off_runs:
+        if run.minutes is not None:
+            control_minutes_by_task.setdefault(run.task_id, []).append(run.minutes)
+    baseline: dict[str, float | None] = {}
+    for task_id, values in control_minutes_by_task.items():
+        base = median(values)
+        baseline[task_id] = base if base is not None and base > 0 else None
+    determined = 0
+    slow = 0
+    missing: list[str] = []
+    for run in native_runs:
+        base = baseline.get(run.task_id)
+        if run.minutes is None or base is None:
+            missing.append(run.run_id)
+            continue
+        determined += 1
+        if run.minutes > 3 * base:
+            slow += 1
+    very_slow_share = (slow / determined) if determined else None
+
     values = {
         "native_median_minutes": median(native_minutes),
         "native_p90_minutes": p90(native_minutes),
         "off_median_minutes": median(off_minutes),
         "native_median_tokens": median(native_tokens),
         "native_p90_tokens": p90(native_tokens),
+        # F13：描述性无 cache 口径，仅展示，不参与主判定。
+        "native_median_tokens_uncached_descriptive": median(native_uncached),
+        "native_uncached_coverage": {"known": len(native_uncached), "total": token_total},
+        # F04：已知部分的覆盖率与描述值。
+        "native_token_coverage": {"known": token_known, "total": token_total, "unknown_ratio": token_unknown_ratio},
+        "native_minutes_coverage": {"known": len(native_minutes), "total": len(native_runs)},
         "native_timeout_rate": timeout_rate,
         "native_human_intervention_median": human_median,
         "native_very_slow_share": very_slow_share,
+        "native_very_slow_determined": determined,
+        "native_very_slow_missing": len(missing),
+        "native_very_slow_missing_runs": missing,
     }
+    token_ok = not token_evidence_insufficient
     checks = {
         "median_minutes_max": values["native_median_minutes"] is not None and values["native_median_minutes"] <= caps.get("median_minutes_max", math.inf),
         "p90_minutes_max": values["native_p90_minutes"] is not None and values["native_p90_minutes"] <= caps.get("p90_minutes_max", math.inf),
-        "median_tokens_max": values["native_median_tokens"] is not None and values["native_median_tokens"] <= caps.get("median_tokens_max", math.inf),
-        "p90_tokens_max": values["native_p90_tokens"] is not None and values["native_p90_tokens"] <= caps.get("p90_tokens_max", math.inf),
+        "median_tokens_max": token_ok and values["native_median_tokens"] is not None and values["native_median_tokens"] <= caps.get("median_tokens_max", math.inf),
+        "p90_tokens_max": token_ok and values["native_p90_tokens"] is not None and values["native_p90_tokens"] <= caps.get("p90_tokens_max", math.inf),
         "timeout_rate_max": values["native_timeout_rate"] is not None and values["native_timeout_rate"] <= caps.get("timeout_rate_max", math.inf),
         "human_intervention_median_max": values["native_human_intervention_median"] is not None and values["native_human_intervention_median"] <= caps.get("human_intervention_median_max", math.inf),
         "very_slow_share_max": values["native_very_slow_share"] is not None and values["native_very_slow_share"] <= caps.get("very_slow_share_max", math.inf),
     }
+    evidence_notes: list[str] = []
+    if token_evidence_insufficient:
+        ratio = "N/A" if token_unknown_ratio is None else f"{token_unknown_ratio:.3f}"
+        evidence_notes.append(
+            f"token 覆盖率不足（已知 {token_known}/{token_total}，未知比例 {ratio} > {MAX_UNKNOWN_TOKEN_RATIO}）：成本 token 结论标证据不足，已知部分仅描述"
+        )
+    if determined == 0:
+        evidence_notes.append("极慢运行占比缺少可用的同任务原系统基准：该成本结论标证据不足")
     return {
         "values": values,
         "caps": caps,
         "checks": checks,
-        "within_caps": all(checks.values()),
+        "within_caps": all(checks.values()) and not token_evidence_insufficient,
+        "evidence_insufficient": token_evidence_insufficient,
+        "evidence_notes": evidence_notes,
         "exceeded": [name for name, ok in checks.items() if not ok],
-        "note": "非常慢运行阈值为对照组同任务中位数的 3 倍（ROADMAP-95 §4 B6）",
+        "note": (
+            "非常慢运行阈值 = 全部原系统组运行（含重复、环境排除运行）的同任务中位数 ×3；"
+            "token 主口径仍是 total，无 cache 的 input+output 仅描述性展示；"
+            "token 未知覆盖率超过 20% 时成本结论标证据不足。"
+        ),
     }
 
 
@@ -428,6 +574,8 @@ def repeat_consistency(runs: list[Run], metric_key: str) -> dict:
 
 
 def analyze(runs: list[Run], config: dict | None = None) -> dict:
+    # F09：直接调用 analyze 也必须经过与 CLI 相同的单批/混代/重复/同一性校验。
+    validate_runs(runs)
     config = config or {}
     seed = int(config.get("seed", DEFAULT_SEED))
     n_boot = int(config.get("n_boot", DEFAULT_N_BOOT))
@@ -437,11 +585,43 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
     repetition = int(config.get("repetition", 1))
 
     task_card_mismatch = [run for run in runs if run.env_available and not run.task_card_ok]
-    effect_runs = [run for run in runs if run.env_available and run.task_card_ok]
+    acceptance_invalid = [run for run in runs if run.acceptance_invalid]
+    # F02：invalid 运行保留记录并计入成本（evaluate_cost 用全部 runs），但不进入效果配对。
+    effect_runs = [run for run in runs if run.env_available and run.task_card_ok and not run.acceptance_invalid]
     excluded_runs = [run for run in runs if not run.env_available]
-    pairs = paired_tasks(effect_runs, repetition)
+    structural_pairs = paired_tasks(effect_runs, repetition)
+
+    # F01/F02：有效配对 = 两臂任务卡可核对且一致 + M1-M3/G1-G3 标签齐全。
+    label_incomplete_pairs: list[dict] = []
+    identity_unresolved_pairs: list[dict] = []
+    pairs: dict[tuple[str, str], dict[str, Run]] = {}
+    for key, arms in structural_pairs.items():
+        identity_problem = pair_identity_problem(arms)
+        if identity_problem is not None:
+            identity_unresolved_pairs.append({"taskId": key[0], "batch": key[1], "reason": identity_problem})
+            continue
+        if not pair_labels_complete(arms):
+            missing = [
+                f"{arm}:{name}"
+                for arm in ("control", "treatment")
+                for name in ("unrelated", "objective_changed", "required_complete", "defect_free")
+                if getattr(arms[arm], name) is None
+            ]
+            label_incomplete_pairs.append({"taskId": key[0], "batch": key[1], "missing": missing})
+            continue
+        pairs[key] = arms
     n_pairs = len(pairs)
-    evidence_insufficient = n_pairs < min_pairs
+
+    # F16：输入已记录的标注一致性低于阈值时，不得输出 meets_prereg。
+    kappa_values = [(run.run_id, run.label_kappa) for run in runs if run.label_kappa is not None]
+    low_kappa = [(run_id, value) for run_id, value in kappa_values if value < MIN_LABEL_KAPPA]
+    label_quality = {
+        "checked": len(kappa_values),
+        "min_kappa": min((value for _, value in kappa_values), default=None),
+        "threshold": MIN_LABEL_KAPPA,
+        "failed": bool(low_kappa),
+        "failed_runs": [{"runId": run_id, "kappa": value} for run_id, value in low_kappa],
+    }
 
     primary = {}
     for key, name, direction, _ in PRIMARY_METRICS:
@@ -449,7 +629,7 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
     guardrails = {}
     for key, name, direction, _ in GUARDRAIL_METRICS:
         guardrails[key] = {"name": name, "direction": "larger is better（已归一化）", **evaluate_metric(pairs, key, direction, n_boot, seed, margin)}
-    cost = evaluate_cost(pairs, runs, caps)
+    cost = evaluate_cost(runs, caps)
     consistency = {key: repeat_consistency(effect_runs, key) for key, _, _, _ in PRIMARY_METRICS}
     faults = [
         {"runId": run.run_id, "taskId": run.task_id, "faults": run.faults}
@@ -470,9 +650,18 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
         for entry in guardrails.values() if entry.get("status") == "ok"
     ) and all(entry.get("status") == "ok" for entry in guardrails.values())
     primary_ok = len(improved_primary) >= 2 and not worsened_primary
-    if evidence_insufficient:
+    evidence_reasons: list[str] = []
+    if n_pairs < min_pairs:
+        evidence_reasons.append(f"有效已标注配对 n_pairs={n_pairs} < min_pairs={min_pairs}")
+    if label_quality["failed"]:
+        evidence_reasons.append(
+            f"标注一致性 kappa={label_quality['min_kappa']} < {MIN_LABEL_KAPPA}（外部校准失败，见 label.kappa）"
+        )
+    if cost["evidence_insufficient"]:
+        evidence_reasons.extend(cost["evidence_notes"])
+    if evidence_reasons:
         conclusion = "evidence_insufficient"
-        conclusion_note = f"配对任务数 n_pairs={n_pairs} < min_pairs={min_pairs}，按预注册口径判为“证据不足”，不下结论。"
+        conclusion_note = "证据不足，不下结论：" + "；".join(evidence_reasons)
     elif faults:
         conclusion = "unacceptable_fault"
         conclusion_note = "存在不可接受故障（V1–V3），实验结论作废，按停止规则处理。"
@@ -485,11 +674,13 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
 
     strata = {}
     for dimension in ("repo", "model", "category"):
-        values = sorted({getattr(run, dimension) for run in effect_runs})
+        values = sorted({getattr(arms["control"], dimension) for arms in pairs.values()} | {getattr(arms["treatment"], dimension) for arms in pairs.values()})
         strata[dimension] = {}
         for value in values:
-            subset = [run for run in effect_runs if getattr(run, dimension) == value]
-            subset_pairs = paired_tasks(subset, repetition)
+            subset_pairs = {
+                key: arms for key, arms in pairs.items()
+                if getattr(arms["control"], dimension) == value and getattr(arms["treatment"], dimension) == value
+            }
             entry = {"n_pairs": len(subset_pairs), "evidence_insufficient": len(subset_pairs) < min_pairs}
             if len(subset_pairs) < min_pairs:
                 entry["conclusion"] = "证据不足"
@@ -515,6 +706,10 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
             "effect_runs": len(effect_runs),
             "environment_unavailable": len(excluded_runs),
             "task_card_mismatch": len(task_card_mismatch),
+            "acceptance_invalid": len(acceptance_invalid),
+            "structural_pairs": len(structural_pairs),
+            "label_incomplete_pairs": len(label_incomplete_pairs),
+            "task_identity_unresolved_pairs": len(identity_unresolved_pairs),
             "paired_tasks": n_pairs,
             "by_arm": {arm: sum(1 for run in runs if run.arm == arm) for arm in ("legacy-system", "full-package", "off", "native", "staged")},
         },
@@ -526,6 +721,13 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
             {"runId": run.run_id, "taskId": run.task_id, "arm": run.arm}
             for run in task_card_mismatch
         ],
+        "acceptance_invalid_runs": [
+            {"runId": run.run_id, "taskId": run.task_id, "arm": run.arm, "reason": "acceptanceVerdict=invalid；保留记录并计入成本，排除效果指标"}
+            for run in acceptance_invalid
+        ],
+        "label_incomplete_pairs": label_incomplete_pairs,
+        "task_identity_unresolved_pairs": identity_unresolved_pairs,
+        "label_quality": label_quality,
         "primary": primary,
         "guardrails": guardrails,
         "cost": cost,
@@ -537,6 +739,9 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
             "worsened_primary": worsened_primary,
             "guardrails_ok": guardrails_ok,
             "cost_ok": cost["within_caps"],
+            "cost_evidence_insufficient": cost["evidence_insufficient"],
+            "label_quality_ok": not label_quality["failed"],
+            "evidence_reasons": evidence_reasons,
             "conclusion": conclusion,
             "note": conclusion_note,
             "rule": "草稿规则（PLACEHOLDER）：主指标≥2项 95% CI 显示改善且无任何主指标恶化；守护指标全部非劣效（CI 下界 > 界值）；成本未超限；无不可接受故障。",
@@ -569,7 +774,7 @@ def render_markdown(report: dict, source: str) -> str:
         "# ROADMAP-95 B6 统计报告（骨架）",
         "",
         f"- 输入：`{source}`",
-        f"- 运行数：{counts['runs']}（legacy-system={counts['by_arm']['legacy-system']}，full-package={counts['by_arm']['full-package']}，off={counts['by_arm']['off']}，native={counts['by_arm']['native']}，staged={counts['by_arm']['staged']}）；有效={counts['effect_runs']}，环境不可用={counts['environment_unavailable']}；配对任务={counts['paired_tasks']}",
+        f"- 运行数：{counts['runs']}（legacy-system={counts['by_arm']['legacy-system']}，full-package={counts['by_arm']['full-package']}，off={counts['by_arm']['off']}，native={counts['by_arm']['native']}，staged={counts['by_arm']['staged']}）；有效={counts['effect_runs']}，环境不可用={counts['environment_unavailable']}；acceptanceVerdict=invalid={counts['acceptance_invalid']}；结构配对={counts['structural_pairs']}，标签不完整={counts['label_incomplete_pairs']}，任务同一性未决={counts['task_identity_unresolved_pairs']}，有效已标注配对={counts['paired_tasks']}",
         f"- bootstrap：seed={config['seed']}，n_boot={config['n_boot']}（按任务重抽样）；非劣效界值={config['noninferiority_margin']}；min_pairs={config['min_pairs']}；分析 repetition={config['repetition']}",
         "",
         "> 本报告是**统计骨架输出**：正式结论须在 PREREG 锁定后按同一口径复核；成本上限与非劣效界值当前是占位值（见 eval/PREREG.md §5、§6）。",
@@ -617,6 +822,12 @@ def render_markdown(report: dict, source: str) -> str:
 
     cost = report["cost"]
     values = cost["values"]
+
+    def token_verdict(check_name: str) -> str:
+        if cost["evidence_insufficient"]:
+            return "证据不足（token 覆盖率不足）"
+        return "超限" if not cost["checks"][check_name] else "未超限"
+
     lines += [
         "",
         "## 3. 成本指标与上限",
@@ -625,13 +836,16 @@ def render_markdown(report: dict, source: str) -> str:
         "| --- | --- | --- | --- |",
         f"| 耗时中位数（分钟） | {fmt(values['native_median_minutes'])} | {fmt(cost['caps']['median_minutes_max'])} | {'超限' if not cost['checks']['median_minutes_max'] else '未超限'} |",
         f"| 耗时 P90（分钟） | {fmt(values['native_p90_minutes'])} | {fmt(cost['caps']['p90_minutes_max'])} | {'超限' if not cost['checks']['p90_minutes_max'] else '未超限'} |",
-        f"| token 中位数 | {fmt(values['native_median_tokens'], 0)} | {fmt(cost['caps']['median_tokens_max'], 0)} | {'超限' if not cost['checks']['median_tokens_max'] else '未超限'} |",
-        f"| token P90 | {fmt(values['native_p90_tokens'], 0)} | {fmt(cost['caps']['p90_tokens_max'], 0)} | {'超限' if not cost['checks']['p90_tokens_max'] else '未超限'} |",
+        f"| token 中位数（total，主口径） | {fmt(values['native_median_tokens'], 0)} | {fmt(cost['caps']['median_tokens_max'], 0)} | {token_verdict('median_tokens_max')} |",
+        f"| token P90（total，主口径） | {fmt(values['native_p90_tokens'], 0)} | {fmt(cost['caps']['p90_tokens_max'], 0)} | {token_verdict('p90_tokens_max')} |",
+        f"| token 覆盖率（已知/总数） | {values['native_token_coverage']['known']}/{values['native_token_coverage']['total']}（未知比例 {fmt(values['native_token_coverage']['unknown_ratio'])}） | 未知比例 ≤ {MAX_UNKNOWN_TOKEN_RATIO:.0%} | {token_verdict('median_tokens_max')} |",
+        f"| 无 cache 描述值（input+output 中位数，仅描述） | {fmt(values['native_median_tokens_uncached_descriptive'], 0)}（覆盖 {values['native_uncached_coverage']['known']}/{values['native_uncached_coverage']['total']}） | — | 不参与判定 |",
         f"| 超时率 | {fmt(values['native_timeout_rate'])} | {fmt(cost['caps']['timeout_rate_max'])} | {'超限' if not cost['checks']['timeout_rate_max'] else '未超限'} |",
         f"| 人工介入中位数 | {fmt(values['native_human_intervention_median'])} | {fmt(cost['caps']['human_intervention_median_max'])} | {'超限' if not cost['checks']['human_intervention_median_max'] else '未超限'} |",
-        f"| 极慢运行占比（>3× 对照同任务中位数） | {fmt(values['native_very_slow_share'])} | {fmt(cost['caps']['very_slow_share_max'])} | {'超限' if not cost['checks']['very_slow_share_max'] else '未超限'} |",
+        f"| 极慢运行占比（>3× 全部原系统组同任务中位数；基准缺失 {values['native_very_slow_missing']} 条） | {fmt(values['native_very_slow_share'])}（有效基准 {values['native_very_slow_determined']} 条/总 {counts['by_arm']['full-package']}） | {fmt(cost['caps']['very_slow_share_max'])} | {'超限' if not cost['checks']['very_slow_share_max'] else '未超限'} |",
         "",
-        f"总体成本状态：{'未超限' if cost['within_caps'] else '超限：' + ', '.join(cost['exceeded'])}。{cost['note']}",
+        f"总体成本状态：{'未超限' if cost['within_caps'] else '超限/证据不足：' + (', '.join(cost['exceeded']) or '无单项超限')}。{cost['note']}",
+        *([f"- 证据不足说明：{'；'.join(cost['evidence_notes'])}"] if cost.get("evidence_notes") else []),
         "",
         "## 4. 重复一致性（正式实验 20% 重复）",
         "",
@@ -663,7 +877,8 @@ def render_markdown(report: dict, source: str) -> str:
     lines += [
         "",
         f"- 主指标显著改善：{', '.join(decision['improved_primary']) or '无'}；显著恶化：{', '.join(decision['worsened_primary']) or '无'}",
-        f"- 守护指标全部非劣效：{'是' if decision['guardrails_ok'] else '否'}；成本未超限：{'是' if decision['cost_ok'] else '否'}",
+        f"- 守护指标全部非劣效：{'是' if decision['guardrails_ok'] else '否'}；成本未超限：{'是' if decision['cost_ok'] else '否'}；标注质量（kappa≥{MIN_LABEL_KAPPA}）：{'是' if decision['label_quality_ok'] else '否'}",
+        *([f"- 证据不足原因：{'；'.join(decision['evidence_reasons'])}"] if decision.get('evidence_reasons') else []),
         f"- **结论：{decision['conclusion']}** —— {decision['note']}",
         f"- 判定规则：{decision['rule']}",
         "",
@@ -676,6 +891,20 @@ def render_markdown(report: dict, source: str) -> str:
     lines.append(f"- 任务卡不一致运行：{len(report['task_card_mismatch_runs'])} 条（`taskCard.verifiedEqual != true`，不计入效果指标）。")
     for run in report["task_card_mismatch_runs"]:
         lines.append(f"  - `{run['runId']}`（{run['taskId']}/{run['arm']}）：任务卡不一致，运行无效")
+    lines.append(f"- acceptanceVerdict=invalid 运行：{len(report['acceptance_invalid_runs'])} 条（保留记录并计入成本，排除效果指标）。")
+    for run in report["acceptance_invalid_runs"]:
+        lines.append(f"  - `{run['runId']}`（{run['taskId']}/{run['arm']}）：{run['reason']}")
+    lines.append(f"- 标签不完整配对：{len(report['label_incomplete_pairs'])} 对（M1-M3/G1-G3 所需标签未全部标注，不计入有效配对）。")
+    for pair in report["label_incomplete_pairs"][:20]:
+        lines.append(f"  - `{pair['taskId']}`（batch={pair['batch']}）：缺 {', '.join(pair['missing'])}")
+    lines.append(f"- 任务同一性未决配对：{len(report['task_identity_unresolved_pairs'])} 对（缺 taskCard.sha256，无法核对）。")
+    for pair in report["task_identity_unresolved_pairs"][:20]:
+        lines.append(f"  - `{pair['taskId']}`（batch={pair['batch']}）：{pair['reason']}")
+    quality = report["label_quality"]
+    lines.append(
+        f"- 标注一致性（label.kappa）：已检查 {quality['checked']} 条，最小 kappa={fmt(quality['min_kappa'])}，阈值 {quality['threshold']}；"
+        + ("低于阈值，结论降级为证据不足。" if quality["failed"] else "未发现低于阈值的记录。")
+    )
     lines += [
         "- 本报告不构成真实宿主演收结论；样本量、成本上限、非劣效界值须由负责人按 PREREG 确认。",
         "- 分层只做描述性报告；样本不足的分层标“证据不足”，不得外推。",
@@ -716,13 +945,74 @@ def _synthetic_runs(offs: list[bool], natives: list[bool], metric: str) -> list[
     return runs
 
 
+def _record(task: str, arm: str, *, batch: str = "selftest", repetition: int = 1,
+            sha: str = "0" * 64, repo: str = "synthetic/repo", base: str = "a" * 40,
+            model: str = "deepseek-flash", seconds: float = 10.0, total: int | None = 1000,
+            tokens_in: int | None = 50, tokens_out: int | None = 50,
+            out_of_scope: bool = False, unrelated: bool | None = False, objective: str = "unchanged",
+            required: str | None = "complete", defect: str | None = "none",
+            delivery: str = "ready-pr-created", acceptance: str | None = None,
+            kappa: float | None = None) -> dict:
+    record = {
+        "runId": f"{task}-{arm}-r{repetition}",
+        "batch": batch,
+        "taskId": task,
+        "repo": repo,
+        "base": base,
+        "arm": arm,
+        "repetition": repetition,
+        "model": {"id": model},
+        "taskCard": {"sha256": sha, "verifiedEqual": True},
+        "validationEnvironment": {"status": "available"},
+        "outOfScopeChanges": {"has": out_of_scope},
+        "unrelatedChanges": {"has": unrelated},
+        "objectiveChanged": objective,
+        "requiredFunctionImplemented": required,
+        "implementationDefect": {"verdict": defect},
+        "delivery": delivery,
+        "wallClockSeconds": seconds,
+        "timeout": False,
+        "tokens": {"input": tokens_in, "output": tokens_out, "total": total},
+        "humanIntervention": {"count": 0},
+    }
+    if acceptance is not None:
+        record["acceptanceVerdict"] = acceptance
+    if kappa is not None:
+        record["label"] = {"kappa": kappa}
+    return record
+
+
+def _good_pairs(count: int, **overrides) -> list[Run]:
+    """F01/F02 正例：count 对、两臂标签齐全、任务卡 sha 一致、成本已知。"""
+    records = []
+    for index in range(count):
+        task = f"good-{index:03d}"
+        for arm in ("legacy-system", "full-package"):
+            treatment = arm == "full-package"
+            record = _record(
+                task, arm,
+                out_of_scope=not treatment, unrelated=not treatment,
+                **overrides,
+            )
+            records.append(record)
+    return [parse_run(record) for record in records]
+
+
 def self_test(as_json: bool = False) -> int:
     steps: list[dict] = []
 
     def record(name: str, ok: bool, detail: str) -> None:
         steps.append({"name": name, "ok": bool(ok), "detail": detail})
 
-    # 1) CI 与 McNemar 已知答案：6 个任务 off=事件、native=无事件（主指标改善 -1）。
+    def expect_value_error(name: str, callable_, fragment: str) -> None:
+        try:
+            callable_()
+        except ValueError as error:
+            record(name, fragment in str(error), str(error))
+        else:
+            record(name, False, "未抛出 ValueError")
+
+    # 1) CI 与 McNemar 已知答案：6 个任务 control=事件、treatment=无事件（越小越好 → 改善 -1）。
     offs = [True] * 6
     natives = [False] * 6
     runs = _synthetic_runs(offs, natives, "outOfScopeRate")
@@ -733,12 +1023,26 @@ def self_test(as_json: bool = False) -> int:
     record("CI 已知答案：6 个任务差值恒为 -1 → CI=[-1,-1]", abs(ci[0] + 1) < 1e-9 and abs(ci[1] + 1) < 1e-9, f"ci={ci}")
     record("精确 McNemar：改善6/恶化0 → p=2*0.5^6", abs(result["mcnemar"]["exact_p"] - expected_p) < 1e-9, f"p={result['mcnemar']['exact_p']} expected={expected_p}")
     record("主指标判定：显著改善", result["superiority"]["improved"] is True, json.dumps(result["superiority"]))
+    # F12：越小越好方向 true→false 计改善（不是恶化）。
+    record("F12 反例：smaller 指标 control=true/treatment=false → improved=6, worsened=0",
+           result["mcnemar"]["improved"] == 6 and result["mcnemar"]["worsened"] == 0,
+           json.dumps(result["mcnemar"]))
+    reversed_runs = _synthetic_runs([False] * 6, [True] * 6, "outOfScopeRate")
+    reversed_metric = evaluate_metric(paired_tasks(reversed_runs, 1), "outOfScopeRate", "smaller", 2000, 20261107, -0.05)
+    record("F12 反例：smaller 指标 control=false/treatment=true → improved=0, worsened=6",
+           reversed_metric["mcnemar"]["improved"] == 0 and reversed_metric["mcnemar"]["worsened"] == 6,
+           json.dumps(reversed_metric["mcnemar"]))
+    larger_runs = _synthetic_runs([False] * 6, [True] * 6, "requiredCompleteRate")
+    larger_metric = evaluate_metric(paired_tasks(larger_runs, 1), "requiredCompleteRate", "larger", 2000, 20261107, -0.05)
+    record("F12 正例：larger 指标 control=false/treatment=true → improved=6, worsened=0",
+           larger_metric["mcnemar"]["improved"] == 6 and larger_metric["mcnemar"]["worsened"] == 0,
+           json.dumps(larger_metric["mcnemar"]))
 
     # 2) McNemar 对称不一致 → p=1；单侧已知 p。
     record("精确 McNemar：5/5 → p=1", abs(mcnemar_exact(5, 5) - 1.0) < 1e-12, f"p={mcnemar_exact(5, 5)}")
     record("精确 McNemar：10/0 → p=0.001953125", abs(mcnemar_exact(10, 0) - 0.001953125) < 1e-12, f"p={mcnemar_exact(10, 0)}")
 
-    # 3) 非劣效反例：守护指标 native 全面变差 → 判 inferior。
+    # 3) 非劣效反例：守护指标 treatment 全面变差 → 判 inferior。
     guard_runs = _synthetic_runs([True] * 6, [False] * 6, "requiredCompleteRate")
     guard_result = evaluate_metric(paired_tasks(guard_runs, 1), "requiredCompleteRate", "larger", 2000, 20261107, -0.05)
     record("非劣效反例：CI 下界 -1 <= -0.05 → 非劣效不成立", guard_result["noninferiority"]["non_inferior"] is False, json.dumps(guard_result["noninferiority"]))
@@ -746,23 +1050,191 @@ def self_test(as_json: bool = False) -> int:
     equal_result = evaluate_metric(paired_tasks(equal_runs, 1), "requiredCompleteRate", "larger", 2000, 20261107, -0.05)
     record("非劣效正例：差值 0 → CI 下界 0 > -0.05", equal_result["noninferiority"]["non_inferior"] is True, json.dumps(equal_result["noninferiority"]))
 
-    # 4) 成本超限：native 耗时中位数 40 > 上限 30。
+    # 4) F03：wallClockSeconds 秒 → 分钟（60s=1min、1800s=30min、3600s=60min 与边界）。
+    time_cases = [(60, 1.0), (1800, 30.0), (3600, 60.0), (0, 0.0), (3599, 3599 / 60.0)]
+    time_mismatches = []
+    for seconds, expected in time_cases:
+        parsed = parse_run(_record("t1", "legacy-system", seconds=float(seconds)))
+        if parsed.minutes is None or abs(parsed.minutes - expected) > 1e-9:
+            time_mismatches.append((seconds, parsed.minutes, expected))
+    record("F03 单位换算：60s=1min、1800s=30min、3600s=60min 及 0/3599s 边界", not time_mismatches, json.dumps(time_mismatches))
+
+    # 5) F01：67 对但仅 1 对标签完整 → 有效配对不足，证据不足；67 对全标注 → 达标正例。
+    complete_runs = _good_pairs(67)
+    complete_report = analyze(complete_runs, {"min_pairs": 67, "n_boot": 200})
+    record("F01 正例：67 对全标注 → paired=67 且 meets_prereg",
+           complete_report["counts"]["paired_tasks"] == 67 and complete_report["decision"]["conclusion"] == "meets_prereg",
+           json.dumps({"paired": complete_report["counts"]["paired_tasks"], "conclusion": complete_report["decision"]["conclusion"]}))
+    partial_runs = _good_pairs(67)
+    for run in partial_runs:
+        if run.task_id != "good-000":
+            run.unrelated = None
+    partial_report = analyze(partial_runs, {"min_pairs": 67, "n_boot": 200})
+    record("F01 反例：67 对仅 1 对标签完整 → paired=1、标签不完整=66、evidence_insufficient",
+           partial_report["counts"]["paired_tasks"] == 1
+           and partial_report["counts"]["label_incomplete_pairs"] == 66
+           and partial_report["decision"]["conclusion"] == "evidence_insufficient",
+           json.dumps({"paired": partial_report["counts"]["paired_tasks"], "incomplete": partial_report["counts"]["label_incomplete_pairs"], "conclusion": partial_report["decision"]["conclusion"]}))
+
+    # 6) F02：任务卡 sha 矛盾拒绝；sha 缺失不计入有效配对；repo 不一致拒绝；invalid 运行保留并计入成本。
+    mismatch_records = [
+        _record("t1", "legacy-system", sha="a" * 64),
+        _record("t1", "full-package", sha="b" * 64),
+    ]
+    expect_value_error("F02 反例：两臂 taskCard.sha256 矛盾 → 拒绝配对",
+                       lambda: analyze([parse_run(item) for item in mismatch_records], {"n_boot": 200}), "sha256")
+    missing_sha_records = [
+        _record("t1", "legacy-system", sha="a" * 64),
+        _record("t1", "full-package", sha=None),
+    ]
+    missing_sha_report = analyze([parse_run(item) for item in missing_sha_records], {"min_pairs": 1, "n_boot": 200})
+    record("F02 反例：一臂缺 taskCard.sha256 → 任务同一性未决、排除效果配对",
+           missing_sha_report["counts"]["task_identity_unresolved_pairs"] == 1
+           and missing_sha_report["counts"]["paired_tasks"] == 0
+           and missing_sha_report["decision"]["conclusion"] == "evidence_insufficient",
+           json.dumps({"unresolved": missing_sha_report["counts"]["task_identity_unresolved_pairs"], "paired": missing_sha_report["counts"]["paired_tasks"]}))
+    repo_records = [
+        _record("t1", "legacy-system", repo="repo/a"),
+        _record("t1", "full-package", repo="repo/b"),
+    ]
+    expect_value_error("F02 反例：同 taskId 的 repo 不一致 → 拒绝",
+                       lambda: analyze([parse_run(item) for item in repo_records], {"n_boot": 200}), "repo")
+    invalid_runs = _good_pairs(3)
+    for run in invalid_runs:
+        if run.task_id == "good-002" and run.arm == "full-package":
+            run.acceptance_invalid = True
+    invalid_report = analyze(invalid_runs, {"min_pairs": 2, "n_boot": 200})
+    record("F02 invalid 运行：保留记录+计入成本，但排除效果指标",
+           invalid_report["counts"]["acceptance_invalid"] == 1
+           and invalid_report["counts"]["paired_tasks"] == 2
+           and invalid_report["cost"]["values"]["native_token_coverage"]["total"] == 3,
+           json.dumps({"invalid": invalid_report["counts"]["acceptance_invalid"], "paired": invalid_report["counts"]["paired_tasks"], "cost_total": invalid_report["cost"]["values"]["native_token_coverage"]["total"]}))
+
+    # 7) F04：token 覆盖率不足 → 成本证据不足、token 门槛不得判达标。
+    unknown_runs = _good_pairs(3)
+    for run in unknown_runs:
+        if run.task_id != "good-000" and run.arm == "full-package":
+            run.tokens = None
+    unknown_report = analyze(unknown_runs, {"min_pairs": 3, "n_boot": 200})
+    record("F04 反例：3 对中 2 条 token 未知（>20%）→ 成本证据不足、结论非 meets",
+           unknown_report["cost"]["evidence_insufficient"] is True
+           and unknown_report["cost"]["checks"]["median_tokens_max"] is False
+           and unknown_report["decision"]["conclusion"] == "evidence_insufficient",
+           json.dumps({"cost": unknown_report["cost"]["values"]["native_token_coverage"], "conclusion": unknown_report["decision"]["conclusion"]}))
+    boundary_runs = _good_pairs(5)
+    unknown_count = 0
+    for run in boundary_runs:
+        if run.arm == "full-package" and run.task_id == "good-004":
+            run.tokens = None
+            unknown_count += 1
+    boundary_report = analyze(boundary_runs, {"min_pairs": 5, "n_boot": 200})
+    record("F04 边界正例：整包 5 条中恰好 1 条 token 未知（未知比例=20%，未超过阈值）→ 成本不因覆盖率降级",
+           boundary_report["cost"]["evidence_insufficient"] is False and unknown_count == 1,
+           json.dumps(boundary_report["cost"]["values"]["native_token_coverage"]))
+    record("F04 正例：token 全部已知 → 成本不因覆盖率降级",
+           complete_report["cost"]["evidence_insufficient"] is False and complete_report["cost"]["within_caps"] is True,
+           json.dumps(complete_report["cost"]["values"]["native_token_coverage"]))
+
+    # 8) F09：直接 analyze 也执行单批/混代校验。
+    two_batch_records = [
+        _record("t1", "legacy-system", batch="batch-a"),
+        _record("t1", "full-package", batch="batch-a"),
+        _record("t2", "legacy-system", batch="batch-b"),
+        _record("t2", "full-package", batch="batch-b"),
+    ]
+    expect_value_error("F09 反例：直接 analyze 多批次输入 → 拒绝（不再绕过）",
+                       lambda: analyze([parse_run(item) for item in two_batch_records], {"n_boot": 200}), "多批次")
+    mixed_records = [
+        _record("t1", "off"),
+        _record("t1", "full-package"),
+    ]
+    expect_value_error("F09 反例：直接 analyze 混代 arm → 拒绝",
+                       lambda: analyze([parse_run(item) for item in mixed_records], {"n_boot": 200}), "混代")
+
+    # 9) F10：全部 repetition 的唯一性（含 rep>=2）。
+    duplicate_records = [
+        _record("t1", "legacy-system"),
+        _record("t1", "full-package"),
+        _record("t1", "legacy-system", repetition=2, out_of_scope=True),
+        _record("t1", "legacy-system", repetition=2, out_of_scope=False),
+    ]
+    expect_value_error("F10 反例：同 task/arm/repetition=2 两条冲突记录 → 拒绝而非覆盖",
+                       lambda: analyze([parse_run(item) for item in duplicate_records], {"n_boot": 200}), "重复运行记录")
+
+    # 10) F11：极慢基准用全部原系统运行（含重复）同任务中位数，整包组占比与缺失。
+    slow_records = [
+        _record("t1", "legacy-system", repetition=1, seconds=10.0),
+        _record("t1", "legacy-system", repetition=2, seconds=100.0),
+        _record("t1", "full-package", repetition=1, seconds=20.0),
+        _record("t1", "full-package", repetition=2, seconds=200.0),
+    ]
+    slow_report = analyze([parse_run(item) for item in slow_records], {"min_pairs": 1, "n_boot": 200})
+    record("F11 正例：同任务原系统中位数 55s → 整包 200s 判极慢，占比 1/2=0.5",
+           abs((slow_report["cost"]["values"]["native_very_slow_share"] or 0) - 0.5) < 1e-9
+           and slow_report["cost"]["values"]["native_very_slow_determined"] == 2,
+           json.dumps({"share": slow_report["cost"]["values"]["native_very_slow_share"], "determined": slow_report["cost"]["values"]["native_very_slow_determined"]}))
+    env_baseline_records = [
+        # 环境不可用的原系统运行仍计入同任务中位数基准：只有把它算进基准，
+        # 55s 中位数才使 200s 整包运行成为极慢（只算 available 的 100s 时阈值 300s 不慢）。
+        _record("t1", "legacy-system", seconds=100.0),
+        {**_record("t1", "legacy-system", seconds=10.0, repetition=2),
+         "validationEnvironment": {"status": "unavailable", "reason": "synthetic environment loss"}},
+        _record("t1", "full-package", seconds=200.0),
+    ]
+    env_baseline_report = analyze([parse_run(item) for item in env_baseline_records], {"min_pairs": 1, "n_boot": 200})
+    record("F11 正例：环境不可用的原系统运行计入同任务基准（55s 中位数 → 200s 判极慢）",
+           abs((env_baseline_report["cost"]["values"]["native_very_slow_share"] or 0) - 1.0) < 1e-9,
+           json.dumps({"share": env_baseline_report["cost"]["values"]["native_very_slow_share"], "baseline_control_runs": 2}))
+    missing_baseline_records = [
+        _record("t1", "legacy-system", seconds=10.0),
+        _record("t1", "full-package", seconds=20.0),
+        # t2 只有整包运行，没有同任务原系统基准。
+        _record("t2", "full-package", seconds=20.0),
+    ]
+    missing_baseline_report = analyze([parse_run(item) for item in missing_baseline_records], {"min_pairs": 1, "n_boot": 200})
+    record("F11 反例：整包运行没有同任务原系统基准 → 明确计缺失（不静默跳过）",
+           missing_baseline_report["cost"]["values"]["native_very_slow_missing"] >= 1,
+           json.dumps({"missing": missing_baseline_report["cost"]["values"]["native_very_slow_missing"], "share": missing_baseline_report["cost"]["values"]["native_very_slow_share"]}))
+
+    # 11) F13：无 cache 描述口径（input+output），total 仍为主口径。
+    cache_record = _record("t1", "full-package", total=120, tokens_in=50, tokens_out=50)
+    cache_report = analyze([parse_run(_record("t1", "legacy-system")), parse_run(cache_record)], {"min_pairs": 1, "n_boot": 200})
+    record("F13：total=120 时描述性无 cache 中位数=input+output=100，主口径 median=120",
+           cache_report["cost"]["values"]["native_median_tokens_uncached_descriptive"] == 100
+           and cache_report["cost"]["values"]["native_median_tokens"] == 120,
+           json.dumps({"uncached": cache_report["cost"]["values"]["native_median_tokens_uncached_descriptive"], "total": cache_report["cost"]["values"]["native_median_tokens"]}))
+
+    # 12) F16：显式低 kappa 不得输出 meets_prereg；合格 kappa 保持原判定。
+    low_kappa_runs = _good_pairs(3, kappa=0.1)
+    low_kappa_report = analyze(low_kappa_runs, {"min_pairs": 3, "n_boot": 200})
+    record("F16 反例：全部 label.kappa=0.1 <0.7 → 结论降级、非 meets",
+           low_kappa_report["decision"]["conclusion"] == "evidence_insufficient"
+           and low_kappa_report["decision"]["label_quality_ok"] is False
+           and "0.7" in low_kappa_report["decision"]["note"],
+           json.dumps({"conclusion": low_kappa_report["decision"]["conclusion"], "kappa": low_kappa_report["label_quality"]["min_kappa"]}))
+    good_kappa_runs = _good_pairs(3, kappa=0.9)
+    good_kappa_report = analyze(good_kappa_runs, {"min_pairs": 3, "n_boot": 200})
+    record("F16 正例：label.kappa=0.9 → 不降级、仍 meets",
+           good_kappa_report["decision"]["conclusion"] == "meets_prereg" and good_kappa_report["decision"]["label_quality_ok"] is True,
+           json.dumps({"conclusion": good_kappa_report["decision"]["conclusion"], "kappa": good_kappa_report["label_quality"]["min_kappa"]}))
+
+    # 13) 成本上限的正反例（保留原覆盖）。
     cost_runs = _synthetic_runs([True] * 6, [True] * 6, "outOfScopeRate")
     for run in cost_runs:
-        if run.arm == "native":
+        if normalize_arm(run.arm) == "treatment":
             run.minutes = 40.0
-    cost = evaluate_cost(paired_tasks(cost_runs, 1), cost_runs, {**DEFAULT_COST_CAPS, "median_minutes_max": 30.0})
+    cost = evaluate_cost(cost_runs, {**DEFAULT_COST_CAPS, "median_minutes_max": 30.0})
     record("成本超限：native 中位耗时 40 > 上限 30", cost["within_caps"] is False and "median_minutes_max" in cost["exceeded"], json.dumps(cost["exceeded"]))
     within_runs = _synthetic_runs([True] * 6, [True] * 6, "outOfScopeRate")
-    within = evaluate_cost(paired_tasks(within_runs, 1), within_runs, DEFAULT_COST_CAPS)
-    record("成本未超限：native 中位耗时 10 <= 上限 30", within["within_caps"] is True, json.dumps(within["exceeded"]))
+    within = evaluate_cost(within_runs, DEFAULT_COST_CAPS)
+    record("成本未超限：native 中位耗时 10/60 <= 上限 30", within["within_caps"] is True, json.dumps(within["exceeded"]))
 
-    # 5) 样本不足：只有 1 对 → evidence_insufficient。
+    # 14) 样本不足：只有 1 对 → evidence_insufficient。
     tiny_runs = _synthetic_runs([True], [False], "outOfScopeRate")
     tiny_report = analyze(tiny_runs, {"min_pairs": 5, "n_boot": 500})
     record("样本不足：n_pairs=1 < min_pairs=5 → evidence_insufficient", tiny_report["decision"]["conclusion"] == "evidence_insufficient", tiny_report["decision"]["conclusion"])
 
-    # 6) 输入校验：缺字段 → 清晰 ValueError（不抛栈）。
+    # 15) 输入校验：缺字段 → 清晰 ValueError（不抛栈）。
     cases = [
         ({"runId": "x", "validationEnvironment": {"status": "available"}}, "缺少字段"),
         ({"runId": "x", "batch": "b", "taskId": "t", "repo": "r", "arm": "off"}, "validationEnvironment.status"),
@@ -833,14 +1305,18 @@ def main(argv: list[str]) -> int:
             print(f"[report] --caps-json 读取失败：{error}", file=sys.stderr)
             return 2
 
-    report = analyze(runs, {
-        "seed": args.seed,
-        "n_boot": args.n_boot,
-        "min_pairs": args.min_pairs,
-        "noninferiority_margin": args.noninferiority_margin,
-        "repetition": args.repetition,
-        "cost_caps": cost_caps,
-    })
+    try:
+        report = analyze(runs, {
+            "seed": args.seed,
+            "n_boot": args.n_boot,
+            "min_pairs": args.min_pairs,
+            "noninferiority_margin": args.noninferiority_margin,
+            "repetition": args.repetition,
+            "cost_caps": cost_caps,
+        })
+    except ValueError as error:
+        print(f"[report] 分析校验失败：{error}", file=sys.stderr)
+        return 1
     output = json.dumps(report, ensure_ascii=False, indent=2) if args.format == "json" else render_markdown(report, args.input)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as handle:
