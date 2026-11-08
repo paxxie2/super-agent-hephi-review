@@ -27,3 +27,10 @@
 - **full-mode 结果**：`ok:true`；base 3/3 失败（`(404, {"code":"NOT_FOUND"...})`，即端点不存在），reference 3/3 通过；`outside=[]`。
 - **限制**：stub 仅用于观测 DB 调用次数并在代码中注明；AST 已移除；未启动真实宿主/实例。
 - **校验分类（F15 后的 check-task）**：base 3/3 均为 `target-assertion-failed`（非 environment-error），3 次 `normalizedSha256` 相同；reference 3/3 `codes=[0,0,0]` 且输出一致。
+
+## C02 确定性整改（失败输出去除随机 requestId）
+
+- **问题**：base 3 次运行的失败诊断原样打印 404 响应（含随机 `requestId`），C02 归一化严格化后三次 stderr 不一致 → `consistent=false`。
+- **整改（仅 hidden-test.sh）**：新增 `_redact/stable/stable_payload` 辅助函数；断言失败时输出剔除 `requestId`/`request_id`、排序键后的确定性摘要。断言语义不变：仍断言 liveness 返回 200、`{"status":"ok"}`、计数 stub 观测零 DB 访问，并保留对照 `/api/health` 的计数证明。
+- **证据**：base 3 次 stderr 一致（sha256 前缀 `ffc40a702e68b6e3`），reference 3 次 stdout 一致（前缀 `697919e67a655f18`）；full-mode `ok:true`，base 3×`target-assertion-failed`、consistent，reference 3×0，`outside=[]`。
+- **未改**：`issue.md`、`reference.patch`、`task.json`。

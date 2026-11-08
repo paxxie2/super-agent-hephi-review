@@ -67,6 +67,26 @@ def json_body(payload):
 def has_chinese(value):
     return isinstance(value, str) and any("\u4e00" <= ch <= "\u9fff" for ch in value)
 
+def _redact(value):
+    """Remove volatile fields (requestId) before printing diagnostics."""
+    if isinstance(value, dict):
+        return {key: _redact(item) for key, item in value.items() if key not in ("requestId", "request_id")}
+    if isinstance(value, list):
+        return [_redact(item) for item in value]
+    return value
+
+
+def stable(value):
+    """Deterministic diagnostic summary: no requestId, sorted keys."""
+    return json.dumps(_redact(value), ensure_ascii=False, sort_keys=True, default=str)
+
+
+def stable_payload(payload):
+    try:
+        return stable(json.loads(payload.decode("utf-8")))
+    except Exception:
+        return payload.decode("utf-8", "replace")
+
 import app.db as db_mod
 import app.main as main_mod
 
@@ -100,8 +120,8 @@ counts["connect"] = 0
 # liveness：恒 200、返回 ok、且零 DB 访问（sync/async 实现均可）。
 status, payload = call(app, "GET", "/api/health/live")
 data = json_body(payload)
-assert status == 200, (status, payload[:300])
-assert data.get("status") == "ok", data
+assert status == 200, (status, stable_payload(payload))
+assert data.get("status") == "ok", stable(data)
 assert counts["db_status"] == 0 and counts["connect"] == 0, f"liveness must not access DB: {counts}"
 
 print("PASS: /api/health/live returns 200 with zero DB access (ASGI behavior)")

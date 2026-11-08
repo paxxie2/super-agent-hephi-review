@@ -53,20 +53,40 @@ def call(method: str, path: str, headers: dict[str, str] | None = None, body: by
     asyncio.run(app(scope, receive, send))
     return int(captured["status"]), json.loads(captured["body"].decode())
 
+def _redact(value):
+    """Remove volatile fields (requestId) before printing diagnostics."""
+    if isinstance(value, dict):
+        return {key: _redact(item) for key, item in value.items() if key not in ("requestId", "request_id")}
+    if isinstance(value, list):
+        return [_redact(item) for item in value]
+    return value
+
+
+def stable(value):
+    """Deterministic diagnostic summary: no requestId, sorted keys."""
+    return json.dumps(_redact(value), ensure_ascii=False, sort_keys=True, default=str)
+
+
+def stable_payload(payload):
+    try:
+        return stable(json.loads(payload.decode("utf-8")))
+    except Exception:
+        return payload.decode("utf-8", "replace")
+
 
 # 404：未知 API 路由走统一错误体。
 status, payload = call("GET", "/api/definitely-not-a-route")
 assert status == 404, status
-assert payload["code"] == "NOT_FOUND", payload
+assert payload["code"] == "NOT_FOUND", stable(payload)
 # 405：已知路由的错误方法。
 status, payload = call("POST", "/api/health")
 assert status == 405, status
-assert payload["code"] == "METHOD_NOT_ALLOWED", payload
+assert payload["code"] == "METHOD_NOT_ALLOWED", stable(payload)
 # 415：真实的非 JSON Content-Type 请求（写入类 API）必须返回统一 415 错误体。
 status, payload = call("POST", "/api/diagnoses", {"Content-Type": "text/plain"}, b"not json")
-assert status == 415, (status, payload)
-assert payload["code"] == "UNSUPPORTED_MEDIA_TYPE", payload
-assert payload.get("fieldErrors") == {} and payload.get("requestId"), payload
+assert status == 415, (status, stable(payload))
+assert payload["code"] == "UNSUPPORTED_MEDIA_TYPE", stable(payload)
+assert payload.get("fieldErrors") == {} and payload.get("requestId"), stable(payload)
 # 兜底：未知 HTTP 状态（测试后注入路由）映射为 HTTP_ERROR，不影响真实路由。
 async def teapot(request: Request) -> JSONResponse:
     raise StarletteHTTPException(status_code=418, detail="teapot")
@@ -75,7 +95,7 @@ async def teapot(request: Request) -> JSONResponse:
 app.router.routes.insert(0, APIRoute("/api/f4-probe-teapot", teapot, methods=["GET"]))
 status, payload = call("GET", "/api/f4-probe-teapot")
 assert status == 418, status
-assert payload["code"] == "HTTP_ERROR", payload
+assert payload["code"] == "HTTP_ERROR", stable(payload)
 # 415 的 handler 映射同样为 UNSUPPORTED_MEDIA_TYPE（注入 415 抛出处，验证映射本身）。
 async def unsupported(request: Request) -> JSONResponse:
     raise StarletteHTTPException(status_code=415, detail="Unsupported Media Type")
@@ -83,6 +103,6 @@ async def unsupported(request: Request) -> JSONResponse:
 app.router.routes.insert(0, APIRoute("/api/f4-probe-415", unsupported, methods=["GET"]))
 status, payload = call("GET", "/api/f4-probe-415")
 assert status == 415, status
-assert payload["code"] == "UNSUPPORTED_MEDIA_TYPE", payload
+assert payload["code"] == "UNSUPPORTED_MEDIA_TYPE", stable(payload)
 print("PASS: 415/404/405/fallback HTTP error bodies")
 PY

@@ -17,3 +17,10 @@
 ## F4 整改记录（外部审查）
 原 hidden-test 只对 `main.py` 源码做 `415: "UNSUPPORTED_MEDIA_TYPE"` 文本存在性检查；F4 整改改为直接以标准库 asyncio/json 驱动真实 ASGI 应用：404（未知 API 路由）、405（错误方法）、415（真实非 JSON Content-Type 的 `POST /api/diagnoses`）与兜底（测试注入 418 路由 → `HTTP_ERROR`）都断言状态码与响应体 `code`，并额外断言 415 的 handler 映射。
 整改中发现原 reference.patch 只加错误码映射、应用没有任何真实路径会产生 415（非 JSON 请求先被 body 解析成 400/422），因此参考补丁补充了写入类 API 的 Content-Type 守卫（仍在 `allowedFiles: backend/app/main.py` 内，返回与 404/405 一致的错误体），需求点语义（415 → UNSUPPORTED_MEDIA_TYPE 统一错误体）不变、范围不变。
+
+## C02 确定性整改（失败输出去除随机 requestId）
+
+- **问题**：base 3 次运行的失败诊断原样打印错误响应体 `payload`（含随机 `requestId`），C02 归一化严格化后三次 stderr 不一致 → `consistent=false`。
+- **整改（仅 hidden-test.sh）**：新增 `stable()` 辅助函数；断言失败时打印剔除 `requestId`/`request_id`、排序键后的确定性摘要。断言语义不变：仍断言 404/405/415/418 状态码与 `NOT_FOUND`/`METHOD_NOT_ALLOWED`/`UNSUPPORTED_MEDIA_TYPE`/`HTTP_ERROR` 错误码、`fieldErrors` 与 `requestId` 存在性；只有失败消息脱敏。
+- **证据**：base 3 次 stderr 一致（sha256 前缀 `ca67c03a88e2cefc`），reference 3 次 stdout 一致（前缀 `c1265a602f5fd1d9`）；full-mode `ok:true`，base 3×`target-assertion-failed`、consistent，reference 3×0，`outside=[]`。
+- **未改**：`issue.md`、`reference.patch`、`task.json`。

@@ -22,25 +22,25 @@
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 80, in <module>\nAssertionError: error response must point at the unknown field: {\"code\":\"VALIDATION_ERROR\",\"message\":\"请求参数不合法\",\"fieldErrors\":{\"siteId\":\"Field required\"},\"requestId\":\"b1e6ce3f55a949a5baf6661e26bf9bf2\"}\n",
-          "outputSha256": "2f29d8834f0ee8d43993bd518db8994148d20c76bfa7fb2bcbdf1fc06b1456d1",
-          "normalizedSha256": "38d67e96ee96e9b0d94ff5fa1bf50fe384b021cf32dd30525bf3f911bab3feaf"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 100, in <module>\nAssertionError: error response must point at the unknown field: {\"code\": \"VALIDATION_ERROR\", \"fieldErrors\": {\"siteId\": \"Field required\"}, \"message\": \"请求参数不合法\"}\n",
+          "outputSha256": "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd",
+          "normalizedSha256": "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd"
         },
         {
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 80, in <module>\nAssertionError: error response must point at the unknown field: {\"code\":\"VALIDATION_ERROR\",\"message\":\"请求参数不合法\",\"fieldErrors\":{\"siteId\":\"Field required\"},\"requestId\":\"68620722c93a4a53bf09cccf99376df6\"}\n",
-          "outputSha256": "e3d2674bdff8a8600a3d8745f04783450c55f118ca993001126e615cedfdfcdd",
-          "normalizedSha256": "38d67e96ee96e9b0d94ff5fa1bf50fe384b021cf32dd30525bf3f911bab3feaf"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 100, in <module>\nAssertionError: error response must point at the unknown field: {\"code\": \"VALIDATION_ERROR\", \"fieldErrors\": {\"siteId\": \"Field required\"}, \"message\": \"请求参数不合法\"}\n",
+          "outputSha256": "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd",
+          "normalizedSha256": "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd"
         },
         {
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 80, in <module>\nAssertionError: error response must point at the unknown field: {\"code\":\"VALIDATION_ERROR\",\"message\":\"请求参数不合法\",\"fieldErrors\":{\"siteId\":\"Field required\"},\"requestId\":\"a3c8ed0baedf4df0af66efb0686fb422\"}\n",
-          "outputSha256": "3283af7430baf8c720e743e577b038494ac496587d628f827358c734cf89fa8d",
-          "normalizedSha256": "38d67e96ee96e9b0d94ff5fa1bf50fe384b021cf32dd30525bf3f911bab3feaf"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 100, in <module>\nAssertionError: error response must point at the unknown field: {\"code\": \"VALIDATION_ERROR\", \"fieldErrors\": {\"siteId\": \"Field required\"}, \"message\": \"请求参数不合法\"}\n",
+          "outputSha256": "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd",
+          "normalizedSha256": "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd"
         }
       ],
       "codes": [
@@ -49,14 +49,14 @@
         1
       ],
       "outputSha256": [
-        "2f29d8834f0ee8d43993bd518db8994148d20c76bfa7fb2bcbdf1fc06b1456d1",
-        "e3d2674bdff8a8600a3d8745f04783450c55f118ca993001126e615cedfdfcdd",
-        "3283af7430baf8c720e743e577b038494ac496587d628f827358c734cf89fa8d"
+        "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd",
+        "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd",
+        "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd"
       ],
       "normalizedSha256": [
-        "38d67e96ee96e9b0d94ff5fa1bf50fe384b021cf32dd30525bf3f911bab3feaf",
-        "38d67e96ee96e9b0d94ff5fa1bf50fe384b021cf32dd30525bf3f911bab3feaf",
-        "38d67e96ee96e9b0d94ff5fa1bf50fe384b021cf32dd30525bf3f911bab3feaf"
+        "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd",
+        "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd",
+        "9e7ad75ea3de1f4d5e69e80894f234c86dc3ca49c209ac2463be4f49c376e8cd"
       ],
       "consistent": true,
       "failureClasses": [
@@ -81,20 +81,27 @@
         "target-symbol-missing"
       ],
       "normalization": {
-        "version": 2,
+        "version": 3,
         "scope": "stdout+stderr",
         "rules": [
           "CRLF/CR → LF",
-          "仅 JSON/Python repr 的元数据键值（timestamp/time/requestId/request_id/traceId/trace_id/spanId/span_id/pid/loggedAt/createdAt/updatedAt/durationMs/elapsedMs）→ <dynamic>",
-          "仅行首日志时间戳（可带 []，如 [2026-11-08T12:00:00Z] 或 2026-11-08T12:00:00Z）→ <timestamp>",
+          "行首日志时间戳（可带 [] 或 \" - \" 分隔）只替换时间本身为 <log-timestamp>，保留日志级别与正文",
+          "仅日志元数据行上的关联 ID 键值（requestId/traceId/spanId/pid/correlationId 等）→ <dynamic>",
+          "AssertionError/assert/actual=/expected= 等业务断言行内的键值（含 requestId）不归一化；timestamp/createdAt 等业务值一律不归一化",
           "裸值、actual=/expected= 之后的值、普通文本中的时间/UUID 不归一化（业务结果差异必须保留）"
         ],
-        "note": "R6：仅归一化已确认的元数据上下文（JSON 键值/日志前缀）；业务断言里的时间、UUID 等真实值保留，差异会令 consistent=false。原始 stdout/stderr 与 outputSha256 不删除。"
+        "note": "C02：级别、正文与业务断言负载保留；只有已确认的日志时间戳与日志元数据上下文被归一化。原始 stdout/stderr 与 outputSha256 不删除。"
       },
       "ok": true
     },
     "scope": {
       "allowedFiles": [
+        "backend/app/schemas.py"
+      ],
+      "patchPaths": [
+        "backend/app/schemas.py"
+      ],
+      "filesystemChanges": [
         "backend/app/schemas.py"
       ],
       "changedFiles": [
@@ -148,29 +155,37 @@
       ],
       "consistent": true,
       "normalization": {
-        "version": 2,
+        "version": 3,
         "scope": "stdout+stderr",
         "rules": [
           "CRLF/CR → LF",
-          "仅 JSON/Python repr 的元数据键值（timestamp/time/requestId/request_id/traceId/trace_id/spanId/span_id/pid/loggedAt/createdAt/updatedAt/durationMs/elapsedMs）→ <dynamic>",
-          "仅行首日志时间戳（可带 []，如 [2026-11-08T12:00:00Z] 或 2026-11-08T12:00:00Z）→ <timestamp>",
+          "行首日志时间戳（可带 [] 或 \" - \" 分隔）只替换时间本身为 <log-timestamp>，保留日志级别与正文",
+          "仅日志元数据行上的关联 ID 键值（requestId/traceId/spanId/pid/correlationId 等）→ <dynamic>",
+          "AssertionError/assert/actual=/expected= 等业务断言行内的键值（含 requestId）不归一化；timestamp/createdAt 等业务值一律不归一化",
           "裸值、actual=/expected= 之后的值、普通文本中的时间/UUID 不归一化（业务结果差异必须保留）"
         ],
-        "note": "R6：仅归一化已确认的元数据上下文（JSON 键值/日志前缀）；业务断言里的时间、UUID 等真实值保留，差异会令 consistent=false。原始 stdout/stderr 与 outputSha256 不删除。"
+        "note": "C02：级别、正文与业务断言负载保留；只有已确认的日志时间戳与日志元数据上下文被归一化。原始 stdout/stderr 与 outputSha256 不删除。"
       },
       "ok": true
     }
   },
   "normalization": {
-    "version": 2,
+    "version": 3,
     "scope": "stdout+stderr",
     "rules": [
       "CRLF/CR → LF",
-      "仅 JSON/Python repr 的元数据键值（timestamp/time/requestId/request_id/traceId/trace_id/spanId/span_id/pid/loggedAt/createdAt/updatedAt/durationMs/elapsedMs）→ <dynamic>",
-      "仅行首日志时间戳（可带 []，如 [2026-11-08T12:00:00Z] 或 2026-11-08T12:00:00Z）→ <timestamp>",
+      "行首日志时间戳（可带 [] 或 \" - \" 分隔）只替换时间本身为 <log-timestamp>，保留日志级别与正文",
+      "仅日志元数据行上的关联 ID 键值（requestId/traceId/spanId/pid/correlationId 等）→ <dynamic>",
+      "AssertionError/assert/actual=/expected= 等业务断言行内的键值（含 requestId）不归一化；timestamp/createdAt 等业务值一律不归一化",
       "裸值、actual=/expected= 之后的值、普通文本中的时间/UUID 不归一化（业务结果差异必须保留）"
     ],
-    "note": "R6：仅归一化已确认的元数据上下文（JSON 键值/日志前缀）；业务断言里的时间、UUID 等真实值保留，差异会令 consistent=false。原始 stdout/stderr 与 outputSha256 不删除。"
+    "note": "C02：级别、正文与业务断言负载保留；只有已确认的日志时间戳与日志元数据上下文被归一化。原始 stdout/stderr 与 outputSha256 不删除。"
+  },
+  "isolation": {
+    "reset": "每次运行前 git reset --hard <baseSha> + git clean -ffdx；base 与 reference 阶段彼此隔离，重复运行也重置",
+    "baseReset": true,
+    "referenceReset": true,
+    "repeatsReset": true
   },
   "ok": true,
   "baseSha": "e00f338b098546adc40156dc15b4b6559e19835d",

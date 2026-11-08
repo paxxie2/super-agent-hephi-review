@@ -67,6 +67,26 @@ def json_body(payload):
 def has_chinese(value):
     return isinstance(value, str) and any("\u4e00" <= ch <= "\u9fff" for ch in value)
 
+def _redact(value):
+    """Remove volatile fields (requestId) before printing diagnostics."""
+    if isinstance(value, dict):
+        return {key: _redact(item) for key, item in value.items() if key not in ("requestId", "request_id")}
+    if isinstance(value, list):
+        return [_redact(item) for item in value]
+    return value
+
+
+def stable(value):
+    """Deterministic diagnostic summary: no requestId, sorted keys."""
+    return json.dumps(_redact(value), ensure_ascii=False, sort_keys=True, default=str)
+
+
+def stable_payload(payload):
+    try:
+        return stable(json.loads(payload.decode("utf-8")))
+    except Exception:
+        return payload.decode("utf-8", "replace")
+
 tmp = Path(tempfile.mkdtemp(prefix="bi-v2-"))
 app = create_app(settings_for(tmp / "unused.db"), seed=False)
 
@@ -79,9 +99,9 @@ status, payload = call(
 )
 text = payload.decode("utf-8", "replace")
 data = json_body(payload)
-assert status in (400, 422), (status, text[:300])
-assert "bogusField" in text, f"error response must point at the unknown field: {text[:300]}"
-assert data.get("code") == "VALIDATION_ERROR", data
+assert status in (400, 422), (status, stable_payload(payload))
+assert "bogusField" in text, f"error response must point at the unknown field: {stable_payload(payload)}"
+assert data.get("code") == "VALIDATION_ERROR", stable(data)
 
 # AT 2: ScenarioRequest 拒绝未知字段（写请求；Idempotency-Key 必备）。
 status2, payload2 = call(
@@ -91,9 +111,9 @@ status2, payload2 = call(
 )
 text2 = payload2.decode("utf-8", "replace")
 data2 = json_body(payload2)
-assert status2 in (400, 422), (status2, text2[:300])
-assert "bogusField" in text2, f"scenario error response must point at the unknown field: {text2[:300]}"
-assert data2.get("code") == "VALIDATION_ERROR", data2
+assert status2 in (400, 422), (status2, stable_payload(payload2))
+assert "bogusField" in text2, f"scenario error response must point at the unknown field: {stable_payload(payload2)}"
+assert data2.get("code") == "VALIDATION_ERROR", stable(data2)
 
 # AT 3: 已知字段的请求不被“未知字段”误拒（只缺必填字段，不触发未知字段错误）。
 status3, payload3 = call(
@@ -102,8 +122,8 @@ status3, payload3 = call(
     headers={"Idempotency-Key": "bi-v2-3"},
 )
 text3 = payload3.decode("utf-8", "replace")
-assert status3 in (400, 422), (status3, text3[:300])
-assert "不支持的字段" not in text3 and "bogus" not in text3, f"known fields must not be reported as unknown: {text3[:300]}"
+assert status3 in (400, 422), (status3, stable_payload(payload3))
+assert "不支持的字段" not in text3 and "bogus" not in text3, f"known fields must not be reported as unknown: {stable_payload(payload3)}"
 
 print("PASS: unknown request fields are rejected and named (ASGI behavior)")
 PY

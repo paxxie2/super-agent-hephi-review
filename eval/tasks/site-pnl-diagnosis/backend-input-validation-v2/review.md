@@ -27,3 +27,10 @@
 - **full-mode 结果**：`ok:true`；base 3/3 失败（`error response must point at the unknown field: {"fieldErrors":{"siteId":"Field required"}...}`，即 base 不报未知字段），reference 3/3 通过且退出码一致；`outside=[]`。
 - **限制**：AST 不再使用；未做变异测试、未做真实模型运行。
 - **校验分类（F15 后的 check-task）**：base 3/3 均为 `target-assertion-failed`（非 environment-error），3 次 `normalizedSha256` 相同；reference 3/3 `codes=[0,0,0]` 且输出一致。
+
+## C02 确定性整改（失败输出去除随机 requestId）
+
+- **问题**：base 3 次运行的失败诊断原样打印响应 JSON（含随机 `requestId`），C02 归一化严格化后三次 stderr 不一致 → `consistent=false`。
+- **整改（仅 hidden-test.sh）**：新增 `_redact/stable/stable_payload` 辅助函数；断言失败时先解析响应 JSON、递归剔除 `requestId`/`request_id`、排序键后输出确定性摘要。断言语义不变：仍断言状态码、`code=VALIDATION_ERROR`、响应点名未知字段、已知字段不被误报；只在**失败消息**中替换为脱敏摘要（`requestId` 存在性等结构断言保留）。
+- **证据**：同一 base 3 次运行 stderr 完全一致（sha256 前缀 `2b336c9f38f7dfba`），reference 3 次通过 stdout 一致（前缀 `d4ea34fe9989d1b5`）；full-mode `ok:true`，base 3×`target-assertion-failed`、consistent，reference 3×0，`outside=[]`。
+- **未改**：`issue.md`、`reference.patch`、`task.json`（需求与补丁不动）。

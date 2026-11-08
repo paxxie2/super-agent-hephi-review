@@ -22,22 +22,25 @@
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 64, in <module>\nAssertionError: (400, {'code': 'VALIDATION_ERROR', 'message': '请求参数不合法', 'fieldErrors': {'header.Idempotency-Key': 'Field required', 'body': 'Input should be a valid dictionary or object to extract fields from'}, 'requestId': '0dbc9c0148bf4d7e8535f47ab43d581d'})\n",
-          "outputSha256": "d2f6eb8178c40dde16a02a13ab1b62448d64383c19095de3e8f8a91631b03743"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 84, in <module>\nAssertionError: (400, '{\"code\": \"VALIDATION_ERROR\", \"fieldErrors\": {\"body\": \"Input should be a valid dictionary or object to extract fields from\", \"header.Idempotency-Key\": \"Field required\"}, \"message\": \"请求参数不合法\"}')\n",
+          "outputSha256": "3da3733a5ee9f9c9f233ca1dbe6700e934ed2fdba4afda453e4458cf8bb61a5f",
+          "normalizedSha256": "3da3733a5ee9f9c9f233ca1dbe6700e934ed2fdba4afda453e4458cf8bb61a5f"
         },
         {
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 64, in <module>\nAssertionError: (400, {'code': 'VALIDATION_ERROR', 'message': '请求参数不合法', 'fieldErrors': {'header.Idempotency-Key': 'Field required', 'body': 'Input should be a valid dictionary or object to extract fields from'}, 'requestId': '35a2d52762264f659d1b3827e612dff3'})\n",
-          "outputSha256": "a9e0d011a9dbd4461e371b189033edc1b6690b7aac6669ae574de500ef1e8bc0"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 84, in <module>\nAssertionError: (400, '{\"code\": \"VALIDATION_ERROR\", \"fieldErrors\": {\"body\": \"Input should be a valid dictionary or object to extract fields from\", \"header.Idempotency-Key\": \"Field required\"}, \"message\": \"请求参数不合法\"}')\n",
+          "outputSha256": "3da3733a5ee9f9c9f233ca1dbe6700e934ed2fdba4afda453e4458cf8bb61a5f",
+          "normalizedSha256": "3da3733a5ee9f9c9f233ca1dbe6700e934ed2fdba4afda453e4458cf8bb61a5f"
         },
         {
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 64, in <module>\nAssertionError: (400, {'code': 'VALIDATION_ERROR', 'message': '请求参数不合法', 'fieldErrors': {'header.Idempotency-Key': 'Field required', 'body': 'Input should be a valid dictionary or object to extract fields from'}, 'requestId': 'b1a6c0baa73f4a86a6cf7b9e8b936b26'})\n",
-          "outputSha256": "b9cdca2114480415836fc02254ec981bb7e187182a5379aaa32e43c7d4fe4e9c"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 84, in <module>\nAssertionError: (400, '{\"code\": \"VALIDATION_ERROR\", \"fieldErrors\": {\"body\": \"Input should be a valid dictionary or object to extract fields from\", \"header.Idempotency-Key\": \"Field required\"}, \"message\": \"请求参数不合法\"}')\n",
+          "outputSha256": "3da3733a5ee9f9c9f233ca1dbe6700e934ed2fdba4afda453e4458cf8bb61a5f",
+          "normalizedSha256": "3da3733a5ee9f9c9f233ca1dbe6700e934ed2fdba4afda453e4458cf8bb61a5f"
         }
       ],
       "codes": [
@@ -45,11 +48,60 @@
         1,
         1
       ],
+      "outputSha256": [
+        "3da3733a5ee9f9c9f233ca1dbe6700e934ed2fdba4afda453e4458cf8bb61a5f",
+        "3da3733a5ee9f9c9f233ca1dbe6700e934ed2fdba4afda453e4458cf8bb61a5f",
+        "3da3733a5ee9f9c9f233ca1dbe6700e934ed2fdba4afda453e4458cf8bb61a5f"
+      ],
+      "normalizedSha256": [
+        "3da3733a5ee9f9c9f233ca1dbe6700e934ed2fdba4afda453e4458cf8bb61a5f",
+        "3da3733a5ee9f9c9f233ca1dbe6700e934ed2fdba4afda453e4458cf8bb61a5f",
+        "3da3733a5ee9f9c9f233ca1dbe6700e934ed2fdba4afda453e4458cf8bb61a5f"
+      ],
       "consistent": true,
+      "failureClasses": [
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        },
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        },
+        {
+          "code": 1,
+          "failureClass": "target-assertion-failed",
+          "reason": "assertion marker: /AssertionError/"
+        }
+      ],
+      "validFailureClasses": [
+        "target-assertion-failed",
+        "target-symbol-missing"
+      ],
+      "normalization": {
+        "version": 3,
+        "scope": "stdout+stderr",
+        "rules": [
+          "CRLF/CR → LF",
+          "行首日志时间戳（可带 [] 或 \" - \" 分隔）只替换时间本身为 <log-timestamp>，保留日志级别与正文",
+          "仅日志元数据行上的关联 ID 键值（requestId/traceId/spanId/pid/correlationId 等）→ <dynamic>",
+          "AssertionError/assert/actual=/expected= 等业务断言行内的键值（含 requestId）不归一化；timestamp/createdAt 等业务值一律不归一化",
+          "裸值、actual=/expected= 之后的值、普通文本中的时间/UUID 不归一化（业务结果差异必须保留）"
+        ],
+        "note": "C02：级别、正文与业务断言负载保留；只有已确认的日志时间戳与日志元数据上下文被归一化。原始 stdout/stderr 与 outputSha256 不删除。"
+      },
       "ok": true
     },
     "scope": {
       "allowedFiles": [
+        "backend/app/main.py"
+      ],
+      "patchPaths": [
+        "backend/app/main.py"
+      ],
+      "filesystemChanges": [
         "backend/app/main.py"
       ],
       "changedFiles": [
@@ -66,21 +118,24 @@
           "signal": null,
           "stdout": "PASS: 415/404/405/fallback HTTP error bodies\n",
           "stderr": "",
-          "outputSha256": "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1"
+          "outputSha256": "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1",
+          "normalizedSha256": "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1"
         },
         {
           "code": 0,
           "signal": null,
           "stdout": "PASS: 415/404/405/fallback HTTP error bodies\n",
           "stderr": "",
-          "outputSha256": "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1"
+          "outputSha256": "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1",
+          "normalizedSha256": "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1"
         },
         {
           "code": 0,
           "signal": null,
           "stdout": "PASS: 415/404/405/fallback HTTP error bodies\n",
           "stderr": "",
-          "outputSha256": "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1"
+          "outputSha256": "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1",
+          "normalizedSha256": "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1"
         }
       ],
       "codes": [
@@ -88,9 +143,49 @@
         0,
         0
       ],
+      "outputSha256": [
+        "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1",
+        "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1",
+        "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1"
+      ],
+      "normalizedSha256": [
+        "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1",
+        "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1",
+        "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1"
+      ],
       "consistent": true,
+      "normalization": {
+        "version": 3,
+        "scope": "stdout+stderr",
+        "rules": [
+          "CRLF/CR → LF",
+          "行首日志时间戳（可带 [] 或 \" - \" 分隔）只替换时间本身为 <log-timestamp>，保留日志级别与正文",
+          "仅日志元数据行上的关联 ID 键值（requestId/traceId/spanId/pid/correlationId 等）→ <dynamic>",
+          "AssertionError/assert/actual=/expected= 等业务断言行内的键值（含 requestId）不归一化；timestamp/createdAt 等业务值一律不归一化",
+          "裸值、actual=/expected= 之后的值、普通文本中的时间/UUID 不归一化（业务结果差异必须保留）"
+        ],
+        "note": "C02：级别、正文与业务断言负载保留；只有已确认的日志时间戳与日志元数据上下文被归一化。原始 stdout/stderr 与 outputSha256 不删除。"
+      },
       "ok": true
     }
+  },
+  "normalization": {
+    "version": 3,
+    "scope": "stdout+stderr",
+    "rules": [
+      "CRLF/CR → LF",
+      "行首日志时间戳（可带 [] 或 \" - \" 分隔）只替换时间本身为 <log-timestamp>，保留日志级别与正文",
+      "仅日志元数据行上的关联 ID 键值（requestId/traceId/spanId/pid/correlationId 等）→ <dynamic>",
+      "AssertionError/assert/actual=/expected= 等业务断言行内的键值（含 requestId）不归一化；timestamp/createdAt 等业务值一律不归一化",
+      "裸值、actual=/expected= 之后的值、普通文本中的时间/UUID 不归一化（业务结果差异必须保留）"
+    ],
+    "note": "C02：级别、正文与业务断言负载保留；只有已确认的日志时间戳与日志元数据上下文被归一化。原始 stdout/stderr 与 outputSha256 不删除。"
+  },
+  "isolation": {
+    "reset": "每次运行前 git reset --hard <baseSha> + git clean -ffdx；base 与 reference 阶段彼此隔离，重复运行也重置",
+    "baseReset": true,
+    "referenceReset": true,
+    "repeatsReset": true
   },
   "ok": true,
   "baseSha": "e00f338b098546adc40156dc15b4b6559e19835d",
