@@ -1,9 +1,13 @@
 {
   "schemaVersion": 1,
   "taskId": "restore-health-service-id-v3",
-  "checkedAt": "2026-11-08T16:07:16Z",
+  "checkedAt": "2026-11-08T18:47:37Z",
+  "f14Strengthened": true,
   "checker": "agent-assisted (not an independent human reviewer)",
   "repoPathUsed": "/Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis",
+  "command": "node eval/check-task.mjs eval/tasks/site-pnl-diagnosis/restore-health-service-id-v3 --repo /Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis --json",
+  "mode": "full (not dry-run)",
+  "repeats": 3,
   "base": {
     "sha": "e00f338b098546adc40156dc15b4b6559e19835d",
     "resolvedCommit": "e00f338b098546adc40156dc15b4b6559e19835d",
@@ -15,32 +19,58 @@
       1,
       1
     ],
+    "failureClasses": [
+      {
+        "code": 1,
+        "failureClass": "target-assertion-failed",
+        "reason": "assertion marker: /AssertionError/"
+      },
+      {
+        "code": 1,
+        "failureClass": "target-assertion-failed",
+        "reason": "assertion marker: /AssertionError/"
+      },
+      {
+        "code": 1,
+        "failureClass": "target-assertion-failed",
+        "reason": "assertion marker: /AssertionError/"
+      }
+    ],
+    "validFailureClasses": [
+      "target-assertion-failed",
+      "target-symbol-missing"
+    ],
     "consistent": true,
+    "normalizedSha256": [
+      "7ab5a9ca63b2c4e3f5b6158bddba3e54374d85e0cc8fc03e6bdafb340eba0f7f",
+      "7ab5a9ca63b2c4e3f5b6158bddba3e54374d85e0cc8fc03e6bdafb340eba0f7f",
+      "7ab5a9ca63b2c4e3f5b6158bddba3e54374d85e0cc8fc03e6bdafb340eba0f7f"
+    ],
     "ok": true,
     "runs": [
       {
         "code": 1,
         "signal": null,
-        "outputSha256": "d63e419d69571036aa956031656fffe925f2102589a6356537221608b52a6f92",
-        "stdoutTail": ""
+        "outputSha256": "7ab5a9ca63b2c4e3f5b6158bddba3e54374d85e0cc8fc03e6bdafb340eba0f7f",
+        "stdoutTail": "",
+        "stderrTail": "Traceback (most recent call last):\n  File \"<stdin>\", line 25, in <module>\nAssertionError\n"
       },
       {
         "code": 1,
         "signal": null,
-        "outputSha256": "d63e419d69571036aa956031656fffe925f2102589a6356537221608b52a6f92",
-        "stdoutTail": ""
+        "outputSha256": "7ab5a9ca63b2c4e3f5b6158bddba3e54374d85e0cc8fc03e6bdafb340eba0f7f",
+        "stdoutTail": "",
+        "stderrTail": "Traceback (most recent call last):\n  File \"<stdin>\", line 25, in <module>\nAssertionError\n"
       },
       {
         "code": 1,
         "signal": null,
-        "outputSha256": "d63e419d69571036aa956031656fffe925f2102589a6356537221608b52a6f92",
-        "stdoutTail": ""
+        "outputSha256": "7ab5a9ca63b2c4e3f5b6158bddba3e54374d85e0cc8fc03e6bdafb340eba0f7f",
+        "stdoutTail": "",
+        "stderrTail": "Traceback (most recent call last):\n  File \"<stdin>\", line 25, in <module>\nAssertionError\n"
       }
     ]
   },
-  "command": "node eval/check-task.mjs eval/tasks/site-pnl-diagnosis/restore-health-service-id-v3 --repo /Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis --json",
-  "mode": "full (not dry-run)",
-  "repeats": 3,
   "reference": {
     "expected": "pass",
     "exitCodes": [
@@ -49,25 +79,30 @@
       0
     ],
     "consistent": true,
+    "normalizedSha256": [
+      "256eb4e5a58c4f3ab582ee5ab0a2fd801c2ed2b980c4c3b3a190e9657282a984",
+      "256eb4e5a58c4f3ab582ee5ab0a2fd801c2ed2b980c4c3b3a190e9657282a984",
+      "256eb4e5a58c4f3ab582ee5ab0a2fd801c2ed2b980c4c3b3a190e9657282a984"
+    ],
     "ok": true,
     "runs": [
       {
         "code": 0,
         "signal": null,
-        "outputSha256": "17c02df43ae7a70c4c67e91d02ba93614652f8349b5011cf8b9e14489b63ea21",
-        "stdoutTail": "PASS: Health exposes a structured ServiceInfo service descriptor on 200/503\n"
+        "outputSha256": "256eb4e5a58c4f3ab582ee5ab0a2fd801c2ed2b980c4c3b3a190e9657282a984",
+        "stdoutTail": "PASS: structured service descriptor is correct on real 200/503 payloads\n"
       },
       {
         "code": 0,
         "signal": null,
-        "outputSha256": "17c02df43ae7a70c4c67e91d02ba93614652f8349b5011cf8b9e14489b63ea21",
-        "stdoutTail": "PASS: Health exposes a structured ServiceInfo service descriptor on 200/503\n"
+        "outputSha256": "256eb4e5a58c4f3ab582ee5ab0a2fd801c2ed2b980c4c3b3a190e9657282a984",
+        "stdoutTail": "PASS: structured service descriptor is correct on real 200/503 payloads\n"
       },
       {
         "code": 0,
         "signal": null,
-        "outputSha256": "17c02df43ae7a70c4c67e91d02ba93614652f8349b5011cf8b9e14489b63ea21",
-        "stdoutTail": "PASS: Health exposes a structured ServiceInfo service descriptor on 200/503\n"
+        "outputSha256": "256eb4e5a58c4f3ab582ee5ab0a2fd801c2ed2b980c4c3b3a190e9657282a984",
+        "stdoutTail": "PASS: structured service descriptor is correct on real 200/503 payloads\n"
       }
     ]
   },
@@ -94,12 +129,21 @@
     },
     "offline": true,
     "hiddenTestStdlibOnly": true,
-    "note": "隐藏测试只用 Python 标准库（ast/os/sys/subprocess/types/importlib），不联网、不安装依赖；check-task 完整模式在临时 git worktree 中执行。"
+    "hiddenTestSha256": "af1e0a2dd78bbf206b4c9f6c99b2f2c289182eb50f6a5d18d0df99c43d1a935f",
+    "note": "隐藏测试只使用 Python 标准库与仓库自身已安装依赖（ASGI 直驱，不联网、不安装、不起实例）；check-task 完整模式在临时 git worktree 中执行。"
+  },
+  "f14": {
+    "coreProof": [
+      "运行时证明：注入 constants.SERVICE_ID 后，真实 ASGI 200/503 的 payload.service == {id: 注入值, version: APP_VERSION}",
+      "结构：200 的 service 恰好含 id/version 两个键；503 同结构同值",
+      "ServiceInfo 模型与 main.py 构造点源码断言降为辅助"
+    ],
+    "auxiliaryAssertionsNote": "AST/哈希/git-ignore/stub 断言只作为辅助，不单独作为核心需求证明。",
+    "referencePatchChanged": "未修改"
   },
   "overallOk": true,
   "limitations": [
     "评审为 agent 辅助，没有第二名独立人类评审。",
-    "隐藏测试只校验本卡目标断言（源码/AST/配置行为），不证明整仓回归测试通过。",
-    "变体卡的需求点为本次新设计；base 是真实历史提交，reference.patch 是实现该变体的参考修复（非历史 commit 的 diff）。"
+    "隐藏测试在临时 worktree 中真实执行 SQLite/文件/ASGI，但不是真实服务实例或真实网络 HTTP。"
   ]
 }

@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "taskId": "settings-dead-branches",
+  "checkedAt": "2026-11-08T18:47:37Z",
+  "f14Strengthened": true,
+  "checker": "agent-assisted (not an independent human reviewer)",
+  "repoPathUsed": "/Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis",
+  "command": "node eval/check-task.mjs eval/tasks/site-pnl-diagnosis/settings-dead-branches --repo /Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis --json",
+  "mode": "full (not dry-run)",
+  "repeats": 3,
+  "base": {
+    "sha": "8d2ec5858ed3071eae598e5afb30b069807ce598",
+    "resolvedCommit": "8d2ec5858ed3071eae598e5afb30b069807ce598",
+    "gitCatFileType": "commit",
+    "existsInLocalClone": true,
+    "expected": "fail",
+    "exitCodes": [
+      1,
+      1,
+      1
+    ],
+    "failureClasses": [
+      {
+        "code": 1,
+        "failureClass": "target-assertion-failed",
+        "reason": "assertion marker: /AssertionError/"
+      },
+      {
+        "code": 1,
+        "failureClass": "target-assertion-failed",
+        "reason": "assertion marker: /AssertionError/"
+      },
+      {
+        "code": 1,
+        "failureClass": "target-assertion-failed",
+        "reason": "assertion marker: /AssertionError/"
+      }
+    ],
+    "validFailureClasses": [
+      "target-assertion-failed",
+      "target-symbol-missing"
+    ],
+    "consistent": true,
+    "normalizedSha256": [
+      "85411af0b61371c0156ae6b72c90a0454b7ba8e10f7c3081d71968ec3f58ec89",
+      "85411af0b61371c0156ae6b72c90a0454b7ba8e10f7c3081d71968ec3f58ec89",
+      "85411af0b61371c0156ae6b72c90a0454b7ba8e10f7c3081d71968ec3f58ec89"
+    ],
+    "ok": true,
+    "runs": [
+      {
+        "code": 1,
+        "signal": null,
+        "outputSha256": "85411af0b61371c0156ae6b72c90a0454b7ba8e10f7c3081d71968ec3f58ec89",
+        "stdoutTail": "",
+        "stderrTail": "Traceback (most recent call last):\n  File \"<stdin>\", line 82, in <module>\nAssertionError\n"
+      },
+      {
+        "code": 1,
+        "signal": null,
+        "outputSha256": "85411af0b61371c0156ae6b72c90a0454b7ba8e10f7c3081d71968ec3f58ec89",
+        "stdoutTail": "",
+        "stderrTail": "Traceback (most recent call last):\n  File \"<stdin>\", line 82, in <module>\nAssertionError\n"
+      },
+      {
+        "code": 1,
+        "signal": null,
+        "outputSha256": "85411af0b61371c0156ae6b72c90a0454b7ba8e10f7c3081d71968ec3f58ec89",
+        "stdoutTail": "",
+        "stderrTail": "Traceback (most recent call last):\n  File \"<stdin>\", line 82, in <module>\nAssertionError\n"
+      }
+    ]
+  },
+  "reference": {
+    "expected": "pass",
+    "exitCodes": [
+      0,
+      0,
+      0
+    ],
+    "consistent": true,
+    "normalizedSha256": [
+      "8f7f352524641e54cb07a133c6d5d93e964ad19f695242349e2e74b48148e547",
+      "8f7f352524641e54cb07a133c6d5d93e964ad19f695242349e2e74b48148e547",
+      "8f7f352524641e54cb07a133c6d5d93e964ad19f695242349e2e74b48148e547"
+    ],
+    "ok": true,
+    "runs": [
+      {
+        "code": 0,
+        "signal": null,
+        "outputSha256": "8f7f352524641e54cb07a133c6d5d93e964ad19f695242349e2e74b48148e547",
+        "stdoutTail": "PASS: dead branch removed and real .env loading/priority/fallback behaviour verified\n"
+      },
+      {
+        "code": 0,
+        "signal": null,
+        "outputSha256": "8f7f352524641e54cb07a133c6d5d93e964ad19f695242349e2e74b48148e547",
+        "stdoutTail": "PASS: dead branch removed and real .env loading/priority/fallback behaviour verified\n"
+      },
+      {
+        "code": 0,
+        "signal": null,
+        "outputSha256": "8f7f352524641e54cb07a133c6d5d93e964ad19f695242349e2e74b48148e547",
+        "stdoutTail": "PASS: dead branch removed and real .env loading/priority/fallback behaviour verified\n"
+      }
+    ]
+  },
+  "scope": {
+    "allowedFiles": [
+      "backend/app/settings.py"
+    ],
+    "changedFiles": [
+      "backend/app/settings.py"
+    ],
+    "outside": [],
+    "ok": true
+  },
+  "environment": {
+    "declared": {
+      "offline": true,
+      "lockfile": "uv.lock",
+      "found": true,
+      "ok": true
+    },
+    "offline": true,
+    "hiddenTestStdlibOnly": true,
+    "hiddenTestSha256": "91ecbda14795bc0dc6bb771a0e410e046e3a9ada7e67a0dcf851b0c4d4707bf6",
+    "note": "隐藏测试只使用 Python 标准库与仓库自身已安装依赖（ASGI 直驱，不联网、不安装、不起实例）；check-task 完整模式在临时 git worktree 中执行。"
+  },
+  "f14": {
+    "coreProof": [
+      "真实 .env 文件：SITE_PNL_ENV_FILE 指向真实文件时 from_env 真实加载生效",
+      "回退：未设置该变量时读取仓库根真实 .env；默认值（host/port/db_path）不变",
+      "优先级：已存在的进程环境变量优先于 .env（override=False）；显式文件优先于仓库 .env",
+      "AST 死分支删除断言降为辅助"
+    ],
+    "auxiliaryAssertionsNote": "AST/哈希/git-ignore/stub 断言只作为辅助，不单独作为核心需求证明。",
+    "referencePatchChanged": "未修改"
+  },
+  "overallOk": true,
+  "limitations": [
+    "评审为 agent 辅助，没有第二名独立人类评审。",
+    "隐藏测试在临时 worktree 中真实执行 SQLite/文件/ASGI，但不是真实服务实例或真实网络 HTTP。"
+  ]
+}
