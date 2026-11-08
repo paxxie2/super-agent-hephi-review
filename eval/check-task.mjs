@@ -86,15 +86,16 @@ function sameIds(list) {
 // 已确认的动态字段；原始 stdout/stderr 与 outputSha256 始终保留，归一化规则写入
 // validation 报告（顶层 normalization 及 checks.{base,reference}.normalization）。
 const NORMALIZATION = {
-  version: 2,
+  version: 3,
   scope: 'stdout+stderr',
   rules: [
     'CRLF/CR → LF',
-    '仅关联 ID 键值（requestId/traceId/spanId/pid/correlationId 等）→ <dynamic>；timestamp/createdAt 等可能是业务值，不归一化',
-    '仅行首日志时间戳（可带 []，如 [2026-11-08T12:00:00Z] 或 2026-11-08T12:00:00Z）→ <timestamp>',
+    '行首日志时间戳（可带 [] 或 " - " 分隔）只替换时间本身为 <log-timestamp>，保留日志级别与正文',
+    '仅日志元数据行上的关联 ID 键值（requestId/traceId/spanId/pid/correlationId 等）→ <dynamic>',
+    'AssertionError/assert/actual=/expected= 等业务断言行内的键值（含 requestId）不归一化；timestamp/createdAt 等业务值一律不归一化',
     '裸值、actual=/expected= 之后的值、普通文本中的时间/UUID 不归一化（业务结果差异必须保留）',
   ],
-  note: 'R6：仅归一化已确认的元数据上下文（JSON 键值/日志前缀）；业务断言里的时间、UUID 等真实值保留，差异会令 consistent=false。原始 stdout/stderr 与 outputSha256 不删除。',
+  note: 'C02：级别、正文与业务断言负载保留；只有已确认的日志时间戳与日志元数据上下文被归一化。原始 stdout/stderr 与 outputSha256 不删除。',
 }
 
 const METADATA_KEYS = 'requestId|request_id|traceId|trace_id|spanId|span_id|pid|correlationId|correlation_id|x-request-id'
@@ -102,14 +103,26 @@ const METADATA_KV_PATTERN = new RegExp(
   `(["'](?:${METADATA_KEYS})["']\\s*:\\s*)(?:"[^"]*"|'[^']*'|[^,\\s}\\]]+)`,
   'gi',
 )
-const LOG_PREFIX_TIMESTAMP_PATTERN = /^(\[\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\]\s*\[(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL)\])|^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\s+-\s+(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL)\s+-)/gm
+const LOG_LEVELS = 'TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL'
+// C02：只替换时间部分，保留 [LEVEL] 与正文；两种日志前缀均支持。
+const LOG_TIMESTAMP_BRACKET_PATTERN = new RegExp(
+  `^(\\[\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?\\])(\\s*\\[(?:${LOG_LEVELS})\\])`,
+  'gm',
+)
+const LOG_TIMESTAMP_DASH_PATTERN = new RegExp(
+  `^(\\d{4}-\\d{2}-\\d{2}[T ]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?)(\\s+-\\s+(?:${LOG_LEVELS})\\s+-)`,
+  'gm',
+)
+// C02：业务断言行内的键值不归一化（requestId 也可能出现在断言负载里）。
+const ASSERTION_CONTEXT_PATTERN = /AssertionError|\bactual\s*=|\bexpected\s*=|^\s*(?:assert|FAIL(?:ED)?)\b/mi
 
 function normalizeStableOutput(text) {
   let out = String(text ?? '').replace(/\r\n?/g, '\n')
-  // T10-02：仅归一化关联 ID 键值；timestamp/createdAt 等可能是业务值，不再归一化。
-  out = out.replace(METADATA_KV_PATTERN, '$1<dynamic>')
-  // T10-02：仅结构化日志行（[ts] [LEVEL] 或 ts - LEVEL -）的时间戳归一化；裸日期行保留。
-  out = out.replace(LOG_PREFIX_TIMESTAMP_PATTERN, '<log-timestamp>')
+  // C02：只替换日志行首的时间字段，保留级别与正文。
+  out = out.replace(LOG_TIMESTAMP_BRACKET_PATTERN, '<log-timestamp>$2')
+  out = out.replace(LOG_TIMESTAMP_DASH_PATTERN, '<log-timestamp>$2')
+  // C02：关联 ID 只在日志元数据行归一；断言上下文（AssertionError/actual=/expected= 等）原样保留。
+  out = out.split('\n').map(line => ASSERTION_CONTEXT_PATTERN.test(line) ? line : line.replace(METADATA_KV_PATTERN, '$1<dynamic>')).join('\n')
   return out
 }
 
@@ -133,6 +146,79 @@ const CANNOT_IMPORT_PATTERN = /ImportError: cannot import name ['"]([^'"]+)['"] 
 const TYPE_ERROR_SIGNATURE_PATTERN = /TypeError: \S+?\(\) (?:takes|got|missing|accepts)[^\n]*argument/i
 const ATTRIBUTE_ERROR_PATTERN = /AttributeError: (?:module )?['"]?([A-Za-z0-9_.]+)['"]? has no attribute/
 const FILE_MISSING_PATTERN = /FileNotFoundError|No such file or directory/i
+
+/**
+ * C01：目标来源索引。分类不能只看调用帧（参数绑定失败时被调函数没有帧）：
+ * 先取异常抛出的符号/函数名，再在 worktree 源码里找出它的定义文件；定义在 worktree
+ * 才算任务目标缺失，只在 site-packages/外部依赖里才归环境错误。
+ */
+function buildSourceIndex(worktree) {
+  const functions = new Map()
+  const classes = new Map()
+  const modules = new Map()
+  const add = (map, name, rel) => {
+    if (!map.has(name)) map.set(name, [])
+    map.get(name).push(rel)
+  }
+  const walk = (dir, relBase) => {
+    let entries
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      if (entry.name === '.git' || entry.name === 'node_modules' || entry.name === '__pycache__') continue
+      const rel = relBase ? `${relBase}/${entry.name}` : entry.name
+      if (entry.isDirectory()) { walk(join(dir, entry.name), rel); continue }
+      if (!entry.isFile()) continue
+      if (entry.name.endsWith('.py')) {
+        const module = entry.name.slice(0, -3)
+        if (module !== '__init__') add(modules, module, rel)
+        let text
+        try { text = readFileSync(join(dir, entry.name), 'utf8') } catch { text = '' }
+        for (const match of text.matchAll(/^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(/gm)) add(functions, match[1], rel)
+        // 类与其方法（按缩进归属，覆盖 class Client: def __init__ 这类定义）。
+        const lines = text.split('\n')
+        let current = null
+        let classIndent = -1
+        for (const line of lines) {
+          const classMatch = /^(\s*)class\s+([A-Za-z_]\w*)(?:\s*\([^)]*\))?\s*:/.exec(line)
+          if (classMatch) {
+            current = classMatch[2]
+            classIndent = classMatch[1].length
+            if (!classes.has(current)) classes.set(current, { files: new Set(), methods: new Set() })
+            classes.get(current).files.add(rel)
+            continue
+          }
+          if (current === null) continue
+          const indent = /^(\s*)/.exec(line)[1].length
+          if (line.trim() !== '' && indent <= classIndent && /^\s*(?:@|def|async\s+def|class)\b/.test(line)) {
+            current = null
+            continue
+          }
+          const method = /^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(/.exec(line)
+          if (method) classes.get(current).methods.add(method[1])
+        }
+      }
+    }
+  }
+  walk(worktree, '')
+  return { functions, classes, modules }
+}
+
+/** AttributeError 的模块/对象来源与属性名；TypeError 等的被调函数名。 */
+function exceptionSymbols(text) {
+  const symbols = []
+  for (const match of text.matchAll(/(?:TypeError|ValueError|AttributeError|KeyError|IndexError|RuntimeError|NotImplementedError|NameError):\s*([A-Za-z_][\w.]*)\(\)/g)) {
+    symbols.push({ kind: 'call', name: match[1] })
+  }
+  for (const match of text.matchAll(/AttributeError: (?:module )?['"]?([A-Za-z_][\w.]*)['"]?(?: object)? has no attribute ['"]?(\w+)/g)) {
+    symbols.push({ kind: 'attribute', name: match[1], attribute: match[2] })
+  }
+  for (const match of text.matchAll(/NameError: name ['"](\w+)['"] is not defined/g)) {
+    symbols.push({ kind: 'name', name: match[1] })
+  }
+  const cannotImport = CANNOT_IMPORT_PATTERN.exec(text)
+  if (cannotImport) symbols.push({ kind: 'cannot-import', name: cannotImport[1], module: cannotImport[2] })
+  return symbols
+}
 
 /** 由 worktree 顶层 Python 包（含 __init__.py 的目录）与 allowedFiles 首段推导本地包根。 */
 function localPackageRoots(worktree, allowedFiles = []) {
@@ -194,32 +280,59 @@ function moduleBelongsToTarget(moduleName, roots) {
  * R5：归属核对。只有模块/符号属于任务目标（worktree 内 traceback 帧，或缺失模块名匹配
  * 本地包根）才算 target-symbol-missing；第三方依赖/客户端版本问题返回 null（归 environment-error）。
  */
-function targetSymbolEvidence(text, { worktree, packageRoots = [] } = {}) {
-  const frames = worktreeFramePaths(text, worktree)
+function targetSymbolEvidence(text, { worktree, packageRoots = [], sourceIndex = null } = {}) {
+  const index = sourceIndex ?? (worktree ? buildSourceIndex(worktree) : { functions: new Map(), classes: new Map(), modules: new Map() })
+  // 1) 共享的本地包根证据（ModuleNotFoundError/ImportError 的模块名）。
   for (const name of text.matchAll(IMPORT_ERROR_PATTERN)) {
     if (moduleBelongsToTarget(name[1], packageRoots)) {
       return { reason: `missing module '${name[1]}' matches local package root (${packageRoots.join(', ')})` }
     }
   }
-  // T10-01：本地调用帧不能证明失败符号属于任务目标——调用者在 worktree 只说明"谁调的"，
-  // 不说明"错在哪"。归属只看失败符号自身：来源模块必须是本地包根，或异常抛出点（最内层帧）
-  // 位于 worktree 内；否则一律 environment-error（fail-closed）。
-  const innermostFrame = innermostFramePath(text)
-  const raisedInWorktree = innermostFrame !== null && pathInsideWorktree(innermostFrame, worktree)
-  const cannotImport = CANNOT_IMPORT_PATTERN.exec(text)
-  if (cannotImport && moduleBelongsToTarget(cannotImport[2], packageRoots)) {
-    return { reason: `cannot import name '${cannotImport[1]}' from target module '${cannotImport[2]}' (module is a local package root)` }
+  for (const symbol of exceptionSymbols(text)) {
+    if (symbol.kind === 'cannot-import') {
+      if (moduleBelongsToTarget(symbol.module, packageRoots) || index.modules.has(String(symbol.module).split('.').pop())) {
+        return { reason: `cannot import name '${symbol.name}' from local module '${symbol.module}'` }
+      }
+      continue
+    }
+    if (symbol.kind === 'call') {
+      const parts = String(symbol.name).split('.')
+      if (parts.length >= 2) {
+        const className = parts[parts.length - 2]
+        const methodName = parts[parts.length - 1]
+        const klass = index.classes.get(className)
+        if (klass) {
+          const files = [...klass.files].join(', ')
+          return { reason: `exception raised by ${symbol.name}() whose class ${className} is defined in the task worktree (${files}); target implementation` }
+        }
+        // 形如 thirdparty.Client.__init__ 的类不在 worktree：不是任务目标。
+        continue
+      }
+      const defined = index.functions.get(symbol.name)
+      if (defined) {
+        return { reason: `exception raised by function '${symbol.name}()' whose definition is in the task worktree (${defined.join(', ')})` }
+      }
+      continue
+    }
+    if (symbol.kind === 'attribute') {
+      const moduleName = String(symbol.name).split('.').pop()
+      if (index.modules.has(moduleName)) {
+        return { reason: `AttributeError on module '${symbol.name}' loaded from the task worktree (${index.modules.get(moduleName).join(', ')}); missing attribute '${symbol.attribute}'` }
+      }
+      const klass = index.classes.get(moduleName)
+      if (klass) {
+        return { reason: `AttributeError on class '${symbol.name}' defined in the task worktree (${[...klass.files].join(', ')}); missing attribute '${symbol.attribute}'` }
+      }
+      continue
+    }
+    if (symbol.kind === 'name') {
+      const defined = index.functions.get(symbol.name) ?? index.classes.get(symbol.name)
+      if (defined) return { reason: `NameError for '${symbol.name}' whose definition is in the task worktree` }
+    }
   }
-  // 签名/参数不匹配：仅当异常抛出点本身位于任务 worktree（目标函数在本地实现）才算目标缺失；
-  // 第三方库内部抛出的 TypeError（即使调用者在本地）是环境/依赖问题。
-  if (TYPE_ERROR_SIGNATURE_PATTERN.test(text) && raisedInWorktree) {
-    return { reason: 'TypeError signature mismatch raised inside the task worktree (target implementation)' }
-  }
-  const attributeError = ATTRIBUTE_ERROR_PATTERN.exec(text)
-  if (attributeError && moduleBelongsToTarget(attributeError[1], packageRoots)) {
-    return { reason: `AttributeError on target module '${attributeError[1]}' (local package root)` }
-  }
-  if (worktree && normalizePathForCompare(text).includes(normalizePathForCompare(worktree).replace(/\/+$/, '')) && FILE_MISSING_PATTERN.test(text)) {
+  // 2) 只有异常抛出点本身在 worktree 且目标符号无法归属时，不能凭空判目标：
+  //    保持 fail-closed（环境错误）；调用者帧不作为归属依据。
+  if (worktree && FILE_MISSING_PATTERN.test(text) && normalizePathForCompare(text).includes(normalizePathForCompare(worktree).replace(/\/+$/, ''))) {
     return { reason: 'FileNotFoundError/ENOENT on task checkout path (target file/symbol missing)' }
   }
   return null
@@ -513,6 +626,49 @@ export function validateStructure(taskDir) {
 
 // ---- 完整校验 -------------------------------------------------------------
 
+/**
+ * C04：reference.patch 自己声明的路径全集（diff --git a/... b/...）。范围检查不能只信
+ * git diff/ls-files：被 .gitignore 忽略的新文件不会出现在那里。
+ */
+function patchDeclaredPaths(referencePath) {
+  const text = readFileSync(referencePath, 'utf8')
+  const paths = new Set()
+  for (const match of text.matchAll(/^diff --git a\/(.+?) b\/(.+?)$/gm)) {
+    for (const raw of [match[1], match[2]]) {
+      const path = raw.replace(/^"|"$/g, '')
+      if (path && path !== '/dev/null') paths.add(path)
+    }
+  }
+  return [...paths].sort()
+}
+
+/** C04：工作树文件树快照（含 ignored/untracked；跳 .git），用于发现补丁带来的实际文件变化。 */
+function snapshotWorktree(worktree, limit = 20000) {
+  const files = new Map()
+  const walk = (dir, relBase) => {
+    let entries
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      if (entry.name === '.git') continue
+      const rel = relBase ? `${relBase}/${entry.name}` : entry.name
+      if (entry.isDirectory()) { walk(join(dir, entry.name), rel); continue }
+      if (!entry.isFile()) continue
+      if (files.size >= limit) return
+      try { files.set(rel, sha256(readFileSync(join(dir, entry.name)))) } catch { /* unreadable */ }
+    }
+  }
+  walk(worktree, '')
+  return files.size >= limit ? null : files
+}
+
+function changedFromSnapshots(before, after) {
+  if (before === null || after === null) return []
+  const changed = new Set()
+  for (const [path, hash] of after) if (before.get(path) !== hash) changed.add(path)
+  for (const path of before.keys()) if (!after.has(path)) changed.add(path)
+  return [...changed]
+}
+
 function runHidden(worktree, hiddenPath, timeoutMs) {
   const result = spawnSync('sh', [hiddenPath], {
     cwd: worktree,
@@ -534,8 +690,21 @@ function runHidden(worktree, hiddenPath, timeoutMs) {
   }
 }
 
-function repeatRuns(worktree, hiddenPath, repeats, timeoutMs) {
-  return Array.from({ length: repeats }, () => runHidden(worktree, hiddenPath, timeoutMs))
+/**
+ * C03：每次运行（含重复运行）都从干净 base 开始，避免 base/reference 或前一次运行留在
+ * checkout 里的状态影响下一次结论。只重置临时 worktree，不碰主仓库。
+ */
+function resetCheckout(worktree, baseSha) {
+  git(worktree, ['reset', '--hard', '--quiet', baseSha])
+  git(worktree, ['clean', '-ffdxq'])
+}
+
+function repeatRuns(worktree, hiddenPath, repeats, timeoutMs, baseSha) {
+  if (baseSha === undefined) return Array.from({ length: repeats }, () => runHidden(worktree, hiddenPath, timeoutMs))
+  return Array.from({ length: repeats }, () => {
+    resetCheckout(worktree, baseSha)
+    return runHidden(worktree, hiddenPath, timeoutMs)
+  })
 }
 
 export function validateTask(options) {
@@ -548,6 +717,12 @@ export function validateTask(options) {
     checks: {},
     // 归一化规则随 validation 报告落盘，便于复核“三次一致”比较的到底是什么。
     normalization: NORMALIZATION,
+    isolation: {
+      reset: '每次运行前 git reset --hard <baseSha> + git clean -ffdx；base 与 reference 阶段彼此隔离，重复运行也重置',
+      baseReset: true,
+      referenceReset: true,
+      repeatsReset: true,
+    },
     ok: false,
   }
   if (!structure.ok) return report
@@ -600,11 +775,12 @@ export function validateTask(options) {
       // 未声明 environment 或 offline=false：保持旧行为（不拦截），在报告中标记声明状态。
       report.checks.environment = { offline: false, declared: structure.environment !== null, ok: true }
     }
-    // R5：本地包根用于 base 失败归属核对（缺失模块是否属于任务目标）。
+    // R5/C01：本地包根 + 目标源码索引用于 base 失败归属核对。
     const packageRoots = localPackageRoots(worktree, task.allowedFiles)
-    const baseRuns = repeatRuns(worktree, hiddenPath, repeats, timeoutMs)
+    const sourceIndex = buildSourceIndex(worktree)
+    const baseRuns = repeatRuns(worktree, hiddenPath, repeats, timeoutMs, baseSha)
     const baseConsistency = summarizeConsistency(baseRuns)
-    const failureClasses = baseRuns.map((run) => ({ code: run.code, ...classifyBaseFailure(run, { worktree, packageRoots }) }))
+    const failureClasses = baseRuns.map((run) => ({ code: run.code, ...classifyBaseFailure(run, { worktree, packageRoots, sourceIndex }) }))
     const invalidFailure = failureClasses.find((entry) => !VALID_BASE_FAILURE_CLASSES.has(entry.failureClass))
     report.checks.base = {
       expected: 'fail',
@@ -624,6 +800,10 @@ export function validateTask(options) {
         : {}),
     }
 
+    // C03：reference 阶段从干净 base 开始，不能复用 base 测试留下的状态。
+    resetCheckout(worktree, baseSha)
+    // C04：补丁应用前记录完整文件树（含 ignored 文件），应用后对比。
+    const treeBefore = snapshotWorktree(worktree)
     const untrackedBefore = new Set(
       git(worktree, ['ls-files', '--others', '--exclude-standard']).split('\n').filter(Boolean),
     )
@@ -642,30 +822,56 @@ export function validateTask(options) {
         .split('\n')
         .filter(Boolean)
       const newUntracked = untrackedAfter.filter((file) => !untrackedBefore.has(file))
+      const treeAfter = snapshotWorktree(worktree)
+      const filesystemChanges = changedFromSnapshots(treeBefore, treeAfter)
+      const patchPaths = patchDeclaredPaths(referencePath)
       const changedFiles = [
         ...new Set([
           ...git(worktree, ['diff', '--name-only', '--no-renames']).split('\n').filter(Boolean),
           ...newUntracked,
+          ...filesystemChanges,
+          ...patchPaths,
         ]),
-      ]
+      ].sort()
       const outside = changedFiles.filter((file) => !task.allowedFiles.some((glob) => matchesGlob(file, glob)))
       report.checks.scope = {
         allowedFiles: task.allowedFiles,
+        patchPaths,
+        filesystemChanges,
         changedFiles,
         outside,
         ok: outside.length === 0,
       }
-      const referenceRuns = repeatRuns(worktree, hiddenPath, repeats, timeoutMs)
-      const referenceConsistency = summarizeConsistency(referenceRuns)
-      report.checks.reference = {
-        expected: 'pass',
-        runs: referenceRuns,
-        codes: referenceConsistency.codes,
-        outputSha256: referenceConsistency.outputSha256,
-        normalizedSha256: referenceConsistency.normalizedSha256,
-        consistent: referenceConsistency.consistent,
-        normalization: NORMALIZATION,
-        ok: referenceRuns.every((run) => run.code === 0) && referenceConsistency.consistent,
+      // C03：重复运行也各自重置到干净 base 并重新应用参考补丁，避免上一次运行的状态。
+      const referenceRuns = []
+      let replayError = null
+      for (let index = 0; index < repeats; index++) {
+        try {
+          resetCheckout(worktree, baseSha)
+          git(worktree, ['apply', '--whitespace=nowarn', referencePath])
+        } catch (error) {
+          replayError = error.message.split('\n').slice(0, 3).join(' ')
+          break
+        }
+        referenceRuns.push(runHidden(worktree, hiddenPath, timeoutMs))
+      }
+      if (replayError !== null) {
+        report.checks.reference = { ok: false, error: `参考修复在重置后的干净 base 上应用失败：${replayError}` }
+      }
+      if (replayError === null) {
+        const referenceConsistency = summarizeConsistency(referenceRuns)
+        report.checks.reference = {
+          expected: 'pass',
+          runs: referenceRuns,
+          codes: referenceConsistency.codes,
+          outputSha256: referenceConsistency.outputSha256,
+          normalizedSha256: referenceConsistency.normalizedSha256,
+          consistent: referenceConsistency.consistent,
+          normalization: NORMALIZATION,
+          ok: referenceRuns.length === repeats
+            && referenceRuns.every((run) => run.code === 0)
+            && referenceConsistency.consistent,
+        }
       }
     }
 
@@ -836,8 +1042,12 @@ function selfTest(asJson) {
     // ---- F15/R5/R6: 稳定内容一致性 + base 失败归属分类（自测合成夹具，不改仓库）----
     const classifyRepo = join(root, 'repo-classify')
     mkdirSync(join(classifyRepo, 'targetpkg'), { recursive: true })
+    mkdirSync(join(classifyRepo, 'backend', 'app', 'domain'), { recursive: true })
     writeFileSync(join(classifyRepo, 'state.txt'), 'base\n', 'utf8')
     writeFileSync(join(classifyRepo, 'targetpkg', '__init__.py'), '', 'utf8')
+    writeFileSync(join(classifyRepo, 'targetpkg', 'service.py'), 'def list_diagnoses(db_path, limit, offset):\n    return [], 0\n', 'utf8')
+    writeFileSync(join(classifyRepo, 'targetpkg', 'api.py'), 'def new_api():\n    return 1\n', 'utf8')
+    writeFileSync(join(classifyRepo, 'backend', 'app', 'domain', 'money.py'), 'def previous_window(start, end):\n    return start, end\n', 'utf8')
     git(classifyRepo, ['init', '--quiet'])
     git(classifyRepo, ['add', '-A'])
     git(classifyRepo, ['-c', 'user.name=B2 Self Test', '-c', 'user.email=b2@example.invalid', 'commit', '--quiet', '-m', 'classify base'])
@@ -887,26 +1097,40 @@ function selfTest(asJson) {
     })
     const fixedPass = 'if [ "$(cat state.txt)" = fixed ]; then echo "PASS: stable"; exit 0; fi'
 
-    // R6 正例：仅元数据变化（JSON 键值）应被归一化，三次判一致。
-    const dynamicMetadata = runClassify('dynamic-metadata', scriptLines([
+    // C02 正例：日志行上的元数据（JSON requestId）被归一化，三次判一致。
+    const logMetadata = runClassify('log-metadata', scriptLines([
       '#!/bin/sh',
       fixedPass,
       "rid=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')",
-      'ts=$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)',
-      'printf \'AssertionError: expected fixed at {"requestId": "%s", "loggedVia": "%s"}\n\' "$rid" "fixed" >&2',
+      'printf \'{"requestId": "%s", "loggedVia": "fixed"}\\n\' "$rid" >&2',
+      'printf \'AssertionError: expected fixed\\n\' >&2',
       'exit 1',
     ]))
     record(
-      'R6/T10-02 元数据（JSON requestId）变化被归一化：三次一致且分类 target-assertion-failed',
-      dynamicMetadata.ok === true
-        && dynamicMetadata.checks.base.consistent === true
-        && new Set(dynamicMetadata.checks.base.outputSha256).size > 1
-        && new Set(dynamicMetadata.checks.base.normalizedSha256).size === 1
-        && dynamicMetadata.checks.base.failureClasses.every((entry) => entry.failureClass === 'target-assertion-failed')
-        && dynamicMetadata.checks.base.runs.every((run) => typeof run.stdout === 'string' && typeof run.stderr === 'string')
-        && (dynamicMetadata.checks.base.normalization?.rules?.length ?? 0) > 0
-        && (dynamicMetadata.normalization?.rules?.length ?? 0) > 0,
-      JSON.stringify({ ok: dynamicMetadata.ok, classes: dynamicMetadata.checks.base?.failureClasses?.map((entry) => entry.failureClass), rawHashes: dynamicMetadata.checks.base?.outputSha256?.map((hash) => hash?.slice(0, 8)), normalizedHashes: dynamicMetadata.checks.base?.normalizedSha256?.map((hash) => hash?.slice(0, 8)) }),
+      'C02 正例：日志元数据行 requestId 变化被归一化：三次一致且 classification=target-assertion-failed',
+      logMetadata.ok === true
+        && logMetadata.checks.base.consistent === true
+        && new Set(logMetadata.checks.base.outputSha256).size > 1
+        && new Set(logMetadata.checks.base.normalizedSha256).size === 1
+        && logMetadata.checks.base.failureClasses.every((entry) => entry.failureClass === 'target-assertion-failed')
+        && (logMetadata.checks.base.normalization?.rules?.length ?? 0) > 0,
+      JSON.stringify({ ok: logMetadata.ok, rawHashes: logMetadata.checks.base?.outputSha256?.map((hash) => hash?.slice(0, 8)), normalizedHashes: logMetadata.checks.base?.normalizedSha256?.map((hash) => hash?.slice(0, 8)) }),
+    )
+
+    // C02 反例：业务断言负载里的 requestId 变化不得归一化（三次必须判不一致）。
+    const assertionRequestId = runClassify('assertion-request-id', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      "rid=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')",
+      'printf \'AssertionError: expected fixed at {"requestId": "%s"}\\n\' "$rid" >&2',
+      'exit 1',
+    ]))
+    record(
+      'C02 反例：AssertionError 业务负载 requestId 变化保留 → 三次不一致、判卡不合格',
+      assertionRequestId.checks.base.consistent === false
+        && assertionRequestId.ok === false
+        && new Set(assertionRequestId.checks.base.normalizedSha256).size > 1,
+      JSON.stringify({ ok: assertionRequestId.ok, consistent: assertionRequestId.checks.base?.consistent, normalizedHashes: assertionRequestId.checks.base?.normalizedSha256?.map((hash) => hash?.slice(0, 8)) }),
     )
 
     // T10-02 反例：业务 JSON 的 createdAt 差异不得被归一化（键名不能证明是元数据）。
@@ -938,6 +1162,27 @@ function selfTest(asJson) {
         && new Set(logPrefixMetadata.checks.base.outputSha256).size > 1
         && new Set(logPrefixMetadata.checks.base.normalizedSha256).size === 1,
       JSON.stringify({ ok: logPrefixMetadata.ok, rawHashes: logPrefixMetadata.checks.base?.outputSha256?.map((hash) => hash?.slice(0, 8)), normalizedHashes: logPrefixMetadata.checks.base?.normalizedSha256?.map((hash) => hash?.slice(0, 8)) }),
+    )
+
+    // C02 反例：同一时间戳格式下日志级别变化必须保留（INFO vs ERROR 不得归一成同一输出）。
+    const logLevelChange = runClassify('log-level-change', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      'counter="$TASK_CHECKOUT/../.classify-log-level-counter"',
+      'n=$(cat "$counter" 2>/dev/null || echo 0)',
+      'n=$((n+1))',
+      'echo "$n" > "$counter"',
+      'case "$n" in 2) level=ERROR;; *) level=INFO;; esac',
+      'printf \'[2026-11-09T00:00:00.000Z] [%s] request started\\n\' "$level" >&2',
+      'printf \'AssertionError: expected fixed\\n\' >&2',
+      'exit 1',
+    ]))
+    record(
+      'C02 反例：日志级别 INFO/ERROR 变化保留 → 三次不一致、判卡不合格',
+      logLevelChange.checks.base.consistent === false
+        && logLevelChange.ok === false
+        && new Set(logLevelChange.checks.base.normalizedSha256).size > 1,
+      JSON.stringify({ ok: logLevelChange.ok, consistent: logLevelChange.checks.base?.consistent, normalizedHashes: logLevelChange.checks.base?.normalizedSha256?.map((hash) => hash?.slice(0, 8)) }),
     )
 
     // R6 反例：业务断言里的时间/UUID 裸值必须保留，三次差异必须判不一致。
@@ -995,7 +1240,7 @@ function selfTest(asJson) {
     const thirdPartyTypeError = runClassify('third-party-type-error', scriptLines([
       '#!/bin/sh',
       fixedPass,
-      "printf \"TypeError: Client.__init__() got an unexpected keyword argument 'proxies'\\n\" >&2",
+      'printf \'Traceback (most recent call last):\\n  File "%s/caller.py", line 12, in <module>\\nTypeError: Client.__init__() got an unexpected keyword argument proxies\\n\' "$TASK_CHECKOUT" >&2',
       'exit 1',
     ]))
     record(
@@ -1013,10 +1258,52 @@ function selfTest(asJson) {
       'exit 1',
     ]))
     record(
-      'R5 worktree 调用帧内的目标函数 TypeError → target-symbol-missing 且有效',
+      'C01 目标函数定义在 worktree（traceback 只有 caller 帧）→ target-symbol-missing 且有效',
       targetCallSiteTypeError.ok === true
         && targetCallSiteTypeError.checks.base.failureClasses.every((entry) => entry.failureClass === 'target-symbol-missing'),
       JSON.stringify({ ok: targetCallSiteTypeError.ok, classes: targetCallSiteTypeError.checks.base?.failureClasses?.map((entry) => entry.failureClass) }),
+    )
+
+    // C01 正例：<stdin>/exec 无文件帧时，按异常函数名在 worktree 源码里找到定义（history-page-size-v3 场景）。
+    const stdinTargetMissing = runClassify('stdin-target-missing', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      'printf \'Traceback (most recent call last):\\n  File "<stdin>", line 7, in <module>\\nTypeError: list_diagnoses() takes 3 positional arguments but 4 were given\\n\' >&2',
+      'exit 1',
+    ]))
+    record(
+      'C01 正例：<stdin> 调用的目标函数定义在 worktree（list_diagnoses）→ target-symbol-missing 且有效',
+      stdinTargetMissing.ok === true
+        && stdinTargetMissing.checks.base.failureClasses.every((entry) => entry.failureClass === 'target-symbol-missing'),
+      JSON.stringify({ ok: stdinTargetMissing.ok, classes: stdinTargetMissing.checks.base?.failureClasses?.map((entry) => entry.failureClass) }),
+    )
+
+    // C01 正例：importlib 把本地文件加载为别名模块（module 'money'）——模块名不是顶层包根，但仍属于 worktree。
+    const importlibAlias = runClassify('importlib-alias', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      'printf \'Traceback (most recent call last):\\n  File "<stdin>", line 5, in <module>\\nAttributeError: module money has no attribute previous_windows\\n\' >&2',
+      'exit 1',
+    ]))
+    record(
+      'C01 正例：importlib 别名模块 money（文件在 worktree）缺属性 → target-symbol-missing 且有效',
+      importlibAlias.ok === true
+        && importlibAlias.checks.base.failureClasses.every((entry) => entry.failureClass === 'target-symbol-missing'),
+      JSON.stringify({ ok: importlibAlias.ok, classes: importlibAlias.checks.base?.failureClasses?.map((entry) => entry.failureClass) }),
+    )
+
+    // C01 反例：真实 httpx 参数绑定失败没有第三方函数体帧，只有本地 caller 帧；不能按调用帧判目标。
+    const thirdPartyBinding = runClassify('third-party-binding', scriptLines([
+      '#!/bin/sh',
+      fixedPass,
+      'printf \'Traceback (most recent call last):\\n  File "%s/caller.py", line 12, in <module>\\nTypeError: Client.__init__() got an unexpected keyword argument proxies\\n\' "$TASK_CHECKOUT" >&2',
+      'exit 1',
+    ]))
+    record(
+      'C01 反例：第三方 Client.__init__ 参数绑定失败（只有 worktree caller 帧）→ environment-error、判卡不合格',
+      thirdPartyBinding.ok === false
+        && thirdPartyBinding.checks.base.failureClasses.every((entry) => entry.failureClass === 'environment-error'),
+      JSON.stringify({ ok: thirdPartyBinding.ok, classes: thirdPartyBinding.checks.base?.failureClasses?.map((entry) => entry.failureClass) }),
     )
 
     const environmentError = runClassify('environment-error', scriptLines([
@@ -1050,6 +1337,129 @@ function selfTest(asJson) {
         && inconsistentReference.checks.base.consistent === true
         && inconsistentReference.checks.reference.consistent === false,
       JSON.stringify({ ok: inconsistentReference.ok, baseConsistent: inconsistentReference.checks.base?.consistent, referenceConsistent: inconsistentReference.checks.reference?.consistent }),
+    )
+
+    // ---- C03：base 留下的状态不得影响 reference；重复运行也必须重置 ----
+    const carryRepo = join(root, 'repo-carry')
+    mkdirSync(carryRepo, { recursive: true })
+    writeFileSync(join(carryRepo, 'state.txt'), 'base\n', 'utf8')
+    git(carryRepo, ['init', '--quiet'])
+    git(carryRepo, ['add', '-A'])
+    git(carryRepo, ['-c', 'user.name=B2 Self Test', '-c', 'user.email=b2@example.invalid', 'commit', '--quiet', '-m', 'carry base'])
+    const carryBase = git(carryRepo, ['rev-parse', 'HEAD']).trim()
+    const carryDir = join(root, 'card-carry')
+    mkdirSync(carryDir, { recursive: true })
+    writeFileSync(join(carryDir, 'issue.md'), '# carry\n\n## 任务\n合成 C03 自测。\n\n## 验收\n见 hidden-test。\n\n## 合法范围\n仅 state.txt。\n', 'utf8')
+    writeFileSync(join(carryDir, 'review.md'), '合法范围：仅 state.txt；本文件是 C03 self-test 合成夹具。\n', 'utf8')
+    // base 写 carry.txt 才失败；reference 补丁本身并不修复 carry.txt（只改 state.txt）。
+    writeFileSync(join(carryDir, 'hidden-test.sh'), [
+      '#!/bin/sh',
+      'if [ -f carry.txt ]; then echo "PASS: reused base state"; exit 0; fi',
+      'echo "base" > carry.txt',
+      'printf "AssertionError: expected carry.txt to exist\\n" >&2',
+      'exit 1',
+      '',
+    ].join('\n'), 'utf8')
+    writeFileSync(join(carryDir, 'reference.patch'), [
+      'diff --git a/state.txt b/state.txt',
+      '--- a/state.txt',
+      '+++ b/state.txt',
+      '@@ -1 +1 @@',
+      '-base',
+      '+fixed',
+      '',
+    ].join('\n'), 'utf8')
+    writeFileSync(join(carryDir, 'task.json'), `${JSON.stringify({
+      schemaVersion: 1, taskId: 'c03-carry', repo: 'synthetic', base: null, category: 'new-feature',
+      referenceFix: 'reference.patch', allowedFiles: ['state.txt'], issue: 'issue.md', hiddenTest: 'hidden-test.sh',
+      review: 'review.md', stagedSuitable: false,
+      contamination: { mergedAfterTrainingCutoff: false, private: true, cutoff: null, notes: 'self-test fixture' },
+      checks: { baseMustFail: true, referenceMustPass: true },
+    }, null, 2)}\n`, 'utf8')
+    const carryReport = validateTask({
+      taskDir: carryDir, repo: carryRepo, base: carryBase,
+      reference: join(carryDir, 'reference.patch'), hiddenTest: join(carryDir, 'hidden-test.sh'), repeats: 3,
+    })
+    record(
+      'C03 反例：base 留下 carry.txt 时 reference 不得复用其状态（干净重置后参考修复必须失败）',
+      carryReport.ok === false
+        && carryReport.checks.base.codes.every((code) => code !== 0)
+        && carryReport.checks.base.consistent === true
+        && carryReport.checks.reference.ok === false
+        && carryReport.checks.reference.codes.every((code) => code !== 0)
+        && carryReport.isolation?.baseReset === true
+        && carryReport.isolation?.repeatsReset === true,
+      JSON.stringify({ ok: carryReport.ok, base: carryReport.checks.base?.codes, ref: carryReport.checks.reference?.codes, isolation: carryReport.isolation }),
+    )
+
+    // ---- C04：ignored 新文件、删除、重命名都必须进入范围检查 ----
+    const scopeRepo = join(root, 'repo-scope')
+    mkdirSync(scopeRepo, { recursive: true })
+    writeFileSync(join(scopeRepo, '.gitignore'), 'outside.secret\n', 'utf8')
+    writeFileSync(join(scopeRepo, 'notes.txt'), 'base\n', 'utf8')
+    writeFileSync(join(scopeRepo, 'secure.txt'), 'secret\n', 'utf8')
+    writeFileSync(join(scopeRepo, 'old.txt'), 'old\n', 'utf8')
+    git(scopeRepo, ['init', '--quiet'])
+    git(scopeRepo, ['add', '-A'])
+    git(scopeRepo, ['-c', 'user.name=B2 Self Test', '-c', 'user.email=b2@example.invalid', 'commit', '--quiet', '-m', 'scope base'])
+    const scopeBase = git(scopeRepo, ['rev-parse', 'HEAD']).trim()
+    const scopeDir = join(root, 'card-scope')
+    mkdirSync(scopeDir, { recursive: true })
+    writeFileSync(join(scopeDir, 'issue.md'), '# scope\n\n## 任务\n合成 C04 自测。\n\n## 验收\n见 hidden-test。\n\n## 合法范围\n仅 notes.txt。\n', 'utf8')
+    writeFileSync(join(scopeDir, 'review.md'), '合法范围：仅 notes.txt；本文件是 C04 self-test 合成夹具。\n', 'utf8')
+    writeFileSync(join(scopeDir, 'hidden-test.sh'), [
+      '#!/bin/sh',
+      'if [ "$(cat notes.txt)" = fixed ]; then echo "PASS: fixed"; exit 0; fi',
+      'printf "AssertionError: expected fixed\\n" >&2',
+      'exit 1',
+      '',
+    ].join('\n'), 'utf8')
+    writeFileSync(join(scopeDir, 'reference.patch'), [
+      'diff --git a/notes.txt b/notes.txt',
+      '--- a/notes.txt',
+      '+++ b/notes.txt',
+      '@@ -1 +1 @@',
+      '-base',
+      '+fixed',
+      'diff --git a/outside.secret b/outside.secret',
+      'new file mode 100644',
+      '--- /dev/null',
+      '+++ b/outside.secret',
+      '@@ -0,0 +1 @@',
+      '+secret',
+      'diff --git a/secure.txt b/secure.txt',
+      'deleted file mode 100644',
+      '--- a/secure.txt',
+      '+++ /dev/null',
+      '@@ -1 +0,0 @@',
+      '-secret',
+      'diff --git a/old.txt b/outside-renamed.txt',
+      'similarity index 100%',
+      'rename from old.txt',
+      'rename to outside-renamed.txt',
+      '',
+    ].join('\n'), 'utf8')
+    writeFileSync(join(scopeDir, 'task.json'), `${JSON.stringify({
+      schemaVersion: 1, taskId: 'c04-scope', repo: 'synthetic', base: null, category: 'new-feature',
+      referenceFix: 'reference.patch', allowedFiles: ['notes.txt'], issue: 'issue.md', hiddenTest: 'hidden-test.sh',
+      review: 'review.md', stagedSuitable: false,
+      contamination: { mergedAfterTrainingCutoff: false, private: true, cutoff: null, notes: 'self-test fixture' },
+      checks: { baseMustFail: true, referenceMustPass: true },
+    }, null, 2)}\n`, 'utf8')
+    const scopeReport = validateTask({
+      taskDir: scopeDir, repo: scopeRepo, base: scopeBase,
+      reference: join(scopeDir, 'reference.patch'), hiddenTest: join(scopeDir, 'hidden-test.sh'), repeats: 2,
+    })
+    const scopeOutside = scopeReport.checks.scope?.outside ?? []
+    record(
+      'C04 反例：ignored 新增/删除/重命名越界均进入 outside（不因 gitignore 消失）',
+      scopeReport.ok === false
+        && scopeOutside.includes('outside.secret')
+        && scopeOutside.includes('secure.txt')
+        && scopeOutside.includes('outside-renamed.txt')
+        && (scopeReport.checks.scope?.patchPaths ?? []).includes('outside.secret')
+        && (scopeReport.checks.scope?.filesystemChanges ?? []).includes('outside.secret'),
+      JSON.stringify({ ok: scopeReport.ok, outside: scopeOutside, patchPaths: scopeReport.checks.scope?.patchPaths, fs: scopeReport.checks.scope?.filesystemChanges }),
     )
 
     const ok = steps.every((step) => step.ok)
