@@ -33,10 +33,12 @@
 //   P3 every test file still hashes to the red commit's blob:
 //      `git -C <workspace> hash-object -- <file>` === `git ls-tree <redCommit> -- <file>`
 //   P4 the report is complete and internally consistent: junit.xml is a
-//      well-formed document (balanced tags, no truncation), the testsuite
-//      `failures`/`errors` counters are numeric **and equal the number of
-//      actual `<failure>`/`<error>` nodes**, and flat reports declare a
-//      `tests` total equal to the number of testcase nodes
+//      well-formed document (balanced tags, no truncation, no duplicate
+//      attributes); any present counter (`tests`/`failures`/`errors`/`skipped`)
+//      must be a non-negative integer; each testsuite's `failures`/`errors`
+//      counter must equal that suite's own `<failure>`/`<error>` nodes (no
+//      cross-suite offsetting; nested suites checked independently); flat
+//      reports declare a `tests` total equal to the number of testcase nodes
 //
 // Input shapes (documented because T17's phase field is not merged yet):
 //   run.json        { phase: 'red', startedAt: ISO, before: { headCommit: sha40 },
@@ -103,13 +105,18 @@ function readJson(path, label) {
 // ---------------------------------------------------------------------------
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", '#39': "'" }
 const decode = value => value.replace(/&(amp|lt|gt|quot|apos|#39);/g, (_, name) => ENTITIES[name])
-const attributes = tag => {
+const attributes = (tag, label = 'junit report') => {
   const found = {}
+  const seen = new Set()
   const re = /([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g
   let match
   while ((match = re.exec(tag)) !== null) {
+    const name = match[1]
+    // N06a: duplicate attributes are rejected instead of silently keeping the last value.
+    if (seen.has(name)) throw new Error(`${label}: duplicate attribute "${name}" on an element`)
+    seen.add(name)
     const value = match[2] !== undefined ? match[2] : match[3]
-    found[match[1]] = decode(value)
+    found[name] = decode(value)
   }
   return found
 }
@@ -197,7 +204,7 @@ function parseXmlDocument(xml, label = 'junit report') {
     const nameMatch = /^\s*([A-Za-z_][\w:.-]*)/.exec(tag)
     if (!nameMatch) throw new Error(`${label}: malformed start tag`)
     const name = nameMatch[1]
-    const node = { name, attrs: attributes(tag.slice(nameMatch[0].length)), children: [], text: '' }
+    const node = { name, attrs: attributes(tag.slice(nameMatch[0].length), label), children: [], text: '' }
     if (stack.length === 0) {
       rootCount += 1
       if (rootCount > 1) throw new Error(`${label}: multiple root elements`)
@@ -224,10 +231,19 @@ export function parseJunit(xml) {
   const suites = nodes.filter(node => node.name === 'testsuite')
   if (suites.length === 0) throw new Error('no parsable <testsuite> element')
   const suiteAttrs = suites.map(suite => suite.attrs)
+  // N06b: a counter attribute that is present must be a non-negative integer;
+  // "exists but is garbage" is rejected instead of silently skipping the check.
+  for (const attrs of suiteAttrs) {
+    for (const field of ['tests', 'failures', 'errors', 'skipped']) {
+      if (attrs[field] !== undefined && !/^\d+$/.test(attrs[field])) {
+        throw new Error(`report counters invalid: testsuite ${field}=${JSON.stringify(attrs[field])} is not a non-negative integer`)
+      }
+    }
+  }
   const failures = suiteAttrs.map(attrs => attrs.failures)
   const errors = suiteAttrs.map(attrs => attrs.errors)
-  const countersPresent = failures.every(value => value !== undefined && /^\d+$/.test(value))
-    && errors.every(value => value !== undefined && /^\d+$/.test(value))
+  const countersPresent = failures.every(value => value !== undefined)
+    && errors.every(value => value !== undefined)
   const testcases = nodes
     .filter(node => node.name === 'testcase')
     .map(node => ({
@@ -241,20 +257,37 @@ export function parseJunit(xml) {
     }))
 
   if (countersPresent) {
+    // N06c: verify failures/errors per testsuite, against that suite's own
+    // subtree (nested suites included). Cross-suite offsetting is rejected; a
+    // declared node count can never be balanced by another suite's surplus.
+    for (let index = 0; index < suites.length; index += 1) {
+      const suite = suites[index]
+      const suiteLabel = suite.attrs.name ? `"${suite.attrs.name}"` : `#${index + 1}`
+      let suiteFailures = 0
+      let suiteErrors = 0
+      const pending = [...suite.children]
+      while (pending.length > 0) {
+        const node = pending.pop()
+        if (node.name === 'failure') suiteFailures += 1
+        else if (node.name === 'error') suiteErrors += 1
+        pending.push(...node.children)
+      }
+      const declaredSuiteFailures = Number(suite.attrs.failures)
+      const declaredSuiteErrors = Number(suite.attrs.errors)
+      if (declaredSuiteFailures !== suiteFailures) {
+        throw new Error(`report counters disagree in testsuite ${suiteLabel}: failures=${declaredSuiteFailures} but the suite subtree contains ${suiteFailures} <failure> node(s)`)
+      }
+      if (declaredSuiteErrors !== suiteErrors) {
+        throw new Error(`report counters disagree in testsuite ${suiteLabel}: errors=${declaredSuiteErrors} but the suite subtree contains ${suiteErrors} <error> node(s)`)
+      }
+    }
     const declaredFailures = failures.reduce((sum, value) => sum + Number(value), 0)
     const declaredErrors = errors.reduce((sum, value) => sum + Number(value), 0)
-    const actualFailures = nodes.filter(node => node.name === 'failure').length
-    const actualErrors = nodes.filter(node => node.name === 'error').length
-    if (declaredFailures !== actualFailures) {
-      throw new Error(`report counters disagree: testsuites declare failures=${declaredFailures} but the document contains ${actualFailures} <failure> node(s)`)
-    }
-    if (declaredErrors !== actualErrors) {
-      throw new Error(`report counters disagree: testsuites declare errors=${declaredErrors} but the document contains ${actualErrors} <error> node(s)`)
-    }
-    // pytest writes flat suites; only cross-check `tests` when suites are not nested.
+    // pytest writes flat suites; only cross-check global `tests` when not nested
+    // (per-suite failures/errors above carry the strict per-suite guarantee).
     const nestedSuites = suites.some(suite => suite.children.some(child => child.name === 'testsuite'))
     const testsValues = suiteAttrs.map(attrs => attrs.tests)
-    if (!nestedSuites && testsValues.every(value => value !== undefined && /^\d+$/.test(value))) {
+    if (!nestedSuites && testsValues.every(value => value !== undefined)) {
       const declaredTests = testsValues.reduce((sum, value) => sum + Number(value), 0)
       if (declaredTests !== testcases.length) {
         throw new Error(`report counters disagree: testsuites declare tests=${declaredTests} but the document contains ${testcases.length} testcase node(s)`)
@@ -740,6 +773,50 @@ const JUNIT_TESTS_COUNT_MISMATCH = `<?xml version="1.0" encoding="UTF-8"?>
 </testsuites>
 `
 
+// --- N06: XML counter integrity fixtures ----------------------------------
+const JUNIT_DUP_ATTR = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="pytest" tests="1" failures="0" failures="1" errors="0">
+    <testcase classname="backend.tests.test_money" name="test_window" file="${TEST_FILE}">
+      <failure message="boom" type="AssertionError">traceback</failure>
+    </testcase>
+  </testsuite>
+</testsuites>
+`
+const JUNIT_NONNUM_COUNTER = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="pytest" tests="nonsense" failures="1" errors="0">
+    <testcase classname="backend.tests.test_money" name="test_window" file="${TEST_FILE}">
+      <failure message="boom" type="AssertionError">traceback</failure>
+    </testcase>
+  </testsuite>
+</testsuites>
+`
+const JUNIT_OFFSET_COUNTERS = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="A" tests="1" failures="0" errors="0">
+    <testcase classname="backend.tests.test_money" name="test_window" file="${TEST_FILE}">
+      <failure message="real failure but suite A declares failures=0" type="AssertionError">traceback</failure>
+    </testcase>
+  </testsuite>
+  <testsuite name="B" tests="1" failures="1" errors="0">
+    <testcase classname="backend.tests.test_money" name="test_pass" file="${TEST_FILE}"/>
+  </testsuite>
+</testsuites>
+`
+const JUNIT_MULTI_SUITE_OK = `<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="A" tests="1" failures="1" errors="0">
+    <testcase classname="backend.tests.test_money" name="test_window" file="${TEST_FILE}">
+      <failure message="boom" type="AssertionError">traceback</failure>
+    </testcase>
+  </testsuite>
+  <testsuite name="B" tests="1" failures="0" errors="0">
+    <testcase classname="backend.tests.test_money" name="test_pass" file="${TEST_FILE}"/>
+  </testsuite>
+</testsuites>
+`
+
 // --- R02: failure type fixtures -------------------------------------------
 const JUNIT_TYPE_WITH_ASSERTION_MESSAGE = `<?xml version="1.0" encoding="UTF-8"?>
 <testsuites>
@@ -920,6 +997,23 @@ export function selfTest() {
     const testsMismatch = buildState(join(root, 'r01-tests-count'), redCommit, { report: JUNIT_TESTS_COUNT_MISMATCH })
     const testsMismatchItem = evaluateBatch({ stateDir: testsMismatch.stateDir, workspace, taskCards: { 'ticket-1': CARD } }).tickets[0].acceptance[0]
     pass(results, 'R01 declared tests=5 but 1 testcase node => invalid', testsMismatchItem.red === 'invalid' && testsMismatchItem.reason.startsWith('P4:'), JSON.stringify(testsMismatchItem))
+
+    // N06: counter integrity gaps (duplicate attrs, non-numeric counters, per-suite offsetting).
+    const dupAttr = buildState(join(root, 'n06-dup-attr'), redCommit, { report: JUNIT_DUP_ATTR })
+    const dupAttrItem = evaluateBatch({ stateDir: dupAttr.stateDir, workspace, taskCards: { 'ticket-1': CARD } }).tickets[0].acceptance[0]
+    pass(results, 'N06 duplicate attribute is rejected', dupAttrItem.red === 'invalid' && dupAttrItem.reason.startsWith('P4:') && /duplicate attribute/.test(dupAttrItem.reason), JSON.stringify(dupAttrItem))
+
+    const nonNumeric = buildState(join(root, 'n06-nonnumeric'), redCommit, { report: JUNIT_NONNUM_COUNTER })
+    const nonNumericItem = evaluateBatch({ stateDir: nonNumeric.stateDir, workspace, taskCards: { 'ticket-1': CARD } }).tickets[0].acceptance[0]
+    pass(results, 'N06 non-numeric tests counter is rejected (not skipped)', nonNumericItem.red === 'invalid' && nonNumericItem.reason.startsWith('P4:') && /counters invalid/.test(nonNumericItem.reason), JSON.stringify(nonNumericItem))
+
+    const offsetCounters = buildState(join(root, 'n06-offset'), redCommit, { report: JUNIT_OFFSET_COUNTERS })
+    const offsetCountersItem = evaluateBatch({ stateDir: offsetCounters.stateDir, workspace, taskCards: { 'ticket-1': CARD } }).tickets[0].acceptance[0]
+    pass(results, 'N06 per-suite counters: cross-suite offsetting is rejected', offsetCountersItem.red === 'invalid' && offsetCountersItem.reason.startsWith('P4:') && /counters disagree in testsuite/.test(offsetCountersItem.reason), JSON.stringify(offsetCountersItem))
+
+    const multiSuiteOk = buildState(join(root, 'n06-multisuite-ok'), redCommit, { report: JUNIT_MULTI_SUITE_OK })
+    const multiSuiteOkItem = evaluateBatch({ stateDir: multiSuiteOk.stateDir, workspace, taskCards: { 'ticket-1': CARD } }).tickets[0].acceptance[0]
+    pass(results, 'N06 complete normal two-suite report still passes', multiSuiteOkItem.red === 'valid', JSON.stringify(multiSuiteOkItem))
 
     // R02: explicit type decides; message mentioning AssertionError cannot override TypeError.
     const typeMessage = buildState(join(root, 'r02-type-message'), redCommit, { report: JUNIT_TYPE_WITH_ASSERTION_MESSAGE })
