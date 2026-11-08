@@ -16,3 +16,6 @@
 - hidden test 只做源码/AST 级目标断言，不执行完整仓库工具链，也不证明全仓库回归通过。
 - 污染门槛未达标（见 task.json.contamination）。
 - 真实模型运行、宿主/实例路径未参与本卡校验。
+
+## F4 整改记录（外部审查）
+原 hidden-test 只做静态/桩断言（文件存在与 callable、AST/SQL 字符串计数、dotenv 模块 stub）。F4 整改改为真实行为断言：真实临时 SQLite + 真实服务/播种函数调用、真实临时 git 仓库的 `git check-ignore`、真实临时 `.env` 文件；断言覆盖参数化读取、优先级、缺省回退与幂等。需求点语义与 allowedFiles 未变，reference.patch 未改动。

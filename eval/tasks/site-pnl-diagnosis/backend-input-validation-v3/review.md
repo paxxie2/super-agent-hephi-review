@@ -13,3 +13,7 @@
 
 ## 未验证项
 未做真实模型运行、未做人类双评审、未验证该补丁在完整仓库工具链下的全部回归测试（hidden-test 只覆盖本任务目标断言）；污染门槛未达标（见 task.json.contamination）。
+
+## F4 整改记录（外部审查）
+原 hidden-test 只对 `main.py` 源码做 `415: "UNSUPPORTED_MEDIA_TYPE"` 文本存在性检查；F4 整改改为直接以标准库 asyncio/json 驱动真实 ASGI 应用：404（未知 API 路由）、405（错误方法）、415（真实非 JSON Content-Type 的 `POST /api/diagnoses`）与兜底（测试注入 418 路由 → `HTTP_ERROR`）都断言状态码与响应体 `code`，并额外断言 415 的 handler 映射。
+整改中发现原 reference.patch 只加错误码映射、应用没有任何真实路径会产生 415（非 JSON 请求先被 body 解析成 400/422），因此参考补丁补充了写入类 API 的 Content-Type 守卫（仍在 `allowedFiles: backend/app/main.py` 内，返回与 404/405 一致的错误体），需求点语义（415 → UNSUPPORTED_MEDIA_TYPE 统一错误体）不变、范围不变。

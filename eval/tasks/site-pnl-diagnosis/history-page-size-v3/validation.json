@@ -22,22 +22,22 @@
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 8, in <module>\nAssertionError: list_diagnoses must accept siteId, got ['request', 'limit', 'offset']\n",
-          "outputSha256": "13af839e9fdda370aed8492235c413cf5b9df4e51210c61e41cf75fc45cdd6f0"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 57, in <module>\nTypeError: list_diagnoses() takes 3 positional arguments but 4 were given\n",
+          "outputSha256": "a3f08d2214d856fd82209a16185410c16426064d0542372dcb04d4cc2fe1a62a"
         },
         {
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 8, in <module>\nAssertionError: list_diagnoses must accept siteId, got ['request', 'limit', 'offset']\n",
-          "outputSha256": "13af839e9fdda370aed8492235c413cf5b9df4e51210c61e41cf75fc45cdd6f0"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 57, in <module>\nTypeError: list_diagnoses() takes 3 positional arguments but 4 were given\n",
+          "outputSha256": "a3f08d2214d856fd82209a16185410c16426064d0542372dcb04d4cc2fe1a62a"
         },
         {
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 8, in <module>\nAssertionError: list_diagnoses must accept siteId, got ['request', 'limit', 'offset']\n",
-          "outputSha256": "13af839e9fdda370aed8492235c413cf5b9df4e51210c61e41cf75fc45cdd6f0"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 57, in <module>\nTypeError: list_diagnoses() takes 3 positional arguments but 4 were given\n",
+          "outputSha256": "a3f08d2214d856fd82209a16185410c16426064d0542372dcb04d4cc2fe1a62a"
         }
       ],
       "codes": [
@@ -66,23 +66,23 @@
         {
           "code": 0,
           "signal": null,
-          "stdout": "PASS: optional siteId filter\n",
+          "stdout": "PASS: optional siteId filtering with unchanged unfiltered behavior\n",
           "stderr": "",
-          "outputSha256": "b12ef0e947655bc182968ad7983b3dec0e1a6a205ee6615986ac8e05fa3a9d58"
+          "outputSha256": "782112b40cd46cf70160669fe9bc646c524f835620950e979060d5961412ef74"
         },
         {
           "code": 0,
           "signal": null,
-          "stdout": "PASS: optional siteId filter\n",
+          "stdout": "PASS: optional siteId filtering with unchanged unfiltered behavior\n",
           "stderr": "",
-          "outputSha256": "b12ef0e947655bc182968ad7983b3dec0e1a6a205ee6615986ac8e05fa3a9d58"
+          "outputSha256": "782112b40cd46cf70160669fe9bc646c524f835620950e979060d5961412ef74"
         },
         {
           "code": 0,
           "signal": null,
-          "stdout": "PASS: optional siteId filter\n",
+          "stdout": "PASS: optional siteId filtering with unchanged unfiltered behavior\n",
           "stderr": "",
-          "outputSha256": "b12ef0e947655bc182968ad7983b3dec0e1a6a205ee6615986ac8e05fa3a9d58"
+          "outputSha256": "782112b40cd46cf70160669fe9bc646c524f835620950e979060d5961412ef74"
         }
       ],
       "codes": [

@@ -1,25 +1,78 @@
 #!/bin/sh
 set -eu
 python3 -B - <<'PY'
-import ast
+"""GET /api/diagnoses 可选 siteId 过滤的服务层行为断言：真实 SQLite 临时库 + 真实服务函数。"""
+import json
+import os
+import sqlite3
+import sys
+import tempfile
 
-# 1) 路由层新增可选 siteId 查询参数（默认 None），并传给服务层。
-api = open("backend/app/api/diagnoses.py", encoding="utf-8").read()
-tree = ast.parse(api)
-fn = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "list_diagnoses"][0]
-args = [a.arg for a in fn.args.args]
-assert "siteId" in args, f"list_diagnoses must accept siteId, got {args}"
-defaults = dict(zip(args[len(args) - len(fn.args.defaults):], fn.args.defaults))
-site_default = defaults.get("siteId")
-assert isinstance(site_default, ast.Call), ast.dump(site_default)
-assert isinstance(site_default.func, ast.Name) and site_default.func.id == "Query", ast.dump(site_default.func)
-assert isinstance(site_default.args[0], ast.Constant) and site_default.args[0].value is None, "siteId must default to None"
-assert "siteId" in api.split("get_diagnosis_page", 1)[1], "route must pass siteId to the service"
+sys.path.insert(0, "backend")
+from app.db import init_db  # noqa: E402
+from app.services import diagnoses as service  # noqa: E402
 
-# 2) 服务层按 site_id 过滤（未提供时保持原行为）。
-svc = open("backend/app/services/diagnoses.py", encoding="utf-8").read()
-assert "site_id: str | None = None" in svc, "list_diagnoses/get_diagnosis_page must accept site_id"
-assert svc.count("WHERE site_id = ?") == 2, "both count and page queries must filter by site_id"
-assert "list_diagnoses(db_path, limit, offset, site_id)" in svc, "get_diagnosis_page must forward site_id"
-print("PASS: optional siteId filter")
+COMPLETENESS = json.dumps({"sources": {}, "unknownComponents": [], "comparisonComplete": None, "notes": []})
+EMPTY_LIST = "[]"
+
+
+def insert_site(conn: sqlite3.Connection, site_id: str, name: str) -> None:
+    conn.execute(
+        "INSERT INTO sites (id, name, city, address, case_label, planned_capacity, data_version) "
+        "VALUES (?, ?, '上海', '测试地址', '正常盈利', 6, 'data-test')",
+        (site_id, name),
+    )
+
+
+def insert_diagnosis(conn: sqlite3.Connection, diagnosis_id: str, site_id: str, created_at: str) -> None:
+    conn.execute(
+        "INSERT INTO diagnoses (id, site_id, start_date, end_date, comparison_start, comparison_end, "
+        "data_version, rule_version, completeness_json, pnl_json, daily_json, findings_json, "
+        "suggestions_json, created_at) "
+        "VALUES (?, ?, '2026-08-30', '2026-09-28', NULL, NULL, 'data-test', 'rule-test', ?, '{}', ?, ?, ?, ?)",
+        (diagnosis_id, site_id, COMPLETENESS, EMPTY_LIST, EMPTY_LIST, EMPTY_LIST, created_at),
+    )
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    db = os.path.join(tmp, "runtime.db")
+    init_db(db)
+    conn = sqlite3.connect(db)
+    try:
+        insert_site(conn, "S01", "静安寺地铁店")
+        insert_site(conn, "S02", "陆家嘴商城店")
+        # Mixed sites; S01 has two diagnoses, S02 one. Latest first for S01.
+        insert_diagnosis(conn, "d_s01_old", "S01", "2026-09-01T10:00:00+08:00")
+        insert_diagnosis(conn, "d_s02", "S02", "2026-09-02T10:00:00+08:00")
+        insert_diagnosis(conn, "d_s01_new", "S01", "2026-09-03T10:00:00+08:00")
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Unfiltered behavior is unchanged (still returns every site).
+    items, total = service.list_diagnoses(db, 10, 0)
+    assert total == 3, total
+    assert {item.siteId for item in items} == {"S01", "S02"}, [item.siteId for item in items]
+    page = service.get_diagnosis_page(db, 10, 0)
+    assert page.total == 3 and len(page.items) == 3, (page.total, len(page.items))
+
+    # siteId narrows both count and page rows, preserving the created_at DESC order.
+    items, total = service.list_diagnoses(db, 10, 0, "S01")
+    assert total == 2, total
+    assert [item.id for item in items] == ["d_s01_new", "d_s01_old"], [item.id for item in items]
+    assert all(item.siteId == "S01" for item in items)
+    filtered = service.get_diagnosis_page(db, 10, 0, "S01")
+    assert filtered.total == 2 and [item.id for item in filtered.items] == ["d_s01_new", "d_s01_old"]
+
+    # A site without diagnoses returns an empty page, not the unfiltered page.
+    missing = service.get_diagnosis_page(db, 10, 0, "S99")
+    assert missing.total == 0 and missing.items == [], (missing.total, missing.items)
+
+    # Pagination stays consistent with the filter.
+    first = service.get_diagnosis_page(db, 1, 0, "S01")
+    second = service.get_diagnosis_page(db, 1, 1, "S01")
+    assert [item.id for item in first.items] == ["d_s01_new"] and first.total == 2
+    assert [item.id for item in second.items] == ["d_s01_old"] and second.total == 2
+
+print("PASS: optional siteId filtering with unchanged unfiltered behavior")
 PY

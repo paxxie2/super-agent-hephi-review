@@ -1,8 +1,22 @@
 diff --git a/backend/app/main.py b/backend/app/main.py
-index bc6cbc8..3ae1f80 100644
+index bc6cbc8..d23f802 100644
 --- a/backend/app/main.py
 +++ b/backend/app/main.py
-@@ -95,7 +95,11 @@ def create_app(settings: Settings | None = None, *, seed: bool = True) -> FastAP
+@@ -65,6 +65,13 @@ def create_app(settings: Settings | None = None, *, seed: bool = True) -> FastAP
+     async def request_id_middleware(request: Request, call_next: Any) -> Any:
+         request_id = request.headers.get("X-Request-Id") or uuid.uuid4().hex
+         request.state.request_id = request_id
++        # 统一错误码：写入类 API 只接受 JSON 请求体；其它 Content-Type 返回 415 错误体。
++        if request.method in {"POST", "PUT", "PATCH"} and request.url.path.startswith("/api/"):
++            media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
++            if media_type and media_type != "application/json":
++                response = _error_response(415, "UNSUPPORTED_MEDIA_TYPE", "Unsupported Media Type", request_id)
++                response.headers["X-Request-Id"] = request_id
++                return response
+         response = await call_next(request)
+         response.headers["X-Request-Id"] = request_id
+         return response
+@@ -95,7 +102,11 @@ def create_app(settings: Settings | None = None, *, seed: bool = True) -> FastAP
  
      @app.exception_handler(StarletteHTTPException)
      async def handle_http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:

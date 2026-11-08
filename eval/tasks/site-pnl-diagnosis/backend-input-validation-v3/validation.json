@@ -22,22 +22,22 @@
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 2, in <module>\nAssertionError: 415 must map to UNSUPPORTED_MEDIA_TYPE\n",
-          "outputSha256": "ea36f417394540614053a96f771ae13f34ed6fab16a006e17af0a50e8d1c4ce1"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 64, in <module>\nAssertionError: (400, {'code': 'VALIDATION_ERROR', 'message': '请求参数不合法', 'fieldErrors': {'header.Idempotency-Key': 'Field required', 'body': 'Input should be a valid dictionary or object to extract fields from'}, 'requestId': '0dbc9c0148bf4d7e8535f47ab43d581d'})\n",
+          "outputSha256": "d2f6eb8178c40dde16a02a13ab1b62448d64383c19095de3e8f8a91631b03743"
         },
         {
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 2, in <module>\nAssertionError: 415 must map to UNSUPPORTED_MEDIA_TYPE\n",
-          "outputSha256": "ea36f417394540614053a96f771ae13f34ed6fab16a006e17af0a50e8d1c4ce1"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 64, in <module>\nAssertionError: (400, {'code': 'VALIDATION_ERROR', 'message': '请求参数不合法', 'fieldErrors': {'header.Idempotency-Key': 'Field required', 'body': 'Input should be a valid dictionary or object to extract fields from'}, 'requestId': '35a2d52762264f659d1b3827e612dff3'})\n",
+          "outputSha256": "a9e0d011a9dbd4461e371b189033edc1b6690b7aac6669ae574de500ef1e8bc0"
         },
         {
           "code": 1,
           "signal": null,
           "stdout": "",
-          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 2, in <module>\nAssertionError: 415 must map to UNSUPPORTED_MEDIA_TYPE\n",
-          "outputSha256": "ea36f417394540614053a96f771ae13f34ed6fab16a006e17af0a50e8d1c4ce1"
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 64, in <module>\nAssertionError: (400, {'code': 'VALIDATION_ERROR', 'message': '请求参数不合法', 'fieldErrors': {'header.Idempotency-Key': 'Field required', 'body': 'Input should be a valid dictionary or object to extract fields from'}, 'requestId': 'b1a6c0baa73f4a86a6cf7b9e8b936b26'})\n",
+          "outputSha256": "b9cdca2114480415836fc02254ec981bb7e187182a5379aaa32e43c7d4fe4e9c"
         }
       ],
       "codes": [
@@ -64,23 +64,23 @@
         {
           "code": 0,
           "signal": null,
-          "stdout": "PASS: unified 415 error code\n",
+          "stdout": "PASS: 415/404/405/fallback HTTP error bodies\n",
           "stderr": "",
-          "outputSha256": "865b7e03f0bb584b99ab7e0493fb2a83e3fa0381d99af42573d9e8a1886a3e4d"
+          "outputSha256": "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1"
         },
         {
           "code": 0,
           "signal": null,
-          "stdout": "PASS: unified 415 error code\n",
+          "stdout": "PASS: 415/404/405/fallback HTTP error bodies\n",
           "stderr": "",
-          "outputSha256": "865b7e03f0bb584b99ab7e0493fb2a83e3fa0381d99af42573d9e8a1886a3e4d"
+          "outputSha256": "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1"
         },
         {
           "code": 0,
           "signal": null,
-          "stdout": "PASS: unified 415 error code\n",
+          "stdout": "PASS: 415/404/405/fallback HTTP error bodies\n",
           "stderr": "",
-          "outputSha256": "865b7e03f0bb584b99ab7e0493fb2a83e3fa0381d99af42573d9e8a1886a3e4d"
+          "outputSha256": "8c2c048dd53245a31d1d706ad54cce976f7092533d204e61310c9b5f4a7b41e1"
         }
       ],
       "codes": [

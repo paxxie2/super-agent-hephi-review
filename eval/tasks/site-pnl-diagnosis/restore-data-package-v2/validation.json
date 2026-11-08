@@ -1,105 +1,103 @@
 {
-  "schemaVersion": 1,
-  "taskId": "restore-data-package-v2",
-  "checkedAt": "2026-11-08T16:07:16Z",
-  "checker": "agent-assisted (not an independent human reviewer)",
-  "repoPathUsed": "/Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis",
-  "base": {
-    "sha": "e00f338b098546adc40156dc15b4b6559e19835d",
-    "resolvedCommit": "e00f338b098546adc40156dc15b4b6559e19835d",
-    "gitCatFileType": "commit",
-    "existsInLocalClone": true,
-    "expected": "fail",
-    "exitCodes": [
-      1,
-      1,
-      1
-    ],
-    "consistent": true,
+  "mode": "full",
+  "taskDir": "/Users/zm/repos/hephi-dev-base/eval/tasks/site-pnl-diagnosis/restore-data-package-v2",
+  "structure": {
     "ok": true,
-    "runs": [
-      {
-        "code": 1,
-        "signal": null,
-        "outputSha256": "cabc23247a91c911364e1083e5e7d7673f84b96078bdaabda5ecbdac7c2c0771",
-        "stdoutTail": ""
-      },
-      {
-        "code": 1,
-        "signal": null,
-        "outputSha256": "cabc23247a91c911364e1083e5e7d7673f84b96078bdaabda5ecbdac7c2c0771",
-        "stdoutTail": ""
-      },
-      {
-        "code": 1,
-        "signal": null,
-        "outputSha256": "cabc23247a91c911364e1083e5e7d7673f84b96078bdaabda5ecbdac7c2c0771",
-        "stdoutTail": ""
-      }
+    "errors": [],
+    "warnings": [
+      "environment.offline=true：lockfile 未在任务目录/本地仓库找到（uv.lock）；完整模式会强制校验，dry-run 无法确认仓库锁文件"
     ]
   },
-  "command": "node eval/check-task.mjs eval/tasks/site-pnl-diagnosis/restore-data-package-v2 --repo /Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis --json",
-  "mode": "full (not dry-run)",
-  "repeats": 3,
-  "reference": {
-    "expected": "pass",
-    "exitCodes": [
-      0,
-      0,
-      0
-    ],
-    "consistent": true,
-    "ok": true,
-    "runs": [
-      {
-        "code": 0,
-        "signal": null,
-        "outputSha256": "36515e7e88063855739ba55540973303ac8ea4d49aa0be124d1e58dbe9a6d10d",
-        "stdoutTail": "PASS: seed path restored with precise runtime database ignore rules\n"
-      },
-      {
-        "code": 0,
-        "signal": null,
-        "outputSha256": "36515e7e88063855739ba55540973303ac8ea4d49aa0be124d1e58dbe9a6d10d",
-        "stdoutTail": "PASS: seed path restored with precise runtime database ignore rules\n"
-      },
-      {
-        "code": 0,
-        "signal": null,
-        "outputSha256": "36515e7e88063855739ba55540973303ac8ea4d49aa0be124d1e58dbe9a6d10d",
-        "stdoutTail": "PASS: seed path restored with precise runtime database ignore rules\n"
-      }
-    ]
-  },
-  "scope": {
-    "allowedFiles": [
-      ".gitignore",
-      "backend/app/data/__init__.py",
-      "backend/app/data/seed.py"
-    ],
-    "changedFiles": [
-      ".gitignore",
-      "backend/app/data/__init__.py",
-      "backend/app/data/seed.py"
-    ],
-    "outside": [],
-    "ok": true
-  },
-  "environment": {
-    "declared": {
+  "checks": {
+    "environment": {
       "offline": true,
       "lockfile": "uv.lock",
       "found": true,
       "ok": true
     },
-    "offline": true,
-    "hiddenTestStdlibOnly": true,
-    "note": "隐藏测试只用 Python 标准库（ast/os/sys/subprocess/types/importlib），不联网、不安装依赖；check-task 完整模式在临时 git worktree 中执行。"
+    "base": {
+      "expected": "fail",
+      "runs": [
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 11, in <module>\nAssertionError: missing restored source file backend/app/data/__init__.py\n",
+          "outputSha256": "7402877ee86f3b5ed76a2a1133a6a048b4ec90e050545550ccd7d97d5655ddc1"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 11, in <module>\nAssertionError: missing restored source file backend/app/data/__init__.py\n",
+          "outputSha256": "7402877ee86f3b5ed76a2a1133a6a048b4ec90e050545550ccd7d97d5655ddc1"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 11, in <module>\nAssertionError: missing restored source file backend/app/data/__init__.py\n",
+          "outputSha256": "7402877ee86f3b5ed76a2a1133a6a048b4ec90e050545550ccd7d97d5655ddc1"
+        }
+      ],
+      "codes": [
+        1,
+        1,
+        1
+      ],
+      "consistent": true,
+      "ok": true
+    },
+    "scope": {
+      "allowedFiles": [
+        ".gitignore",
+        "backend/app/data/__init__.py",
+        "backend/app/data/seed.py"
+      ],
+      "changedFiles": [
+        ".gitignore",
+        "backend/app/data/__init__.py",
+        "backend/app/data/seed.py"
+      ],
+      "outside": [],
+      "ok": true
+    },
+    "reference": {
+      "expected": "pass",
+      "runs": [
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: seed restores empty-db seeding and precise runtime-database ignore rules\n",
+          "stderr": "",
+          "outputSha256": "a06043990718cb65108d51b86bff2154ab48d57e0239f9a5a2a6c09553645e13"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: seed restores empty-db seeding and precise runtime-database ignore rules\n",
+          "stderr": "",
+          "outputSha256": "a06043990718cb65108d51b86bff2154ab48d57e0239f9a5a2a6c09553645e13"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: seed restores empty-db seeding and precise runtime-database ignore rules\n",
+          "stderr": "",
+          "outputSha256": "a06043990718cb65108d51b86bff2154ab48d57e0239f9a5a2a6c09553645e13"
+        }
+      ],
+      "codes": [
+        0,
+        0,
+        0
+      ],
+      "consistent": true,
+      "ok": true
+    }
   },
-  "overallOk": true,
-  "limitations": [
-    "评审为 agent 辅助，没有第二名独立人类评审。",
-    "隐藏测试只校验本卡目标断言（源码/AST/配置行为），不证明整仓回归测试通过。",
-    "变体卡的需求点为本次新设计；base 是真实历史提交，reference.patch 是实现该变体的参考修复（非历史 commit 的 diff）。"
-  ]
+  "ok": true,
+  "baseSha": "e00f338b098546adc40156dc15b4b6559e19835d",
+  "repo": "/Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis",
+  "repeats": 3
 }

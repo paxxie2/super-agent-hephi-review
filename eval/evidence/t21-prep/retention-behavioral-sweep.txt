@@ -1,0 +1,30 @@
+# q1-retention 23 卡 full-mode 行为验证（2026-11-09 02:1x +08，外部审查 F4）
+
+命令：node eval/check-task.mjs <card> --repo /Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis --json
+判定：ok:true = base 隐藏测试 3×非0一致 + reference 补丁 3×exit0一致 + scope outside=[]
+
+backend-input-validation-v2 PASS ok:true
+backend-input-validation-v3 PASS ok:true
+backend-validation-messages PASS ok:true
+backend-validation-messages-v2 PASS ok:true
+backend-validation-messages-v3 PASS ok:true
+health-service-field-v2 PASS ok:true
+health-service-field-v3 PASS ok:true
+history-page-size-v2 PASS ok:true
+history-page-size-v3 PASS ok:true
+money-window-helpers-v2 PASS ok:true
+money-window-helpers-v3 PASS ok:true
+previous-window-order PASS ok:true
+previous-window-order-v2 PASS ok:true
+previous-window-order-v3 PASS ok:true
+restore-data-package PASS ok:true
+restore-data-package-v2 PASS ok:true
+restore-data-package-v3 PASS ok:true
+restore-health-service-id PASS ok:true
+restore-health-service-id-v2 PASS ok:true
+restore-health-service-id-v3 PASS ok:true
+settings-dead-branches PASS ok:true
+settings-dead-branches-v2 PASS ok:true
+settings-dead-branches-v3 PASS ok:true
+
+汇总：23/23 PASS ok:true，0 FAIL

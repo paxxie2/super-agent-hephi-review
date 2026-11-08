@@ -1,101 +1,99 @@
 {
-  "schemaVersion": 1,
-  "taskId": "settings-dead-branches-v2",
-  "checkedAt": "2026-11-08T16:07:16Z",
-  "checker": "agent-assisted (not an independent human reviewer)",
-  "repoPathUsed": "/Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis",
-  "base": {
-    "sha": "8d2ec5858ed3071eae598e5afb30b069807ce598",
-    "resolvedCommit": "8d2ec5858ed3071eae598e5afb30b069807ce598",
-    "gitCatFileType": "commit",
-    "existsInLocalClone": true,
-    "expected": "fail",
-    "exitCodes": [
-      1,
-      1,
-      1
-    ],
-    "consistent": true,
+  "mode": "full",
+  "taskDir": "/Users/zm/repos/hephi-dev-base/eval/tasks/site-pnl-diagnosis/settings-dead-branches-v2",
+  "structure": {
     "ok": true,
-    "runs": [
-      {
-        "code": 1,
-        "signal": null,
-        "outputSha256": "37bafc1eb3cdd0f7183e53cc67dec31b9c8c338b0f2807335039af7e3092ed76",
-        "stdoutTail": ""
-      },
-      {
-        "code": 1,
-        "signal": null,
-        "outputSha256": "37bafc1eb3cdd0f7183e53cc67dec31b9c8c338b0f2807335039af7e3092ed76",
-        "stdoutTail": ""
-      },
-      {
-        "code": 1,
-        "signal": null,
-        "outputSha256": "37bafc1eb3cdd0f7183e53cc67dec31b9c8c338b0f2807335039af7e3092ed76",
-        "stdoutTail": ""
-      }
+    "errors": [],
+    "warnings": [
+      "environment.offline=true：lockfile 未在任务目录/本地仓库找到（uv.lock）；完整模式会强制校验，dry-run 无法确认仓库锁文件"
     ]
   },
-  "command": "node eval/check-task.mjs eval/tasks/site-pnl-diagnosis/settings-dead-branches-v2 --repo /Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis --json",
-  "mode": "full (not dry-run)",
-  "repeats": 3,
-  "reference": {
-    "expected": "pass",
-    "exitCodes": [
-      0,
-      0,
-      0
-    ],
-    "consistent": true,
-    "ok": true,
-    "runs": [
-      {
-        "code": 0,
-        "signal": null,
-        "outputSha256": "979b1bf8ac9405f0e4898ee37637a2ccc9cf84b982db3728a61bf21c607b2a35",
-        "stdoutTail": "PASS: dead branch removed and the dotenv entry point parameterised without behavior change\n"
-      },
-      {
-        "code": 0,
-        "signal": null,
-        "outputSha256": "979b1bf8ac9405f0e4898ee37637a2ccc9cf84b982db3728a61bf21c607b2a35",
-        "stdoutTail": "PASS: dead branch removed and the dotenv entry point parameterised without behavior change\n"
-      },
-      {
-        "code": 0,
-        "signal": null,
-        "outputSha256": "979b1bf8ac9405f0e4898ee37637a2ccc9cf84b982db3728a61bf21c607b2a35",
-        "stdoutTail": "PASS: dead branch removed and the dotenv entry point parameterised without behavior change\n"
-      }
-    ]
-  },
-  "scope": {
-    "allowedFiles": [
-      "backend/app/settings.py"
-    ],
-    "changedFiles": [
-      "backend/app/settings.py"
-    ],
-    "outside": [],
-    "ok": true
-  },
-  "environment": {
-    "declared": {
+  "checks": {
+    "environment": {
       "offline": true,
       "lockfile": "uv.lock",
       "found": true,
       "ok": true
     },
-    "offline": true,
-    "hiddenTestStdlibOnly": true,
-    "note": "隐藏测试只用 Python 标准库（ast/os/sys/subprocess/types/importlib），不联网、不安装依赖；check-task 完整模式在临时 git worktree 中执行。"
+    "base": {
+      "expected": "fail",
+      "runs": [
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 30, in <module>\nAssertionError: from_env must call the dotenv entry point unconditionally\n",
+          "outputSha256": "d033badd0550f2467c394366612df84f959ec527c403bbb5150586828e7abfd4"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 30, in <module>\nAssertionError: from_env must call the dotenv entry point unconditionally\n",
+          "outputSha256": "d033badd0550f2467c394366612df84f959ec527c403bbb5150586828e7abfd4"
+        },
+        {
+          "code": 1,
+          "signal": null,
+          "stdout": "",
+          "stderr": "Traceback (most recent call last):\n  File \"<stdin>\", line 30, in <module>\nAssertionError: from_env must call the dotenv entry point unconditionally\n",
+          "outputSha256": "d033badd0550f2467c394366612df84f959ec527c403bbb5150586828e7abfd4"
+        }
+      ],
+      "codes": [
+        1,
+        1,
+        1
+      ],
+      "consistent": true,
+      "ok": true
+    },
+    "scope": {
+      "allowedFiles": [
+        "backend/app/settings.py"
+      ],
+      "changedFiles": [
+        "backend/app/settings.py"
+      ],
+      "outside": [],
+      "ok": true
+    },
+    "reference": {
+      "expected": "pass",
+      "runs": [
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: dotenv entry reads real files with correct priority and fallbacks\n",
+          "stderr": "",
+          "outputSha256": "82e6a4a86aa99ba3a202b0b6369de61a22729123d553ccc8773798e7897ae07b"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: dotenv entry reads real files with correct priority and fallbacks\n",
+          "stderr": "",
+          "outputSha256": "82e6a4a86aa99ba3a202b0b6369de61a22729123d553ccc8773798e7897ae07b"
+        },
+        {
+          "code": 0,
+          "signal": null,
+          "stdout": "PASS: dotenv entry reads real files with correct priority and fallbacks\n",
+          "stderr": "",
+          "outputSha256": "82e6a4a86aa99ba3a202b0b6369de61a22729123d553ccc8773798e7897ae07b"
+        }
+      ],
+      "codes": [
+        0,
+        0,
+        0
+      ],
+      "consistent": true,
+      "ok": true
+    }
   },
-  "overallOk": true,
-  "limitations": [
-    "评审为 agent 辅助，没有第二名独立人类评审。",
-    "隐藏测试只校验本卡目标断言（源码/AST/配置行为），不证明整仓回归测试通过。",
-    "变体卡的需求点为本次新设计；base 是真实历史提交，reference.patch 是实现该变体的参考修复（非历史 commit 的 diff）。"
-  ]
+  "ok": true,
+  "baseSha": "8d2ec5858ed3071eae598e5afb30b069807ce598",
+  "repo": "/Users/zm/dsh-instances/experiment/sources/site-pnl-diagnosis",
+  "repeats": 3
 }

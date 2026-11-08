@@ -13,3 +13,6 @@
 
 ## 未验证项
 未做真实模型运行、未做人类双评审、未验证该补丁在完整仓库工具链下的全部回归测试（hidden-test 只覆盖本任务目标断言）；污染门槛未达标（见 task.json.contamination）。
+
+## F4 整改记录（外部审查）
+原 hidden-test 只做静态/桩断言（文件存在与 callable、AST/SQL 字符串计数、dotenv 模块 stub）。F4 整改改为真实行为断言：真实临时 SQLite + 真实服务/播种函数调用、真实临时 git 仓库的 `git check-ignore`、真实临时 `.env` 文件；断言覆盖参数化读取、优先级、缺省回退与幂等。需求点语义与 allowedFiles 未变，reference.patch 未改动。
