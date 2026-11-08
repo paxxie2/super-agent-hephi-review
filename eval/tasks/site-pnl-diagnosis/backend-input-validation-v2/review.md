@@ -23,7 +23,7 @@
   2. `POST /api/diagnoses/{id}/scenarios` 带未知字段 → 同样断言响应指向未知字段；
   3. 仅含已知字段（只缺必填项）的请求 → 断言不被报成“不支持的字段”。
   等价实现（不用 ConfigDict、行为正确）可通过；AST 已完全移除，不再作为判据。
-- **reference.patch 改动（需求修订，待负责人确认——非『语义不变』）**：原卡仅要求拒绝未知字段；加强后的验收（响应含 code 与字段名）超出原语义，属任务修订：原补丁用 `ConfigDict(extra="forbid")`，但 pydantic 的 `extra_forbidden` 错误 `loc` 只有 `body`，响应不携带未知字段名，无法满足 issue“错误指向未知字段”。现补丁改为 `StrictRequestModel`（`ConfigDict(extra="forbid")` + before `model_validator` 显式列出未知字段并写入中文消息），行为仍是“拒绝未知字段”，仅补齐字段名定位；补丁已重新生成。
+- **reference.patch 改动（需求修订，负责人已批准 2026-11-09——非『语义不变』）**：原卡仅要求拒绝未知字段；加强后的验收（响应含 code 与字段名）超出原语义，属任务修订：原补丁用 `ConfigDict(extra="forbid")`，但 pydantic 的 `extra_forbidden` 错误 `loc` 只有 `body`，响应不携带未知字段名，无法满足 issue“错误指向未知字段”。现补丁改为 `StrictRequestModel`（`ConfigDict(extra="forbid")` + before `model_validator` 显式列出未知字段并写入中文消息），行为仍是“拒绝未知字段”，仅补齐字段名定位；补丁已重新生成。
 - **full-mode 结果**：`ok:true`；base 3/3 失败（`error response must point at the unknown field: {"fieldErrors":{"siteId":"Field required"}...}`，即 base 不报未知字段），reference 3/3 通过且退出码一致；`outside=[]`。
 - **限制**：AST 不再使用；未做变异测试、未做真实模型运行。
 - **校验分类（F15 后的 check-task）**：base 3/3 均为 `target-assertion-failed`（非 environment-error），3 次 `normalizedSha256` 相同；reference 3/3 `codes=[0,0,0]` 且输出一致。

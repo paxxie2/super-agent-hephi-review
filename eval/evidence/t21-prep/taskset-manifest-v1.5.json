@@ -1,8 +1,8 @@
 {
-  "version": "v1.4",
-  "frozenAt": "2026-11-08T19:07:01.934Z",
-  "preregSha256": "7bde8af3725177444223135cdb4e8b9e0eafefa13b4d6517b6dc925a3e5c8b3f",
-  "note": "regenerated after review-r9 card edits; bi-v2 marked as pending-owner-approval revision (not dispatchable until approved); health-v2 fixed-text assertion restored",
+  "version": "v1.5",
+  "frozenAt": "2026-11-08T19:10:30.746Z",
+  "preregSha256": "b9f2070f1850c1a5159982817db1491c0c2d7b7712eb40728fe86641470eee87",
+  "note": "bi-v2 requirement revision approved by owner 2026-11-09; card frozen and dispatchable",
   "roleCounts": {
     "non-q1-tooling": 12,
     "q1-devexposed-original": 5,
@@ -147,10 +147,10 @@
       "category": "cross-module",
       "group": "site-pnl-diagnosis",
       "taskJsonSha256": "fb6804c7e3f546853fe60cc44ca1e1602bf91bf67bb477bfb9005bd3c03ece41",
-      "issueSha256": "adc1719e9c5ab6a2263a49e5e0079ec556fce05a02db2136000cf70028c57a2d",
+      "issueSha256": "82677e4b029adcc1e2cee95e6676e7c1321aa86c2dce41ade5a74542d5869f22",
       "validationOk": true,
       "role": "q1-retention",
-      "revision": "REQUIREMENT REVISION PENDING OWNER APPROVAL (review-r9 R7): acceptance extended to require code=VALIDATION_ERROR + unknown-field naming; NOT dispatched until approved"
+      "revision": "requirement revision APPROVED BY OWNER 2026-11-09 (code=VALIDATION_ERROR + unknown-field naming); frozen at this hash, dispatchable"
     },
     {
       "taskId": "backend-input-validation-v3",
