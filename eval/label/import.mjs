@@ -27,12 +27,17 @@
 //   - 枚举值必须在 RUBRIC 规定的集合内；
 //   - 判定为 has-defect / unrelatedChanges.has / testWeakening.has 时 notes 必填；
 //   - has-defect 时 notes 必须写明缺陷位置（文件+行），见 RUBRIC §5；
-//   - unrelatedChanges.has / testWeakening.has 为 true 时 positions 至少一条（file + 行/块定位）。
+//   - unrelatedChanges.has / testWeakening.has 为 true 时 positions 至少一条（file + 行/块定位）；
+//   - 私有映射（--mapping）：mapping.batch 必须等于 labels.batch 与 manifest.batch；
+//     mapping 的 case 集必须与 labels/manifest 完整一一对应（不多不少），每个 case 的 runId 非空且唯一；
+//     若 mapping 带 caseCount/manifestSha256（新导出会写），必须与本次 manifest 一致。
+//     不一致一律 exit 1，不得只按可重复的 case-001 编号取映射。
 //
 // 退出码：0=完整；1=不完整/非法；2=用法或环境缺失。
 // 本脚本不接触 git，不读材料内容，只校验标注 JSON 与清单。
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -182,11 +187,76 @@ export function validateLabels(manifest, labels, rawLabelsText = null) {
   return { ok: errors.length === 0, errors, summary }
 }
 
-function normalize(manifest, labels, mapping) {
+function sha256Text(text) {
+  return createHash('sha256').update(text).digest('hex')
+}
+
+// F05：默认只校验 labels/manifest 的批次，normalize 又按可重复的 case-001 编号取映射，
+// 另一批次的 mapping 会被接受并污染分组。这里把 mapping 的身份作为一等校验：
+//   - mapping.batch 必须等于 manifest.batch（labels 批次已由 validateLabels 校验，这里再防御）；
+//   - mapping.mapping 的 case 集必须与 labels.cases / manifest.cases 完整一一对应（不多不少）；
+//   - 每条映射的 runId 必须是非空、唯一（一一对应；不允许两个 case 指向同一 run）；
+//   - 若 mapping 带导出清单身份（caseCount / manifestSha256），必须与本次 manifest 一致，
+//     避免同批多次导出时只凭重复的 case 编号错配。
+function normalize(manifest, labels, mapping, manifestRawText) {
+  if (!isObject(mapping)) throw new Error('mapping 必须是对象')
+  const problems = []
+  const manifestIds = manifest.cases.map((item) => item.blindId)
+  if (labels.batch !== manifest.batch) problems.push(`labels.batch 不一致：labels=${labels.batch ?? '(缺失)'} manifest=${manifest.batch}`)
+  if (mapping.batch !== manifest.batch) problems.push(`mapping.batch 不一致：mapping=${mapping.batch ?? '(缺失)'} manifest=${manifest.batch}（跨批次映射会错绑任务，已拒绝）`)
+  if (!isObject(mapping.mapping)) problems.push('mapping.mapping 必须是对象')
+
+  const mappingCases = isObject(mapping.mapping) ? mapping.mapping : {}
+  const labelIds = Object.keys(labels.cases ?? {})
+  const mappingIds = Object.keys(mappingCases)
+  for (const blindId of mappingIds) {
+    if (!manifestIds.includes(blindId)) problems.push(`mapping 含未知 blindId：${blindId}（不在 manifest 中）`)
+  }
+  for (const blindId of manifestIds) {
+    if (!Object.hasOwn(mappingCases, blindId)) problems.push(`mapping 缺少 ${blindId}`)
+    if (!labelIds.includes(blindId)) problems.push(`labels 缺少 ${blindId}`)
+  }
+  for (const blindId of labelIds) {
+    if (!manifestIds.includes(blindId)) problems.push(`labels 含未知 blindId：${blindId}`)
+  }
+
+  const runIdOwner = new Map()
+  for (const blindId of manifestIds) {
+    const mapped = Object.hasOwn(mappingCases, blindId) ? mappingCases[blindId] : undefined
+    if (mapped === undefined) continue
+    if (!isObject(mapped)) {
+      problems.push(`mapping.${blindId} 必须是对象`)
+      continue
+    }
+    if (!nonEmptyString(mapped.runId)) {
+      problems.push(`mapping.${blindId}.runId 必须是非空字符串（不能只靠可重复的 ${blindId} 编号）`)
+    } else if (runIdOwner.has(mapped.runId)) {
+      problems.push(`mapping 的 runId 重复：${mapped.runId}（${runIdOwner.get(mapped.runId)} 与 ${blindId} 不能指向同一 run）`)
+    } else {
+      runIdOwner.set(mapped.runId, blindId)
+    }
+    if (!nonEmptyString(mapped.taskId)) problems.push(`mapping.${blindId}.taskId 必须是非空字符串`)
+    if (!nonEmptyString(mapped.arm)) problems.push(`mapping.${blindId}.arm 必须是非空字符串`)
+    if (mapped.repetition !== undefined && (!Number.isInteger(mapped.repetition) || mapped.repetition < 1)) {
+      problems.push(`mapping.${blindId}.repetition 必须是正整数（可选）`)
+    }
+  }
+
+  // 可选导出清单身份：新导出会写 caseCount + manifestSha256；旧 mapping 没有这两个字段时不强行失败，
+  // 但一旦提供就必须与本次 manifest 完全一致。
+  if (mapping.caseCount !== undefined && mapping.caseCount !== manifestIds.length) {
+    problems.push(`mapping.caseCount 与 manifest 不一致：mapping=${mapping.caseCount} manifest=${manifestIds.length}`)
+  }
+  if (mapping.manifestSha256 !== undefined) {
+    const actual = sha256Text(manifestRawText ?? '')
+    if (mapping.manifestSha256 !== actual) problems.push(`mapping.manifestSha256 与本次 manifest 不一致：mapping=${mapping.manifestSha256} actual=${actual}`)
+  }
+
+  if (problems.length > 0) throw new Error(`映射校验失败：${problems.join('; ')}`)
+
   const normalized = { batch: manifest.batch, labeler: labels.labeler, runs: [] }
   for (const item of manifest.cases) {
-    const mapped = mapping.mapping?.[item.blindId]
-    if (!mapped) throw new Error(`映射缺少 ${item.blindId}`)
+    const mapped = mappingCases[item.blindId]
     const label = labels.cases[item.blindId]
     normalized.runs.push({
       runId: mapped.runId,
@@ -308,6 +378,34 @@ function selfTest(asJson) {
     const normalized = existsSync(normalizedFile) ? readJSON(normalizedFile) : null
     record('带私有映射 → 还原为 run 级标注', normalizedRun.status === 0 && normalized?.runs?.length === 2 && normalized.runs.some((run) => run.arm === 'native'), `exit=${normalizedRun.status}`)
 
+    // F05：私有映射必须带正确的批次/完整 case 集/一一对应 runId；跨批次或错配必须拒绝。
+    const cloneMapping = () => JSON.parse(JSON.stringify(mapping))
+    const wrongBatchMapping = cloneMapping()
+    wrongBatchMapping.batch = 'selftest-b4-other'
+    const wrongBatchRun = cli(['--manifest', manifestFile, '--labels', goodFile, '--mapping', write('mapping-wrong-batch.json', wrongBatchMapping), '--json'])
+    record('F05 负例：mapping.batch 与 labels/manifest 不一致 → exit 1', wrongBatchRun.status === 1 && wrongBatchRun.stdout.includes('mapping.batch'), `exit=${wrongBatchRun.status}`)
+
+    const extraCaseMapping = cloneMapping()
+    extraCaseMapping.mapping['case-999'] = { runId: 'selftest-t9-off', taskId: 't9', arm: 'off' }
+    const extraCaseRun = cli(['--manifest', manifestFile, '--labels', goodFile, '--mapping', write('mapping-extra-case.json', extraCaseMapping), '--json'])
+    record('F05 负例：mapping 含多余 case → exit 1', extraCaseRun.status === 1 && extraCaseRun.stdout.includes('未知 blindId'), `exit=${extraCaseRun.status}`)
+
+    const missingCaseMapping = cloneMapping()
+    delete missingCaseMapping.mapping['case-002']
+    const missingCaseRun = cli(['--manifest', manifestFile, '--labels', goodFile, '--mapping', write('mapping-missing-case.json', missingCaseMapping), '--json'])
+    record('F05 负例：mapping 缺 case → exit 1', missingCaseRun.status === 1 && missingCaseRun.stdout.includes('缺少 case-002'), `exit=${missingCaseRun.status}`)
+
+    const duplicateRunIdMapping = cloneMapping()
+    duplicateRunIdMapping.mapping['case-002'].runId = duplicateRunIdMapping.mapping['case-001'].runId
+    const duplicateRunIdRun = cli(['--manifest', manifestFile, '--labels', goodFile, '--mapping', write('mapping-duplicate-run.json', duplicateRunIdMapping), '--json'])
+    record('F05 负例：两个 case 映射到同一 runId → exit 1', duplicateRunIdRun.status === 1 && duplicateRunIdRun.stdout.includes('runId 重复'), `exit=${duplicateRunIdRun.status}`)
+
+    const wrongCaseCountMapping = cloneMapping()
+    wrongCaseCountMapping.caseCount = 3
+    wrongCaseCountMapping.manifestSha256 = '0'.repeat(64)
+    const wrongIdentityRun = cli(['--manifest', manifestFile, '--labels', goodFile, '--mapping', write('mapping-wrong-identity.json', wrongCaseCountMapping), '--json'])
+    record('F05 负例：导出清单身份（caseCount/manifestSha256）不匹配 → exit 1', wrongIdentityRun.status === 1 && wrongIdentityRun.stdout.includes('caseCount') && wrongIdentityRun.stdout.includes('manifestSha256'), `exit=${wrongIdentityRun.status}`)
+
     const ok = steps.every((step) => step.ok)
     if (asJson) console.log(JSON.stringify({ selfTest: ok, steps }, null, 2))
     else {
@@ -335,10 +433,12 @@ function main() {
   if (!existsSync(labelsPath)) usage(`labels 不存在：${labelsPath}`)
 
   let manifest
+  let manifestRawText
   let labels
   let labelsRawText
   try {
-    manifest = readJSON(manifestPath)
+    manifestRawText = readFileSync(manifestPath, 'utf8')
+    manifest = JSON.parse(manifestRawText)
   } catch (error) {
     usage(`manifest 不是合法 JSON：${error.message}`)
   }
@@ -364,7 +464,7 @@ function main() {
       usage(`mapping 不是合法 JSON：${error.message}`)
     }
     try {
-      report.normalized = normalize(manifest, labels, mapping)
+      report.normalized = normalize(manifest, labels, mapping, manifestRawText)
     } catch (error) {
       report.ok = false
       report.errors = [error.message]

@@ -63,6 +63,15 @@ const HARD_TRACE_PATTERNS = [
   { id: 'pull-ref', re: /\bpull\/\d+\b|#\d{2,4}\b(?=[^\n]*(?:merge|pr\b))/i },
   { id: 'run-id-arm', re: /\b[a-z0-9][a-z0-9._-]*[-_](?:off|native|staged|legacy-system|full-package)[-_][a-z0-9._-]+\b/i },
   { id: 'decision-log', re: /decisions\.jsonl/i },
+  // F06：已发现的漏配写法——当前 schema 的 JSON 形态、带引号/空格的赋值、现行中文组名，
+  // 以及裸 legacy-system/full-package。全部按硬痕迹 fail-closed（不静默删正文后放行）。
+  { id: 'arm-json', re: /"arm"\s*:\s*"(?:legacy-system|full-package|off|native|staged|shadow)"/i },
+  { id: 'arm-quoted', re: /\barm\b\s*(?:=+|:|：)\s*["'`]\s*(?:legacy-system|full-package|off|native|staged|shadow)\s*["'`]/i },
+  { id: 'arm-legacy-full', re: /\barm\b\s*(?:=+|:|：)\s*["'`]?\s*(?:legacy-system|full-package)\b/i },
+  { id: 'legacy-system-word', re: /legacy-system/i },
+  { id: 'full-package-word', re: /full-package/i },
+  { id: 'zh-group', re: /原系统组|整包组|原系统|整包/ },
+  { id: 'zh-group-json', re: /"(?:group|arm|组别|运行分组)"\s*:\s*"(?:原系统组|整包组|原系统|整包|legacy-system|full-package)"/i },
 ]
 
 // 软痕迹：只在 requirement/allowed-scope 正文里提示（不阻断），由材料作者人工判断。
@@ -321,7 +330,8 @@ function runExport(options) {
     rubric: 'eval/label/RUBRIC.md',
     note: '本清单不含组别、taskId、runId；盲评结束后用私有映射还原。',
   }
-  writeFileSync(join(out, 'manifest.json'), `${JSON.stringify(exportManifest, null, 2)}\n`, 'utf8')
+  const exportManifestText = `${JSON.stringify(exportManifest, null, 2)}\n`
+  writeFileSync(join(out, 'manifest.json'), exportManifestText, 'utf8')
   writeFileSync(join(out, 'labels.template.json'), `${JSON.stringify({ batch: manifest.batch, labeler: null, cases: templateCases }, null, 2)}\n`, 'utf8')
 
   mkdirSync(dirname(mappingPath), { recursive: true })
@@ -329,6 +339,9 @@ function runExport(options) {
     schemaVersion: 1,
     batch: manifest.batch,
     seed,
+    // F05：导出清单身份；import 用它核对“同批多次导出”时 case-001 编号复用的错配。
+    caseCount: manifestCases.length,
+    manifestSha256: sha256(exportManifestText),
     note: '私有映射：只在盲评结束后打开；不得与材料一起分发。',
     mapping,
   }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
@@ -496,6 +509,86 @@ function selfTest(asJson) {
       restoreDetail = `exit=${mappingRun.status} ${mappingRun.stderr.slice(0, 200)}`
     }
     record('B4-01 私有映射可按 blindId 还原 runId/arm/taskId 且不进入材料目录', restoreOk, restoreDetail)
+
+    // F06：现行实际写法的组别泄漏必须拒绝（fail-closed），且不静默删正文后放行。
+    const leakTaskDir = join(root, 'task-leak')
+    mkdirSync(leakTaskDir, { recursive: true })
+    writeFileSync(join(leakTaskDir, 'issue.md'), '任务：增加字段。\n运行分组：原系统组\n{"arm": "legacy-system"}\n', 'utf8')
+    writeFileSync(join(leakTaskDir, 'review.md'), '合法范围：src/**。\n', 'utf8')
+    const leakManifest = join(root, 'manifest-leak.json')
+    writeFileSync(leakManifest, JSON.stringify({
+      batch: 'selftest-b4-leak',
+      seed: 7,
+      tasks: { t1: { taskDir: leakTaskDir } },
+      runs: [{ runId: 'selftest-t1-off', taskId: 't1', arm: 'off', repo, base, head }],
+    }), 'utf8')
+    const leakOut = join(root, 'out-leak')
+    const leakRun = runCliSafe(['--manifest', leakManifest, '--out', leakOut, '--mapping', join(root, 'private', 'mapping-leak.json')])
+    record('F06 负例：requirement 含中文“原系统组”+ JSON "arm":"legacy-system" → 拒绝导出（exit 1）',
+      leakRun.status === 1
+        && /HARD [^\n]*requirement[^\n]*\[zh-group\]/.test(leakRun.stderr)
+        && /HARD [^\n]*requirement[^\n]*\[arm-json\]/.test(leakRun.stderr)
+        && !existsSync(leakOut),
+      `exit=${leakRun.status} outExists=${existsSync(leakOut)} stderr=${leakRun.stderr.slice(0, 500)}`)
+
+    const leakScanOnly = runCliSafe(['--manifest', leakManifest, '--out', join(root, 'out-leak-scan'), '--mapping', join(root, 'private', 'mapping-leak-scan.json'), '--scan-only'])
+    record('F06 负例：scan-only 遇到同样泄漏也拒绝（exit 1，不生成材料）',
+      leakScanOnly.status === 1 && !existsSync(join(root, 'out-leak-scan')),
+      `exit=${leakScanOnly.status} outExists=${existsSync(join(root, 'out-leak-scan'))}`)
+
+    const leakScopeDir = join(root, 'task-leak-scope')
+    mkdirSync(leakScopeDir, { recursive: true })
+    writeFileSync(join(leakScopeDir, 'issue.md'), '任务：增加字段。\n', 'utf8')
+    writeFileSync(join(leakScopeDir, 'review.md'), '合法范围：src/**。\n分组信息：{ "arm" : "full-package" }\n', 'utf8')
+    const leakScopeManifest = join(root, 'manifest-leak-scope.json')
+    writeFileSync(leakScopeManifest, JSON.stringify({
+      batch: 'selftest-b4-leak-scope',
+      seed: 7,
+      tasks: { t1: { taskDir: leakScopeDir } },
+      runs: [{ runId: 'selftest-t1-off', taskId: 't1', arm: 'off', repo, base, head }],
+    }), 'utf8')
+    const leakScopeOut = join(root, 'out-leak-scope')
+    const leakScopeRun = runCliSafe(['--manifest', leakScopeManifest, '--out', leakScopeOut, '--mapping', join(root, 'private', 'mapping-leak-scope.json')])
+    record('F06 负例：allowed-scope 含带空格 JSON `"arm" : "full-package"` → 拒绝（exit 1）',
+      leakScopeRun.status === 1
+        && /HARD [^\n]*allowed-scope[^\n]*\[arm-json\]/.test(leakScopeRun.stderr)
+        && !existsSync(leakScopeOut),
+      `exit=${leakScopeRun.status} stderr=${leakScopeRun.stderr.slice(0, 400)}`)
+
+    const leakDiffRepo = makeTracedRepo('repo-arm-json-trace', 'export const add = (a, b) => a + b\n// meta {"arm":"legacy-system"}\n')
+    const leakDiffManifest = join(root, 'manifest-leak-diff.json')
+    writeFileSync(leakDiffManifest, JSON.stringify({
+      batch: 'selftest-b4-leak-diff',
+      seed: 7,
+      tasks: { t1: { taskDir } },
+      runs: [{ runId: 'selftest-t1-native', taskId: 't1', arm: 'native', repo: leakDiffRepo.tracedRepo, base: leakDiffRepo.tracedBase, head: leakDiffRepo.tracedHead }],
+    }), 'utf8')
+    const leakDiffOut = join(root, 'out-leak-diff')
+    const leakDiffRun = runCliSafe(['--manifest', leakDiffManifest, '--out', leakDiffOut, '--mapping', join(root, 'private', 'mapping-leak-diff.json')])
+    record('F06 负例：diff 含 JSON `"arm":"legacy-system"` → 拒绝（exit 1，diff 层）',
+      leakDiffRun.status === 1
+        && /HARD [^\n]*diff[^\n]*\[arm-json\]/.test(leakDiffRun.stderr)
+        && !existsSync(leakDiffOut),
+      `exit=${leakDiffRun.status} stderr=${leakDiffRun.stderr.slice(0, 400)}`)
+
+    const leakAssignDir = join(root, 'task-leak-assign')
+    mkdirSync(leakAssignDir, { recursive: true })
+    writeFileSync(join(leakAssignDir, 'issue.md'), '任务：增加字段。\narm = "legacy-system"\narm=full-package\n', 'utf8')
+    writeFileSync(join(leakAssignDir, 'review.md'), '合法范围：src/**。\n', 'utf8')
+    const leakAssignManifest = join(root, 'manifest-leak-assign.json')
+    writeFileSync(leakAssignManifest, JSON.stringify({
+      batch: 'selftest-b4-leak-assign',
+      seed: 7,
+      tasks: { t1: { taskDir: leakAssignDir } },
+      runs: [{ runId: 'selftest-t1-off', taskId: 't1', arm: 'off', repo, base, head }],
+    }), 'utf8')
+    const leakAssignOut = join(root, 'out-leak-assign')
+    const leakAssignRun = runCliSafe(['--manifest', leakAssignManifest, '--out', leakAssignOut, '--mapping', join(root, 'private', 'mapping-leak-assign.json')])
+    record('F06 负例：requirement 含 `arm = "legacy-system"` / `arm=full-package` → 拒绝（exit 1）',
+      leakAssignRun.status === 1
+        && /\[arm-quoted\]|\[arm-legacy-full\]|\[legacy-system-word\]/.test(leakAssignRun.stderr)
+        && !existsSync(leakAssignOut),
+      `exit=${leakAssignRun.status} stderr=${leakAssignRun.stderr.slice(0, 400)}`)
 
     const ok = steps.every((step) => step.ok)
     if (asJson) console.log(JSON.stringify({ selfTest: ok, steps }, null, 2))
