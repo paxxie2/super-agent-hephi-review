@@ -989,6 +989,7 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
 
     # F01/F02：有效配对 = 两臂任务卡可核对且一致 + M1-M3/G1-G3 标签齐全。
     label_incomplete_pairs: list[dict] = []
+    label_incomplete_arms: list[dict[str, Run]] = []  # T08：与 label_incomplete_pairs 同序，供最不利补全计算（不入报告 JSON）
     identity_unresolved_pairs: list[dict] = []
     pairs: dict[tuple[str, str], dict[str, Run]] = {}
     for key, arms in structural_pairs.items():
@@ -1004,9 +1005,48 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
                 if getattr(arms[arm], name) is None
             ]
             label_incomplete_pairs.append({"taskId": key[0], "batch": key[1], "missing": missing})
+            label_incomplete_arms.append(arms)
             continue
         pairs[key] = arms
     n_pairs = len(pairs)
+
+    # T08（v5.4）：最不利缺失补全敏感性段（D-11 未批准，最不利补全为硬门口径）。
+    # 只作并列展示：不改有效配对分母、不改 LOCKED 判定。缺失按最不利方向补全——
+    # 实验组缺失计 unrelated=True、对照组缺失计 unrelated=False（缺失不得默认有利值）。
+    worst_case_rows: list[tuple[bool, bool]] = []
+    worst_case_imputed: list[dict] = []
+    for arms in pairs.values():
+        worst_case_rows.append((arms["treatment"].unrelated is True, arms["control"].unrelated is True))
+    for entry, arms in zip(label_incomplete_pairs, label_incomplete_arms):
+        t_missing = "treatment:unrelated" in entry["missing"]
+        c_missing = "control:unrelated" in entry["missing"]
+        worst_case_rows.append(
+            (
+                True if t_missing else arms["treatment"].unrelated is True,  # 实验组缺失 → 最不利=True
+                False if c_missing else arms["control"].unrelated is True,  # 对照组缺失 → 最不利=False
+            )
+        )
+        worst_case_imputed.append({
+            "taskId": entry["taskId"],
+            "batch": entry["batch"],
+            "missing": entry["missing"],
+            "imputed": {
+                "treatment_unrelated": (True if t_missing else arms["treatment"].unrelated),
+                "control_unrelated": (False if c_missing else arms["control"].unrelated),
+            },
+        })
+    wc_total = len(worst_case_rows)
+    worst_case_imputation = {
+        "total_pairs": wc_total,
+        "valid_pairs": n_pairs,
+        "imputed_pairs": len(label_incomplete_pairs),
+        "treatment_unrelated_count": sum(1 for t, _ in worst_case_rows if t),
+        "control_unrelated_count": sum(1 for _, c in worst_case_rows if c),
+        "treatment_unrelated_rate": (sum(1 for t, _ in worst_case_rows if t) / wc_total) if wc_total else None,
+        "control_unrelated_rate": (sum(1 for _, c in worst_case_rows if c) / wc_total) if wc_total else None,
+        "imputed_details": worst_case_imputed,
+        "note": "D-11 未批准，最不利补全为硬门口径：标签不完整配对按最不利方向补全（实验组缺失计 unrelated=True，对照组缺失计 unrelated=False）后的并列敏感性展示；不改变 LOCKED 判定与有效配对分母。仅覆盖标签不完整配对，非所有缺失结果的完整补全；本段不参与当前 LOCKED 判定，正式执行口径待负责人确认 D-11。",
+    }
 
     # F16/S04/N04：批次级标注一致性证据。校准证据必须绑定当前 batchId；
     # 全 human+双人+有效 kappa 才是 full；任何 agent 参与或单人 → degraded-partial；
@@ -1209,6 +1249,7 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
             "note": "按 PREREG v1.3 §1/§7.5/§9 核对；缺失字段标 unverified，不伪造回读；已知矛盾运行标 invalid 并保留成本。",
         },
         "label_incomplete_pairs": label_incomplete_pairs,
+        "worst_case_imputation": worst_case_imputation,
         "task_identity_unresolved_pairs": identity_unresolved_pairs,
         "label_quality": label_quality,
         "primary": primary,
@@ -1411,6 +1452,19 @@ def render_markdown(report: dict, source: str) -> str:
     lines.append(f"- 标签不完整配对：{len(report['label_incomplete_pairs'])} 对（M1-M3/G1-G3 所需标签未全部标注，不计入有效配对）。")
     for pair in report["label_incomplete_pairs"][:20]:
         lines.append(f"  - `{pair['taskId']}`（batch={pair['batch']}）：缺 {', '.join(pair['missing'])}")
+    worst = report.get("worst_case_imputation")
+    if worst is not None:
+        lines.append(
+            f"- 最不利缺失补全（并列敏感性，{worst['note']}）：补全后无关改动率 {label_t}（实验）"
+            f"{worst['treatment_unrelated_count']}/{worst['total_pairs']}（{fmt(worst['treatment_unrelated_rate'])}）、"
+            f"{label_c}（对照）{worst['control_unrelated_count']}/{worst['total_pairs']}（{fmt(worst['control_unrelated_rate'])}）；"
+            f"基础 {worst['valid_pairs']} 对有效配对 + {worst['imputed_pairs']} 对最不利补全。"
+        )
+        for pair in worst["imputed_details"][:20]:
+            lines.append(
+                f"  - `{pair['taskId']}`（batch={pair['batch']}）：缺 {', '.join(pair['missing'])}，"
+                f"补全为 实验 unrelated={pair['imputed']['treatment_unrelated']} / 对照 unrelated={pair['imputed']['control_unrelated']}"
+            )
     lines.append(f"- 任务同一性未决配对：{len(report['task_identity_unresolved_pairs'])} 对（缺 taskCard.sha256，无法核对）。")
     for pair in report["task_identity_unresolved_pairs"][:20]:
         lines.append(f"  - `{pair['taskId']}`（batch={pair['batch']}）：{pair['reason']}")

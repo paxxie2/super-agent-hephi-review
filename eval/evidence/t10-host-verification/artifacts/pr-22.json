@@ -1,0 +1,11 @@
+{
+  "fetchedAt": "2026-11-11T20:00:45.057Z",
+  "pr": {
+    "baseRefName": "main",
+    "headRefOid": "440712d90839129bc8ac1c8a23bc391d5a871fe0",
+    "number": 22,
+    "state": "OPEN",
+    "title": "fix(api): cap GET /api/diagnoses/{id}/evidence offset at 10000",
+    "url": "https://github.com/paxxie2/b5-off-history-page-size/pull/22"
+  }
+}

@@ -1,0 +1,1 @@
+operator resolutions are disabled: provide --operator-config <path> to a mode-0600 JSON file with {"allowOperatorResolutions": true}; the process environment (including HEPHI_ALLOW_OPERATOR_RESOLUTIONS) is not an enable channel

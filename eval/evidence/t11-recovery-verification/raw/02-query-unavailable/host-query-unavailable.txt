@@ -1,0 +1,5 @@
+$ curl -sS --max-time 3 http://127.0.0.1:65000/
+host query command: curl -sS --max-time 3 http://127.0.0.1:65000/
+host query exit: 7
+host query stderr: curl: (7) Failed to connect to 127.0.0.1 port 65000 after 0 ms: Couldn't connect to server
+conclusion: host Job/process query unavailable (connection refused)

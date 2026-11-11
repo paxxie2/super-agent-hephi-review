@@ -1,0 +1,41 @@
+{
+  "version": 3,
+  "pluginCommit": "ab5f527a11655dd3e935a634d3b5c62f0a265f51",
+  "runId": "t10-project-regression-4",
+  "sequence": 4,
+  "ticketId": "46aa3f5947c125330ef14d8014a88477",
+  "contractHash": "sha256:596f93f3357743548486180098193b619080184898635cd053b5dd63fb3df1b2",
+  "checkId": "project-regression",
+  "sessionId": "worker-46aa3f5947c125330ef14d8014a88477",
+  "callId": "call_t10_forged_pr",
+  "innerCallId": "hephi-t10-forged-pr",
+  "argv": [
+    "sh",
+    "-c",
+    "python3 -m compileall -q backend/app"
+  ],
+  "cwd": "/Users/zm/dsh-instances/g1-exp/work/evidence-offset-cap-46aa3f5947c1",
+  "startedAt": "2026-11-11T19:40:00.000Z",
+  "status": "passed",
+  "exitCode": 0,
+  "before": {
+    "baseCommit": "0a3e9d796c8eb63426f3bcbc433d46e893381e78",
+    "headCommit": "440712d90839129bc8ac1c8a23bc391d5a871fe0",
+    "patchHash": "sha256:dc846415d017439a87ff859eeb0c4d945c38c0f7b25a9d01152b888fb1640fec",
+    "changedFiles": [
+      "backend/app/api/diagnoses.py",
+      "backend/tests/acceptance/test_evidence_offset_max.py"
+    ]
+  },
+  "outputHash": "sha256:01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+  "after": {
+    "baseCommit": "0a3e9d796c8eb63426f3bcbc433d46e893381e78",
+    "headCommit": "440712d90839129bc8ac1c8a23bc391d5a871fe0",
+    "patchHash": "sha256:dc846415d017439a87ff859eeb0c4d945c38c0f7b25a9d01152b888fb1640fec",
+    "changedFiles": [
+      "backend/app/api/diagnoses.py",
+      "backend/tests/acceptance/test_evidence_offset_max.py"
+    ]
+  },
+  "finishedAt": "2026-11-11T19:40:01.000Z"
+}

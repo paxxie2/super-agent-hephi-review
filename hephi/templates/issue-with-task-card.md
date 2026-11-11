@@ -98,13 +98,19 @@ v1/v2 卡不接受 `kind`/`tests`/`cases`（会被拒绝）；已有 v1 示例�
       "id": "AC1",
       "text": "total(2, 3) 返回 5，project-regression 通过",
       "check": "project-regression",
-      "paths": ["src/price.js"],
+      "paths": ["src/price.js", "tests/price.test.js"],
       "tests": ["tests/price.test.js"],
       "cases": ["两个正数相加", "含零的输入"]
     }
   ]
 }
 ```
+
+> `tests` 与 `paths` 的关系分两种情况：
+> - **需要 Worker 新写或修改测试**（本例）：测试文件要同时写进该验收项的 `paths`，否则会被范围检查拒绝，先红后绿做不完。若该文件已存在且命中受保护资产清单，还需要 `authorizes` 授权 `modify`。
+> - **测试已存在且在基线上就失败**：它只作为验收依据，不需要写权限，不要列入 `paths`（红色运行可以直接在基线提交上完成）。
+>
+> `hephi lint-task` 的 `focus.tests-outside-paths` 只是提示，由任务作者判断属于哪一种。
 
 ### 6.2 行为保持型重构（kind: refactor）
 
@@ -129,3 +135,53 @@ v1/v2 卡不接受 `kind`/`tests`/`cases`（会被拒绝）；已有 v1 示例�
 ```
 
 > 说明：`refactor`/`doc` 的验收项不强制 `tests`；只有在需要点名具体用例时才写 `tests`/`cases`。所有路径都是相对仓库根的路径，不使用绝对路径或 `..`。
+
+## 7. 遗留系统与大任务的任务合同标准（无关重构专项）
+
+适用范围：`hephi-95-plan-v5` 无关重构专项的任务（遗留系统修复、多里程碑大任务）。其他任务可参考，不强制。
+本节只约定任务卡怎么写，不改变插件行为；所用字段都是现有字段。
+
+| 字段 | 要求 | 原因 |
+| --- | --- | --- |
+| `version` / `kind` | 统一 3。修复和新功能用 `code`；获授权的结构改造单独开 `refactor` 卡，不与修复混在一张卡 | 在入口区分授权的重构和顺手重构 |
+| `acceptance[].paths` | 只写精确文件，不写目录 glob；只列这条验收项需要新增或修改的文件 | 路径就是写权限，不多给 |
+| `acceptance[].tests` | `code` 卡必填。需要新写或修改的测试同时列入本项 `paths`；已存在且在基线上失败的测试不列入 | 见 §6.1 说明 |
+| `outOfScope` | 遗留系统必须写两类：① 必须保留的对外行为（接口签名、返回值、异常、配置项）；② 不得改动的模块、类或函数。写具体名字，不写“不要乱改” | 每轮都会出现在 Worker 的系统提示里 |
+| `budget` | **只有负责人或需求方明确批准“超出即拒绝”时才填写**。未填时默认的 8 个文件、400 行只记录不拒绝；一旦填写，超限就会被拒绝 | 硬边界要有人批准。只想观察改动规模时，把预估的文件数和行数写在任务元数据里，不要写进 `budget` |
+| `authorizes` | 需要修改已有的受保护测试时，在对应验收项里精确授权“文件 + 操作” | 否则合法的测试同步会被拒绝 |
+
+大任务拆分：
+
+- 一张卡只对应一个里程碑；跨模块依赖按“先接口、后调用点”拆成多张卡，依次交付。
+- 每张卡各自有精确 `paths`。不要用一张范围很宽的卡覆盖整个大任务。
+- 拆卡不改变验收单位：大任务的结果按原始需求最终合并的整份改动来评，不按单张卡评。
+
+遗留系统修复示例：
+
+```hephi-task
+{
+  "version": 3,
+  "kind": "code",
+  "goal": "OrderService.cancel() 对已发货订单抛出 IllegalStateException（当前静默返回）",
+  "outOfScope": [
+    "保留 OrderService 全部公开方法的签名与既有返回值",
+    "不得改动 OrderService.create()、OrderService.refund() 及 PaymentGateway",
+    "不做格式化、重命名、导入整理或依赖升级",
+    "不得合并 PR；失败如实报告 blocked，不绕过检查"
+  ],
+  "acceptance": [
+    {
+      "id": "AC1",
+      "text": "cancel() 对状态为 SHIPPED 的订单抛出 IllegalStateException；其余状态行为不变；project-regression 通过",
+      "check": "project-regression",
+      "paths": ["src/order/OrderService.java", "src/test/order/OrderServiceCancelTest.java"],
+      "tests": ["src/test/order/OrderServiceCancelTest.java"],
+      "cases": ["已发货订单取消被拒", "未发货订单取消成功"]
+    }
+  ]
+}
+```
+
+示例没有写 `budget`：预估规模（2 个文件、约 40 行）记在任务元数据里。只有获批准的硬边界才写成 `"budget": { "maxFiles": 2, "maxChangedLines": 80 }`。
+
+投递前必须运行 `hephi lint-task`，并逐条判断 `focus.tests-outside-paths` 与 `focus.broad-scope` 提示。

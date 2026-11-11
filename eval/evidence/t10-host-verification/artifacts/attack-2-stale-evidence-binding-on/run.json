@@ -1,0 +1,39 @@
+{
+  "version": 3,
+  "pluginCommit": "ab5f527a11655dd3e935a634d3b5c62f0a265f51",
+  "runId": "t10-acceptance-4",
+  "sequence": 4,
+  "ticketId": "46aa3f5947c125330ef14d8014a88477",
+  "contractHash": "sha256:596f93f3357743548486180098193b619080184898635cd053b5dd63fb3df1b2",
+  "checkId": "acceptance",
+  "sessionId": "worker-46aa3f5947c125330ef14d8014a88477",
+  "callId": "call_t10_stale_outer_on",
+  "innerCallId": "hephi-t10-stale-inner-on",
+  "argv": [
+    "sh",
+    "-c",
+    "python3 -m pytest backend/tests/acceptance -q --junitxml=\"$HEPHI_RUN_DIR/junit.xml\""
+  ],
+  "cwd": "/Users/zm/dsh-instances/g1-exp/work/evidence-offset-cap-46aa3f5947c1",
+  "startedAt": "2026-11-11T19:40:00.000Z",
+  "status": "passed",
+  "exitCode": 0,
+  "before": {
+    "baseCommit": "96274466e26670f3691cf796d00f37dff6439146",
+    "headCommit": "96274466e26670f3691cf796d00f37dff6439146",
+    "patchHash": "sha256:efd4c4219cdb6da7ee23154e2d6e629f4bf27bc2f8a43382e1c114bfd4f2d2dd",
+    "changedFiles": [
+      "backend/tests/acceptance/test_evidence_offset_max.py"
+    ]
+  },
+  "outputHash": "sha256:71dc947b86f29fd169f3f9d06f14e52fe997cd7b2a6f357e0f80f0e7dd65b958",
+  "after": {
+    "baseCommit": "96274466e26670f3691cf796d00f37dff6439146",
+    "headCommit": "96274466e26670f3691cf796d00f37dff6439146",
+    "patchHash": "sha256:efd4c4219cdb6da7ee23154e2d6e629f4bf27bc2f8a43382e1c114bfd4f2d2dd",
+    "changedFiles": [
+      "backend/tests/acceptance/test_evidence_offset_max.py"
+    ]
+  },
+  "finishedAt": "2026-11-11T19:40:01.000Z"
+}

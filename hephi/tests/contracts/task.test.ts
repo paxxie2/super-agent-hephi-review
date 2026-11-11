@@ -183,7 +183,7 @@ describe('Issue task card v3 (T13)', () => {
     const template = await readFile(new URL('../../templates/issue-with-task-card.md', import.meta.url), 'utf8')
     const blocks = [...template.matchAll(/```hephi-task\n([\s\S]*?)\n```/g)].map(match => JSON.parse(match[1]) as unknown)
     const v3 = blocks.filter((block): block is Record<string, unknown> => typeof block === 'object' && block !== null && (block as { version?: unknown }).version === 3)
-    expect(v3.map(block => block.kind)).toEqual(['code', 'refactor'])
+    expect(v3.map(block => block.kind)).toEqual(['code', 'refactor', 'code'])
     for (const block of v3) expect(() => parseTaskCard(block)).not.toThrow()
   })
 

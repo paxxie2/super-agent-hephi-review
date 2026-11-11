@@ -1,0 +1,5 @@
+# operator config used by all successful attempts
+-rw-------@ 1 zm  staff  35 Nov  8 21:31 /Users/zm/dsh-instances/g1-exp/operator-config.json
+{"allowOperatorResolutions": true}
+# copied config used for the negative case (wrong mode)
+-rw-r--r--@ 1 zm  wheel  35 Nov 12 03:57 /tmp/t11-recovery-20261111T195718Z/raw/05-operator-gate/operator-config-0644.json
