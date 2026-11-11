@@ -41,6 +41,7 @@
 - `asset.authorized`（allow，审计）：C1 授权命中的受保护验收资产变更——`reason` 记录验收项 id、文件与操作（`modify`/`delete`）；仅记录，不放宽其他判定。
 - `asset.modified`（allow，仅记录）：C1 清单外的已有测试被修改（受旧 `protect` 清单约束的文件）——只记录、不拦截；清单外删除仍按旧规则拒绝。
 - `asset.unauthorized-modify` / `asset.unauthorized-delete`（deny）：C1 受保护验收资产在缺少“同一验收项 + 精确文件 + 对应操作”授权时被修改/删除（write/edit 当场拒绝；shell/git 绕过由 ready 的最终 diff 复核拒绝）。`version` 与字段不变，仅新增规则编号。
+- `ready.snapshot-tampered`（deny）：H6=C 检测层——绑定生效（`binding.effective`）时，被采信检查记录缺少封存、封存不可用，或 ready 重读的 Session 日志与封存前缀不一致（前缀摘要变化、帧流外追加、撕裂尾帧重试后仍不完整）即拒绝；`reason` 以 `ready.snapshot-tampered:` 开头并附 checkId 与具体原因。这是**检测**而非防护（同 UID Worker 仍可改写），不改变 A1/A2 判定与绑定开关默认值。`version` 与字段不变，仅新增规则编号。
 - `ready.awaiting-approval`（deny，等待审批）：C3 人工审批——合同 v5+ 冻结了非空 `verification.approvers` 时，PR 评审必须满足：名单内每人只取最新一条 review；名单内任一人最新为 `CHANGES_REQUESTED` 即拒绝；至少一名名单内 approver 对当前 PR HEAD（`commitId === headSha`）`APPROVED` 才放行。没有有效批准返回该规则并在 `reason` 说明是等待审批（**不是检查失败，不计入 C4.5 重试计数**）。`version` 与字段不变，仅新增规则编号。
 
 ## 写入约束

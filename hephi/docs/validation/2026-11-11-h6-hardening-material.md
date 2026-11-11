@@ -83,3 +83,28 @@ git show docs/hephi-plan-v5.4:docs/hephi-95-plan-v5.4-20261112.md | sed -n '576,
 - 未修改任何代码、判据、配置或沙箱策略；未复跑 H6 写入探针（一次性写入实验属另行授权，生产禁止）；未评估宿主 sandbox 收紧的具体配置面。
 - **未知/待补**：原版对候选 A 的具体插入位置与行号（绑定在已丢失分支的代码状态上，现仓无法复核）；"检测机制曾实现（detect-only）"的提交与代码不在现仓（`hephi/src/control/snapshot-seal.ts` 不存在，实测）；原版对候选成本的量化。
 - 经验注入：Lead 给定 `pack_sha256=4768c226…`；本地无法复现（日志 append 至 45 行），按任务卡点名 exp-028/029/040/043 读取，不虚构注入。
+
+## 8. 已实施（2026-11-12 恢复）
+
+> 本节为**追加**：上文 §1–§5（重建版）的候选分析与结论未改动。编号沿用原文件 §8，便于 task-9/决策记录交叉引用。
+
+**恢复范围（detect-only，不改 A1/A2 判定与开关默认）**：
+
+| # | 文件 | 内容 |
+| --- | --- | --- |
+| 1 | `hephi/src/control/snapshot-seal.ts`（新） | zstd 帧**结构**解析（只走 frame/block header，不解压、不依赖 zstd API）；封存「最后一个完整帧结束偏移」前缀的 SHA-256；校验 A) 前缀摘要一致（缩短/改写/重编码→拒绝）B) 封存前缀之后必须是完整 zstd 帧并精确到 EOF（帧流外追加单字节/残帧→拒绝）；`compression:none` 的 JSONL 完整行语义；按 DSH JSONL 持久化布局（`projectKey`/`encodeSegment` 镜像）查找日志；64MiB 上限 |
+| 2 | `hephi/src/control/check-runner.ts` | `finally` 块（`record.finishedAt` 之后、`saveRun` 之前）调用封存；成功写 `record.snapshotSeal`，失败/取不到字节写 `record.snapshotSealUnavailable`（**不改变本次检查结果**） |
+| 3 | `hephi/src/control/check-store.ts` | `SnapshotSeal` 类型 + 记录可选字段；形状校验 fail-closed（损坏、双写按 corrupt evidence 拒绝） |
+| 4 | `hephi/src/control/evidence-verifier.ts` | `binding.effective` 分支、`readSession` 之后、`analyzeNativeEvidence` 之前校验每条被采信记录：缺封存/封存不可用/重读不匹配 → `ready.snapshot-tampered`；`readyRule` 映射新增该规则 |
+| 5 | `hephi/src/index.ts` | 宿主 adapter：按部署 session root（config `sessionLogRoot` → `DSH_SESSION_ROOT` → `$DSH_HOME/sessions` → `~/.dsh/sessions`）读原始字节封存/复核；live 追加撕裂尾帧重读 4×50ms（前缀不一致不重试）；定位失败 → 封存 unavailable → 绑定生效时 ready fail-closed |
+| 6 | `hephi/src/control/worker-mount.ts` | 仅透传 `sealSnapshot` 给 `runCheck` |
+| 7 | `hephi/tests/control/snapshot-seal.test.ts`（新） | 21 个测试：帧结构解析/前缀封存/两类校验/JSONL 完整行/64MiB 上限/DSH 布局查找/记录形状/runner 封存接线/ready 拒绝与规则映射 |
+
+**不改变既有边界**：
+
+- 只做**检测**、不做防护：Worker 同 UID、`danger-full-access` 下仍可改写快照或检查记录；“追加一个合法伪造 zstd 帧”与宿主正常批次不可区分（见上文 §2.1 绕过面）。
+- H6 判据/定案不变（`2026-11-07-evidence-chain-host.md:156`、`2026-11-07-a2-final.md:59`）；**不据此声称 H6 已修或重开 A1-BIND**；强绑定保持关闭、D1 上限 L1 的既有结论不变。
+- 宿主接口依赖：adapter 依赖能读到持久化 session log 文件（历史宿主为 JSONL+zstd 布局；未在真实宿主复验，宿主升级可能变化）；读不到时绑定生效下 ready fail-closed（预期行为），需要宿主配置 `sessionLogRoot`。
+- 检查记录仍为 `version: 3`（新增可选字段；跨构建证据本要求重跑）。
+
+**验证**：见 `hephi/docs/decisions-format.md` 的规则登记与本次提交说明；本地门禁为 `npx tsc --noEmit` exit 0、`npx vitest run tests/control/snapshot-seal.test.ts` 21 passed、`npx vitest run tests/control` 与全量 `npx vitest run` 无回归（真实执行结果以本次任务完成记录为准）。

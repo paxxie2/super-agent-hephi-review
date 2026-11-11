@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { defaultStateDir } from './control/activation.js'
 import type { NativeJobs } from './control/check-runner.js'
 import { createEvidenceVerifier, type SessionSnapshot } from './control/evidence-verifier.js'
+import { findSessionLogFile, defaultSessionLogRoots, readPersistedSessionLog, sealSnapshotBytes, verifySnapshotBytes, type SnapshotSealProvider, type SnapshotSealVerifier } from './control/snapshot-seal.js'
 import { installWorkerMount } from './control/worker-mount.js'
 import { activationMarker, pluginCommit, pluginName, pluginVersion } from './version.js'
 
@@ -24,6 +25,11 @@ export function apply(ctx: Context, config: {
   allowOperatorResolutions?: boolean
   /** C4.5 per-check retry limit (host cordis config). Default 3. */
   retryLimit?: number
+  /**
+   * H6=C detect-only: deployment session root for the persisted Session logs (raw
+   * bytes). Falls back to DSH_SESSION_ROOT, $DSH_HOME/sessions, ~/.dsh/sessions.
+   */
+  sessionLogRoot?: string
 } = {}): void {
   const stateDir = defaultStateDir(config.stateDir)
   // Host-side requirement. It is combined with the contract value inside the verifier
@@ -47,8 +53,44 @@ export function apply(ctx: Context, config: {
   // trusting the record; foreground checks are unaffected.
   let jobs: NativeJobs | undefined
   try { jobs = ctx.get('jobs') as NativeJobs | undefined } catch { jobs = undefined }
-  const verify = createEvidenceVerifier({ stateDir, readSession, requireSessionBinding: hostRequireSessionBinding, allowOperatorResolutions, jobs })
-  const dispose = installWorkerMount(ctx, { stateDir, verify, allowOperatorResolutions, retryLimit })
+  // H6=C detect-only: `sessionQuery.readSession` exposes parsed events, not the persisted
+  // bytes, so the seal adapter reads the log file through the deployment's session root.
+  // A live append can tear the trailing frame; that shape is retried (4 x 50ms) while a
+  // changed sealed prefix is a definitive failure (no retry). A missing log makes the seal
+  // unavailable, and ready fails closed only while binding is effective.
+  const sessionRoots = (): string[] => defaultSessionLogRoots(config.sessionLogRoot)
+  const sealSnapshot: SnapshotSealProvider = async (sessionId, sessionCwd) => {
+    try {
+      const file = await findSessionLogFile({ roots: sessionRoots(), sessionId, sessionCwd })
+      if (!file) return { unavailable: `no persisted Session log found for ${sessionId} under ${sessionRoots().join(', ')}` }
+      const read = await readPersistedSessionLog(file.path)
+      if ('unavailable' in read) return read
+      return sealSnapshotBytes(read.bytes, file.format)
+    } catch (error) {
+      return { unavailable: `snapshot seal failed: ${error instanceof Error ? error.message : String(error)}` }
+    }
+  }
+  const sealSnapshotVerifier: SnapshotSealVerifier = async ({ sessionId, sessionCwd, seal }) => {
+    let lastProblem = 'the persisted Session log could not be verified'
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        const file = await findSessionLogFile({ roots: sessionRoots(), sessionId, sessionCwd })
+        if (!file) return { ok: false, problem: `no persisted Session log found for ${sessionId} under ${sessionRoots().join(', ')}` }
+        const read = await readPersistedSessionLog(file.path)
+        if ('unavailable' in read) return { ok: false, problem: read.unavailable }
+        const result = verifySnapshotBytes(read.bytes, seal)
+        if (result.ok) return result
+        lastProblem = result.problem
+        if (!result.retryable) return { ok: false, problem: result.problem }
+      } catch (error) {
+        lastProblem = `the persisted Session log is unreadable: ${error instanceof Error ? error.message : String(error)}`
+      }
+      if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 50))
+    }
+    return { ok: false, problem: lastProblem }
+  }
+  const verify = createEvidenceVerifier({ stateDir, readSession, requireSessionBinding: hostRequireSessionBinding, allowOperatorResolutions, jobs, sealSnapshotVerifier })
+  const dispose = installWorkerMount(ctx, { stateDir, verify, allowOperatorResolutions, retryLimit, sealSnapshot })
   ctx.effect(() => dispose, `${pluginName}: worker ready gate`)
   // Registration completed: emit the deploy-verifiable activation marker (issue #26).
   console.log(activationMarker('index'))

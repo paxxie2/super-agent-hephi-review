@@ -10,6 +10,7 @@ import { clean, hasCommit, normalizeRepository, remoteRepository } from './repos
 import { inScope } from './discipline.js'
 import { resolveWorkspace } from './workspace.js'
 import { checkRunDir, readRetryResets, readRuns, resolvedRunIds, saveRun, type CheckRunRecord } from './check-store.js'
+import type { SnapshotSealProvider } from './snapshot-seal.js'
 import { logDecision } from './decision-log.js'
 import { pluginCommit } from '../version.js'
 
@@ -367,6 +368,11 @@ export async function runCheck(options: {
   retryLimit?: number;
   /** T17: run the check as the red (before-implementation) phase; recorded but never counted as a green check. */
   phase?: 'red';
+  /**
+   * H6=C detect-only: host adapter that seals this Worker Session's persisted log.
+   * Absent = unwired host (no seal fields are written; ready keeps its old behavior).
+   */
+  sealSnapshot?: SnapshotSealProvider;
 }): Promise<CheckRunRecord> {
   const { contract, stateDir, outer } = options
   const check = verificationOf(contract).checks.find(c => c.id === options.checkId)
@@ -607,6 +613,17 @@ export async function runCheck(options: {
     collection?.dispose()
     options.internal?.()
     record.finishedAt = new Date().toISOString()
+    // H6=C detect-only: seal the Session log prefix before the record becomes durable.
+    // A seal failure never changes the check result; it is recorded for ready to fail closed.
+    if (options.sealSnapshot) {
+      try {
+        const sealed = await options.sealSnapshot(record.sessionId, options.sessionCwd)
+        if ('seal' in sealed) record.snapshotSeal = sealed.seal
+        else record.snapshotSealUnavailable = sealed.unavailable
+      } catch (error) {
+        record.snapshotSealUnavailable = `snapshot seal failed: ${error instanceof Error ? error.message : String(error)}`
+      }
+    }
     await saveRun(stateDir, record)
   }
   return record

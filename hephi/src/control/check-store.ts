@@ -6,6 +6,25 @@ import type { RepositoryFingerprint } from '../verification/fingerprint.js'
 /** T17: the red (before-implementation) phase. Ordinary runs carry no phase at all. */
 export type CheckRunPhase = 'red'
 
+/**
+ * H6=C detect-only: digest of the Worker Session's persisted log prefix at check
+ * completion. `bytes`/`sha256` cover only complete units (zstd frames or JSONL lines),
+ * so a torn trailing batch from a live append is not part of the seal. This is
+ * detection, not protection (same UID Worker can rewrite the log or the record).
+ */
+export type SnapshotSeal = {
+  format: 'jsonl.zstd' | 'jsonl'
+  /** Number of sealed prefix bytes. */
+  bytes: number
+  /** SHA-256 (hex) of exactly the first `bytes` bytes of the persisted log. */
+  sha256: string
+  /** Complete zstd frames (jsonl.zstd) or complete JSONL lines (jsonl) in the prefix. */
+  frames: number
+}
+
+/** Why the seal could not be taken at check completion; ready fails closed when binding is effective. */
+export type SnapshotSealUnavailable = string
+
 export type CheckRunRecord = {
   version: 3; runId: string; sequence: number; ticketId: string; contractHash: string;
   /** Plugin build that produced this record; ready rejects a different build. */
@@ -22,6 +41,10 @@ export type CheckRunRecord = {
   status: 'running' | 'passed' | 'blocked' | 'unknown'; exitCode: number | null;
   before: RepositoryFingerprint; after?: RepositoryFingerprint;
   outputHash?: string; reason?: string;
+  /** H6=C detect-only: sealed Session log prefix taken at check completion. */
+  snapshotSeal?: SnapshotSeal;
+  /** Set instead of `snapshotSeal` when the host adapter could not seal the log. */
+  snapshotSealUnavailable?: SnapshotSealUnavailable;
 }
 const SAFE_EVIDENCE_ID = /^[\w-]+$/
 export function checkRunDir(stateDir: string, ticketId: string, runId = ''): string {
@@ -37,7 +60,33 @@ function assertRecord(value: unknown, ticketId: string, expectedRunId: string): 
     || (record.phase !== undefined && record.phase !== 'red')) {
     throw new Error('unsupported or corrupt check evidence')
   }
+  // H6=C: a record carries either a well-formed seal or an unavailable marker, never
+  // both; a malformed seal is corrupt evidence (fail closed) instead of "no seal".
+  if (record.snapshotSeal !== undefined) {
+    const problem = snapshotSealShapeProblem(record.snapshotSeal)
+    if (problem !== undefined) throw new Error(`unsupported or corrupt check evidence: ${problem}`)
+  }
+  if (record.snapshotSealUnavailable !== undefined
+    && (typeof record.snapshotSealUnavailable !== 'string' || record.snapshotSealUnavailable.length === 0)) {
+    throw new Error('unsupported or corrupt check evidence: snapshotSealUnavailable must be a non-empty string')
+  }
+  if (record.snapshotSeal !== undefined && record.snapshotSealUnavailable !== undefined) {
+    throw new Error('unsupported or corrupt check evidence: snapshotSeal and snapshotSealUnavailable are mutually exclusive')
+  }
   return record
+}
+
+const SNAPSHOT_SEAL_HEX = /^[0-9a-f]{64}$/
+
+/** Shape validation for the persisted seal (fail closed: any deviation is corrupt evidence). */
+export function snapshotSealShapeProblem(value: unknown): string | undefined {
+  if (value === null || typeof value !== 'object') return 'snapshotSeal must be an object'
+  const seal = value as Partial<SnapshotSeal>
+  if (seal.format !== 'jsonl.zstd' && seal.format !== 'jsonl') return 'snapshotSeal.format must be jsonl.zstd or jsonl'
+  if (!Number.isSafeInteger(seal.bytes) || (seal.bytes as number) < 0) return 'snapshotSeal.bytes must be a non-negative safe integer'
+  if (typeof seal.sha256 !== 'string' || !SNAPSHOT_SEAL_HEX.test(seal.sha256)) return 'snapshotSeal.sha256 must be 64 lowercase hex characters'
+  if (!Number.isSafeInteger(seal.frames) || (seal.frames as number) < 1) return 'snapshotSeal.frames must be a positive safe integer'
+  return undefined
 }
 
 /** Read one stored run record; a missing run is an error, not an empty result. */

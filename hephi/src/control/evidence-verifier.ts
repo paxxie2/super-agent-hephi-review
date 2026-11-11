@@ -14,6 +14,7 @@ import { checkDiscipline } from './discipline.js'
 import { pluginCommit } from '../version.js'
 import { logDecision } from './decision-log.js'
 import { readPlan } from './plan-store.js'
+import type { SnapshotSealVerifier } from './snapshot-seal.js'
 
 const exec = promisify(execFile)
 
@@ -366,6 +367,28 @@ function approvalProblem(info: PullRequestInfo, approvers: string[], headCommit:
 
 const samplePlanFiles = (items: string[]) => items.slice(0, 10).join(', ') + (items.length > 10 ? ` (+${items.length - 10} more)` : '')
 
+/**
+ * H6=C: a used record must carry a seal that still matches the persisted Session log.
+ * Returns the `ready.snapshot-tampered` denial reason, or undefined when the record is
+ * verifiable (or the host adapter is not wired, which keeps the legacy behavior).
+ */
+export async function snapshotSealProblem(record: CheckRunRecord, input: {
+  verifier?: SnapshotSealVerifier
+  sessionId: string
+  sessionCwd?: string
+}): Promise<string | undefined> {
+  if (!input.verifier) return undefined
+  if (record.snapshotSealUnavailable !== undefined) {
+    return `ready.snapshot-tampered: ${record.checkId}: the check could not seal the Session snapshot (${record.snapshotSealUnavailable})`
+  }
+  if (record.snapshotSeal === undefined) {
+    return `ready.snapshot-tampered: ${record.checkId}: the check record has no sealed Session snapshot digest; rerun the check with this plugin build`
+  }
+  const result = await input.verifier({ sessionId: input.sessionId, sessionCwd: input.sessionCwd, seal: record.snapshotSeal })
+  if (!result.ok) return `ready.snapshot-tampered: ${record.checkId}: ${result.problem}`
+  return undefined
+}
+
 export function createEvidenceVerifier(options: {
   stateDir: string
   pullRequest?: (repo: string, n: number) => Promise<PullRequestInfo>
@@ -389,6 +412,12 @@ export function createEvidenceVerifier(options: {
    * evidence cannot be verified (ready denies) rather than silently trusting the record.
    */
   jobs?: NativeJobs
+  /**
+   * H6=C detect-only: host adapter that re-reads the persisted Session log and checks
+   * the seal recorded at check completion. Absent = unwired host; the seal fields are
+   * then not written by the runner either, so ready keeps its previous behavior.
+   */
+  sealSnapshotVerifier?: SnapshotSealVerifier
 }): ReadyVerifier {
   if (options.requireSessionBinding && !options.readSession) throw new Error('Session binding requires a Session reader')
   const verify = async (contract: ActivationContract, execution: Parameters<ReadyVerifier>[1]): ReturnType<ReadyVerifier> => {
@@ -486,6 +515,13 @@ export function createEvidenceVerifier(options: {
         // the ownership check keeps a missing sessionQuery from masking a foreign record.
         const snapshot = await options.readSession(sessionId)
         for (const r of used) {
+          // H6=C: the persisted log prefix sealed at check completion must still match.
+          const sealProblem = await snapshotSealProblem(r, {
+            verifier: options.sealSnapshotVerifier,
+            sessionId,
+            sessionCwd: execution.agent?.session.header.cwd,
+          })
+          if (sealProblem) throw new Error(sealProblem)
           const evidence = await analyzeNativeEvidence(snapshot, sessionId, contract, r, options.stateDir, workspace, options.jobs)
           // Non-fatal shape facts (for example `workdir: absent` on the job-event path) are kept
           // in the denial reason so the operator can see what could not be compared.
@@ -572,11 +608,12 @@ export function createEvidenceVerifier(options: {
 }
 
 /** Stable rule ids for ready denials; P3 aggregates by rule. */
-function readyRule(reason: string): string {
+export function readyRule(reason: string): string {
   // T14/AT-43: a GitHub rate-limit failure is environment unavailability, not a failed
   // check; give it its own rule so P3 does not count it as an evidence/check failure.
   if (/rate limit|API rate limit exceeded/i.test(reason)) return 'ready.github-unavailable'
   // C3: waiting for a human approval is its own denial class (a wait state, not a failed check).
+  if (reason.includes('ready.snapshot-tampered')) return 'ready.snapshot-tampered'
   if (reason.includes('ready.awaiting-approval')) return 'ready.awaiting-approval'
   // A1-BIND/A1-OUT: an unreadable Job terminal state or unverifiable output is not a
   // generic binding mismatch; keep them distinguishable for P3 aggregation.

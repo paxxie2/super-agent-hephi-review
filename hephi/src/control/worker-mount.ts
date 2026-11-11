@@ -13,6 +13,7 @@ import { checkoutRelative, resolveWorkspace } from './workspace.js'
 import { DELEGATION_TOOLS, MODIFYING_TOOLS } from './stage-control.js'
 import { installStageControl, type StageAgents, type StageJobs, type StageSessionQuery, type StageSubagents } from './stage-mount.js'
 import { logDecision } from './decision-log.js'
+import type { SnapshotSealProvider } from './snapshot-seal.js'
 
 // Structural type for the host's public, agent-scoped prompt service.
 type PromptContext = Context & {
@@ -103,6 +104,8 @@ export type WorkerControlConfig = {
   allowOperatorResolutions?: boolean
   /** C4.5: per-check retry limit. Default 3; must be a positive integer. */
   retryLimit?: number
+  /** H6=C detect-only: host adapter that seals the Worker Session's persisted log at check completion. */
+  sealSnapshot?: SnapshotSealProvider
 }
 
 export function mountWorkerGate(
@@ -201,7 +204,7 @@ export function mountWorkerGate(
         const record = await runCheck({ stateDir, contract: await loadBoundActivation(), checkId: args.checkId, phase,
           outer: execution, tools: agent.ctx.tools as unknown as CheckTools, jobs: nativeJobs(ctx), sessionCwd: agent.session.header.cwd,
           allowOperatorResolutions: options.allowOperatorResolutions === true, retryLimit: options.retryLimit,
-          internal: id => { internalCall = id } })
+          sealSnapshot: options.sealSnapshot, internal: id => { internalCall = id } })
         const passed = record.status === 'passed' && record.exitCode === 0
         await logDecision(stateDir, {
           ticketId, sessionId, callId: String(execution.callId), tool: 'hephi_check', mode: 'enforce',
