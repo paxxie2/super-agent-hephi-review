@@ -4,7 +4,8 @@
 // 目标：核实 A1 绑定的五个环节在真实宿主编码下是否成立：
 //   H1 hephi_check 内部 bash 调用是否出现在当前 Worker Session 快照；tool/call 字段名、
 //      arguments 形态（原始 JSON 字符串）、workdir 字段；
-//   H2 前台 bash 结果的 kind / exitCode 位置；promoted 结果是否带 jobId 且无最终退出码；
+//   H2 前台 bash 结果的 kind / exitCode 位置；promoted 结果是否带 jobId 且无最终退出码
+//      （全量统计快照中全部 bash tool/result；samples 仅人读、不参与判定）；
 //   H3 ready 时 jobs.get(jobId, sessionId) 能否取到已完成 Job 终态与 detail；错误 session
 //      调用的行为（抛错/undefined）；readAt 的 lossy 语义；
 //   H4 check 记录写入的 sessionId（outer.agent.id）与 ready 时 session.header.id 是否相等；
@@ -586,41 +587,89 @@ function textOfMessage(message) {
   return content.map((part) => (part && typeof part.text === 'string' ? part.text : '')).join('\n')
 }
 
+/**
+ * H2（A1-BIND path A）判据：持久化 tool/result 的 message.value 必须带结构化结果，且字段符合判据——
+ *   - kind ∈ {foreground, background, promoted}；
+ *   - foreground 带整数 exitCode；
+ *   - promoted/background 带非空 jobId 且无最终 exitCode。
+ * 统计必须覆盖快照中的**全部** bash tool/result：早期实现只取前 5 条作样本、再用样本数与总数比较，
+ * 导致 >5 条 bash result 的真实快照即使全部结构化也恒判 fail（R1 验收硬前置缺陷，task-38 修复）。
+ * `samples` 仅保留前 5 条供人读，**不参与判定**。
+ */
+function h2Sample(event) {
+  const message = event.data.message
+  const text = textOfMessage(message)
+  const value = message.value
+  return {
+    callId: maskId(message.toolCallId),
+    isError: message.isError ?? null,
+    hasStructuredValue: Boolean(value && typeof value === 'object' && typeof value.kind === 'string'),
+    kind: value?.kind ?? null,
+    exitCodeField: value?.exitCode ?? null,
+    jobIdField: value?.jobId ?? null,
+    textExitCodeMarker: /\[exit code: -?\d+\]/.exec(text)?.[0] ?? null,
+    promotedMarker: /\[still running after \d+ms; moved to background job [^\]]+\]/.exec(text)?.[0] ?? null,
+    truncatedMarker: text.includes('[output truncated') ? '[output truncated' : null,
+    contentChars: text.length,
+  }
+}
+
+/** 单条结果的判据违反原因；null = 该条符合判据（仅对已带结构化 value 的结果返回 null 以外之外的值）。 */
+function h2CriterionProblem(sample) {
+  if (!sample.hasStructuredValue) return 'missing-structured-value'
+  if (sample.kind === 'foreground') {
+    return Number.isInteger(sample.exitCodeField) ? null : 'foreground-without-integer-exit-code'
+  }
+  if (sample.kind === 'promoted' || sample.kind === 'background') {
+    if (typeof sample.jobIdField !== 'string' || sample.jobIdField.length === 0) return `${sample.kind}-without-jobId`
+    if (sample.exitCodeField !== undefined && sample.exitCodeField !== null) return `${sample.kind}-with-final-exit-code`
+    return null
+  }
+  return 'unknown-kind'
+}
+
 function h2Ring(sessionAnalysis, redact) {
   if (!sessionAnalysis) return ring('H2', 'unavailable', null, '没有 Session 快照；无法核对前台结果编码。')
-  if (sessionAnalysis.bashResults.length === 0) {
+  const all = sessionAnalysis.bashResults
+  if (all.length === 0) {
     return ring('H2', 'unavailable', { bashCallCount: sessionAnalysis.bashCalls.length }, '快照中没有 bash tool/result；无法核对。')
   }
-  const samples = sessionAnalysis.bashResults.slice(0, 5).map((event) => {
-    const message = event.data.message
-    const text = textOfMessage(message)
-    const value = message.value
-    return {
-      callId: maskId(message.toolCallId),
-      isError: message.isError ?? null,
-      hasStructuredValue: Boolean(value && typeof value === 'object' && typeof value.kind === 'string'),
-      kind: value?.kind ?? null,
-      exitCodeField: value?.exitCode ?? null,
-      textExitCodeMarker: /\[exit code: -?\d+\]/.exec(text)?.[0] ?? null,
-      promotedMarker: /\[still running after \d+ms; moved to background job [^\]]+\]/.exec(text)?.[0] ?? null,
-      truncatedMarker: text.includes('[output truncated') ? '[output truncated' : null,
-      contentChars: text.length,
-    }
-  })
-  const structured = samples.filter((sample) => sample.hasStructuredValue).length
+  const analyzed = all.map((event) => h2Sample(event))
+  const structured = analyzed.filter((sample) => sample.hasStructuredValue)
+  const problems = new Map()
+  for (const sample of analyzed) {
+    const problem = h2CriterionProblem(sample)
+    if (problem !== null) problems.set(problem, (problems.get(problem) ?? 0) + 1)
+  }
+  const kinds = [...new Set(analyzed.map((sample) => sample.kind).filter((kind) => typeof kind === 'string'))]
+  const coveredBranches = ['foreground', 'background', 'promoted'].filter((kind) => kinds.includes(kind))
+  const uncoveredKinds = ['background', 'promoted'].filter((kind) => !kinds.includes(kind))
   const evidence = {
-    bashResultCount: sessionAnalysis.bashResults.length,
-    structuredValueCount: structured,
-    kinds: [...new Set(samples.map((sample) => sample.kind).filter(Boolean))],
-    samples,
+    // 全量统计（判定依据）：bashResults 的每一条 tool/result 都参与，不是采样窗口。
+    bashResultCount: all.length,
+    structuredValueCount: structured.length,
+    kinds,
+    coveredBranches,
+    uncoveredKinds,
+    problemCounts: Object.fromEntries([...problems.entries()].sort(([a], [b]) => a.localeCompare(b))),
+    // 人读样本（前 5 条，不参与判定）。
+    samples: analyzed.slice(0, 5),
   }
-  if (structured === 0) {
-    return ring('H2', 'fail', evidence, '持久化 tool/result 的 message 不含结构化 value（kind/exitCode 读不到）；A1 期望的 message.value 在本快照编码下不存在。退出码只以文本标记 [exit code: N] 出现。')
+  const coverageNote = uncoveredKinds.length > 0
+    ? ` 未覆盖分支：${uncoveredKinds.join('/')}（本快照无该 kind 的结构化结果；不得据此声称这些分支通过）。`
+    : ''
+  const missing = problems.get('missing-structured-value') ?? 0
+  if (structured.length === 0) {
+    return ring('H2', 'fail', evidence, `持久化 tool/result 的 message 不含结构化 value（全部 ${all.length} 条均无 kind/exitCode）；A1 期望的 message.value 在本快照编码下不存在。退出码只以文本标记 [exit code: N] 出现。${coverageNote}`)
   }
-  if (structured < sessionAnalysis.bashResults.length) {
-    return ring('H2', 'fail', evidence, `只有 ${structured}/${sessionAnalysis.bashResults.length} 条 bash tool/result 带结构化 value；编码不统一。`)
+  if (problems.size > 0) {
+    const summary = [...problems.entries()].map(([reason, count]) => `${reason}=${count}`).join(', ')
+    if (missing > 0) {
+      return ring('H2', 'fail', evidence, `只有 ${structured.length}/${all.length} 条 bash tool/result 带结构化 value（缺失 ${missing} 条）；编码不统一。字段问题：${summary}。${coverageNote}`)
+    }
+    return ring('H2', 'fail', evidence, `全部 ${all.length} 条 bash tool/result 都带结构化 value，但字段不符合判据：${summary}。${coverageNote}`)
   }
-  return ring('H2', 'pass', evidence, 'tool/result 携带结构化 value（kind/exitCode/jobId 可读）。')
+  return ring('H2', 'pass', evidence, `全部 ${all.length} 条 bash tool/result 都带符合判据的结构化 value（kind/exitCode/jobId 可读）。${coverageNote}`)
 }
 
 function h3Ring(sessionAnalysis, redact, context = {}) {
@@ -1047,6 +1096,76 @@ function selfTest(asJson) {
 
   const noValue = analyzeSession(makeSession({ innerCall: true, value: false }))
   record('负例：tool/result 无结构化 value → H2 fail', h2Ring(noValue, redact).status === 'fail', 'ok')
+
+  // H2 全量统计回归（task-38）：修复前只采样前 5 条 → >5 条真实快照即使全结构化也恒 fail。
+  const foregroundValue = (exitCode = 0) => ({
+    kind: 'foreground', exitCode, timedOut: false, aborted: false, signal: null,
+    stdout: { text: 'ok', truncated: false }, stderr: { text: '', truncated: false },
+  })
+  const promotedValue = (jobId = 'bash-self-promoted') => ({ kind: 'promoted', jobId, timeoutMs: 1000 })
+  const makeMultiBashSession = (values) => {
+    const events = [{ type: 'session', data: { type: 'session', version: 4, id: sessionId } }]
+    const callIds = values.map((_, index) => `call_bash_self_${index}`)
+    for (const callId of callIds) {
+      events.push({ type: 'tool/call', data: { callId, name: 'bash', arguments: JSON.stringify({ command, workdir: cwd }) } })
+    }
+    values.forEach((value, index) => {
+      events.push({
+        type: 'tool/result',
+        data: {
+          message: {
+            role: 'tool', toolCallId: callIds[index], isError: false,
+            content: [{ type: 'text', text: '[exit code: 0]' }],
+            ...(value ? { value } : {}),
+          },
+        },
+      })
+    })
+    return { headerId: sessionId, events }
+  }
+  const h2Full = (values) => h2Ring(analyzeSession(makeMultiBashSession(values)), redact)
+
+  const h2Seven = h2Full(Array.from({ length: 7 }, () => foregroundValue(0)))
+  record('回归（task-38）：>5 条（7 条）全结构化 → H2 pass（全量统计，不再截前 5 条）',
+    h2Seven.status === 'pass' && h2Seven.evidence?.bashResultCount === 7 && h2Seven.evidence?.structuredValueCount === 7
+      && h2Seven.evidence?.samples?.length === 5,
+    JSON.stringify({ status: h2Seven.status, ...h2Seven.evidence }))
+
+  const h2SevenPartial = h2Full([...Array.from({ length: 6 }, () => foregroundValue(0)), null])
+  record('回归（task-38）：>5 条（7 条）中 1 条缺结构化 value → H2 fail（6/7，真实缺失仍 fail）',
+    h2SevenPartial.status === 'fail' && h2SevenPartial.evidence?.structuredValueCount === 6
+      && h2SevenPartial.evidence?.problemCounts?.['missing-structured-value'] === 1,
+    JSON.stringify({ status: h2SevenPartial.status, ...h2SevenPartial.evidence }))
+
+  const h2Five = h2Full(Array.from({ length: 5 }, () => foregroundValue(0)))
+  record('回归（task-38）：≤5 条（5 条）全结构化 → H2 pass（窗口行为不变）',
+    h2Five.status === 'pass' && h2Five.evidence?.samples?.length === 5,
+    JSON.stringify({ status: h2Five.status, kinds: h2Five.evidence?.kinds }))
+
+  const h2NoExit = h2Full([foregroundValue(0), { kind: 'foreground', timedOut: false, aborted: false, stdout: { text: '', truncated: false }, stderr: { text: '', truncated: false } }])
+  record('回归（task-38）：全结构化但 foreground 缺整数 exitCode → H2 fail（不放宽判据）',
+    h2NoExit.status === 'fail' && h2NoExit.evidence?.problemCounts?.['foreground-without-integer-exit-code'] === 1,
+    JSON.stringify(h2NoExit.evidence?.problemCounts))
+
+  const h2PromotedExit = h2Full([promotedValue('bash-1'), { kind: 'promoted', jobId: 'bash-2', exitCode: 0 }])
+  record('回归（task-38）：promoted 带最终 exitCode → H2 fail',
+    h2PromotedExit.status === 'fail' && h2PromotedExit.evidence?.problemCounts?.['promoted-with-final-exit-code'] === 1,
+    JSON.stringify(h2PromotedExit.evidence?.problemCounts))
+
+  const h2PromotedNoJob = h2Full([{ kind: 'promoted', timeoutMs: 1000 }])
+  record('回归（task-38）：promoted 缺 jobId → H2 fail',
+    h2PromotedNoJob.status === 'fail' && h2PromotedNoJob.evidence?.problemCounts?.['promoted-without-jobId'] === 1,
+    JSON.stringify(h2PromotedNoJob.evidence?.problemCounts))
+
+  const h2PromotedOk = h2Full([foregroundValue(0), promotedValue('bash-3')])
+  record('回归（task-38）：foreground 合规 + promoted 合规（jobId、无最终 exitCode）→ H2 pass',
+    h2PromotedOk.status === 'pass' && h2PromotedOk.evidence?.coveredBranches?.includes('promoted') === true,
+    JSON.stringify({ status: h2PromotedOk.status, covered: h2PromotedOk.evidence?.coveredBranches }))
+
+  const h2NoPromoted = h2Full([foregroundValue(0), foregroundValue(1)])
+  record('回归（task-38）：无 promoted/background 样本 → evidence.uncoveredKinds 显式标注（不得声称该分支通过）',
+    h2NoPromoted.evidence?.uncoveredKinds?.length === 2 && String(h2NoPromoted.notes ?? '').includes('未覆盖分支'),
+    JSON.stringify({ uncovered: h2NoPromoted.evidence?.uncoveredKinds, notes: h2NoPromoted.notes }))
   const mismatchRecord = { ...baseRecord, sessionId: 'worker-other-000000000002' }
   record('负例：sessionId 不一致 → H4 fail', h4Ring(session, mismatchRecord, redact).status === 'fail', 'ok')
 
