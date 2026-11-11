@@ -93,6 +93,8 @@ sed -n '55p;59p;163,179p' hephi/docs/validation/2026-11-07-a2-final.md
 
 **复算漂移登记（2026-11-12 04:1x +08 实测，必须保留）**：本轮材料核对时重跑 `verify.mjs` 得 `CASES 11 expectationFailed=2`——与 T10 报告第 204 行记录的 `expectationFailed=0` 不同。原因实测：**PR#22 已于 2026-11-11T20:09:30Z MERGED**（`gh pr view 22 --json state,mergedAt` 实测；T10 证据窗口为 20:00:45Z 之前，当时 OPEN），两个依赖 PR OPEN 前提的 binding-off 用例（`legal-foreground-binding-off`、`attack-1-forged-record-binding-off`）现按 `ready.pr-mismatch` 拒绝。这正是 T10 报告 §11.5 第 285–286 行预登记的漂移场景：「若未来 PR 状态变化……需重新按当时状态复算（不影响攻击类结论）」。**含义与纪律**：① T10 原始证据（`artifacts/` + `checksums.sha256`）不受影响——本轮 `shasum -a 256 -c checksums.sha256` 31 项全 OK（实测非 OK 数 = 0）；② 攻击①「生产配置误放行」的结论**只在其原始时点证据上成立**，当前 PR 状态下的拒绝原因是 PR 状态而非证据校验——不得把本轮的 `pr-mismatch` 拒绝说成「攻击① 已被修复/不再放行」；③ 后续 T10 复跑须按 §11.5 重新构造 OPEN PR 语境或在合并后时点重定预期。
 
+**事故登记（同轮，如实保留）**：`verify.mjs` 会就地重写 `artifacts/**`、`attacks.jsonl`、`checksums.sha256`（非只读脚本）。本轮复算因此覆盖了 T10 归档证据的工作树副本；发现后立即 `git restore eval/evidence/t10-host-verification/` 恢复，恢复后 `git status --porcelain` 为空、`shasum -a 256 -c checksums.sha256` 31/31 OK、`git log -1` 仍为本文提交（未污染提交内容）。后续任何人复算前应先复制目录到 /tmp 再跑。
+
 ## 7. 待人工/主持决策清单
 
 | # | 决策项 |
