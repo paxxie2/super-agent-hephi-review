@@ -1,0 +1,27 @@
+{
+  "version": 3,
+  "kind": "code",
+  "goal": "交付运行记录→schema 校验→导出比对三里程碑链：eval/record-run.mjs 采集端、run.schema.json 校验与导出比对工具，合成后 self-test 全绿",
+  "outOfScope": [
+    "保留 record-run.mjs 既有 CLI 与记录字段兼容性（已归档证据文件不作废）",
+    "不得改动 eval/b7-matrix.mjs、eval/stats/ 与 b5-tasks.json 保留集",
+    "不得修改 site-pnl-diagnosis 任务集任何文件",
+    "不做格式化、重命名、依赖升级；不得合并 PR；失败如实报告 blocked，不绕过检查"
+  ],
+  "acceptance": [
+    {
+      "id": "AC1",
+      "text": "record-run 采集端扩展后 node eval/record-run.mjs --self-test exit 0 且输出 SELF-TEST: PASS",
+      "check": "project-regression",
+      "paths": ["eval/record-run.mjs"],
+      "tests": ["eval/tasks/hephi/record-run/hidden-test.sh"]
+    },
+    {
+      "id": "AC2",
+      "text": "run schema 校验与导出比对有自测断言（导出物与采集记录逐字段一致），纳入同一 self-test",
+      "check": "project-regression",
+      "paths": ["eval/record-run.mjs", "eval/schema/"],
+      "tests": ["eval/tasks/hephi/record-run/hidden-test.sh"]
+    }
+  ]
+}

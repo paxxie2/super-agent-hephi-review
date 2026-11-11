@@ -1,0 +1,27 @@
+{
+  "version": 3,
+  "kind": "code",
+  "goal": "交付 staged 阶段控制三里程碑：状态机、readSession 恢复、preflight，行为与 hephi/docs/stage-control.md 约定一致",
+  "outOfScope": [
+    "保留 stage-mount.ts 对外挂载接口签名与既有阶段编号",
+    "不得改动 evidence-verifier.ts、activation.ts 及 hephi/src/ 其他控制模块",
+    "不得修改 hephi/docs/stage-control.md 的既有阶段语义（文档同步修改须逐条对应代码变更）",
+    "不做格式化、重命名、依赖升级；不得合并 PR；失败如实报告 blocked，不绕过检查"
+  ],
+  "acceptance": [
+    {
+      "id": "AC1",
+      "text": "状态机非法迁移被拒绝，readSession 恢复后阶段状态与中断前一致",
+      "check": "project-regression",
+      "paths": ["hephi/src/control/stage-mount.ts"],
+      "tests": ["hephi/tests/control/"]
+    },
+    {
+      "id": "AC2",
+      "text": "preflight 对缺失前置产物 fail-closed；hephi/tests/control 整目录回归全绿",
+      "check": "project-regression",
+      "paths": ["hephi/src/control/stage-mount.ts"],
+      "tests": ["hephi/tests/control/"]
+    }
+  ]
+}

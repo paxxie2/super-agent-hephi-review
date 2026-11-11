@@ -1,0 +1,27 @@
+{
+  "version": 3,
+  "kind": "code",
+  "goal": "交付 22 卡保留集清点三里程碑：manifest 冻结、全模扫描、哈希登记，shasum -c 全过",
+  "outOfScope": [
+    "保留 eval/evidence/t21-prep/ 既有归档文件内容不改动（清点新增哈希登记，不重写历史）",
+    "不得改动 eval/tasks/site-pnl-diagnosis 22 张卡本体与 b5-tasks.json",
+    "不得改动 PREREG.md 冻结内容",
+    "不做格式化、重命名、依赖升级；不得合并 PR；失败如实报告 blocked，不绕过检查"
+  ],
+  "acceptance": [
+    {
+      "id": "AC1",
+      "text": "manifest 列出保留集全部卡片/证据文件，逐项登记 sha256",
+      "check": "project-regression",
+      "paths": ["eval/evidence/t21-prep/"],
+      "tests": ["eval/evidence/t21-prep/SHA256SUMS"]
+    },
+    {
+      "id": "AC2",
+      "text": "全模扫描后 cd eval/evidence/t21-prep && shasum -a 256 -c SHA256SUMS exit 0（含新增行）",
+      "check": "project-regression",
+      "paths": ["eval/evidence/t21-prep/"],
+      "tests": ["eval/evidence/t21-prep/SHA256SUMS"]
+    }
+  ]
+}

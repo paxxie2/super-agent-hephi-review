@@ -1,0 +1,27 @@
+{
+  "version": 3,
+  "kind": "code",
+  "goal": "交付多项目/多模型准备矩阵三里程碑：矩阵定义、环境探测、报告生成，合成后 b7-matrix self-test 全绿",
+  "outOfScope": [
+    "保留 eval/b7-matrix.mjs 既有矩阵字段与 --self-test 输出契约",
+    "不得改动 eval/record-run.mjs、eval/stats/ 与 PREREG.md 冻结内容",
+    "不得修改 site-pnl-diagnosis 任务集任何文件",
+    "不做格式化、重命名、依赖升级；不得合并 PR；失败如实报告 blocked，不绕过检查"
+  ],
+  "acceptance": [
+    {
+      "id": "AC1",
+      "text": "环境探测覆盖矩阵全部项目×模型格点，缺失环境标记为 blocked 而非跳过",
+      "check": "project-regression",
+      "paths": ["eval/b7-matrix.mjs"],
+      "tests": ["eval/tasks/hephi/b7-matrix/hidden-test.sh"]
+    },
+    {
+      "id": "AC2",
+      "text": "报告生成后 node eval/b7-matrix.mjs --self-test exit 0 且断言数不少于基线 36",
+      "check": "project-regression",
+      "paths": ["eval/b7-matrix.mjs", "eval/B7.md"],
+      "tests": ["eval/tasks/hephi/b7-matrix/hidden-test.sh"]
+    }
+  ]
+}

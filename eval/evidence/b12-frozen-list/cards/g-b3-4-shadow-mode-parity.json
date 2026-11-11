@@ -1,0 +1,27 @@
+{
+  "version": 3,
+  "kind": "code",
+  "goal": "交付 P4 shadow 观察面三里程碑：决策日志、allowUnavailable 处理、parity 比对脚本，对已导出清单跑通（enforcement-modes.md 边界内）",
+  "outOfScope": [
+    "保留 check-shadow-parity.mjs 既有 CLI 与报告格式",
+    "不得改动 hephi/src/ 运行时强制逻辑（shadow 仅观察，不改变判定）",
+    "真实对照导出依赖宿主操作者，未实施部分按 enforcement-modes.md:22-23 标注边界，不得伪造导出数据",
+    "不做格式化、重命名、依赖升级；不得合并 PR；失败如实报告 blocked，不绕过检查"
+  ],
+  "acceptance": [
+    {
+      "id": "AC1",
+      "text": "决策日志记录 allow/allowUnavailable/deny 决策及输入摘要，可重放",
+      "check": "project-regression",
+      "paths": ["scripts/experimental/check-shadow-parity.mjs"],
+      "tests": ["scripts/experimental/check-shadow-parity.mjs"]
+    },
+    {
+      "id": "AC2",
+      "text": "parity 脚本对已导出对照清单输出一致/不一致明细且 exit code 正确（一致 0，不一致非 0）",
+      "check": "project-regression",
+      "paths": ["scripts/experimental/check-shadow-parity.mjs", "hephi/docs/enforcement-modes.md"],
+      "tests": ["scripts/experimental/check-shadow-parity.mjs"]
+    }
+  ]
+}

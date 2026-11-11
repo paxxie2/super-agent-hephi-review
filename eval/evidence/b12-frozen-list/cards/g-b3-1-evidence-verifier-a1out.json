@@ -1,0 +1,27 @@
+{
+  "version": 3,
+  "kind": "code",
+  "goal": "交付 A1-OUT fail-closed 链三里程碑：前台 kind 校验、jobs.readAt lossy 拒绝、ready 映射，合成后 evidence-verifier 套件全绿",
+  "outOfScope": [
+    "保留 evidence-verifier 对外函数签名与既有通过判定的返回值结构",
+    "不得改动 activation.ts、stage-mount.ts 及 hephi/src/ 其他控制模块",
+    "不得弱化或跳过既有 evidence-verifier.test.ts 断言",
+    "不做格式化、重命名、依赖升级；不得合并 PR；失败如实报告 blocked，不绕过检查"
+  ],
+  "acceptance": [
+    {
+      "id": "AC1",
+      "text": "前台 kind 校验对非白名单 kind 拒绝（fail-closed），既有合法路径行为不变",
+      "check": "project-regression",
+      "paths": ["hephi/src/control/evidence-verifier.ts"],
+      "tests": ["hephi/tests/control/evidence-verifier.test.ts"]
+    },
+    {
+      "id": "AC2",
+      "text": "jobs.readAt lossy 输出被拒绝且错误信息含定位；ready 映射只接受通过校验的证据",
+      "check": "project-regression",
+      "paths": ["hephi/src/control/evidence-verifier.ts"],
+      "tests": ["hephi/tests/control/evidence-verifier.test.ts"]
+    }
+  ]
+}

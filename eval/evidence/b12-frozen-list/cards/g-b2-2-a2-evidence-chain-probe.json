@@ -1,0 +1,27 @@
+{
+  "version": 3,
+  "kind": "code",
+  "goal": "交付只读宿主证据链探针（识别 path-A/path-B 双形状 job 证据）、判定模板与自测夹具，最终合成后在 HEAD 上探针自测与 probes 套件全绿",
+  "outOfScope": [
+    "保留 check-binding-host.mjs 既有 CLI 参数与判定输出结构（path-A 判定不回归）",
+    "不得改动 hephi/src/ 与 hephi/lib/ 下任何运行时控制逻辑（本任务是只读探查线）",
+    "不得访问或依赖真实宿主运行时；自测仅用合成数据",
+    "不做格式化、重命名、依赖升级；不得合并 PR；失败如实报告 blocked，不绕过检查"
+  ],
+  "acceptance": [
+    {
+      "id": "AC1",
+      "text": "探针支持 --self-test，用合成数据自测解析/判定逻辑，exit 0 且输出 SELF-TEST: PASS",
+      "check": "project-regression",
+      "paths": ["hephi/scripts/check-binding-host.mjs"],
+      "tests": ["hephi/tests/probes/check-binding-host.test.ts"]
+    },
+    {
+      "id": "AC2",
+      "text": "path-B（inner→root 注册）与双形状 ambiguous 场景有判定用例并写入验证文档",
+      "check": "project-regression",
+      "paths": ["hephi/docs/validation/"],
+      "tests": ["hephi/tests/probes/check-binding-host.test.ts"]
+    }
+  ]
+}
