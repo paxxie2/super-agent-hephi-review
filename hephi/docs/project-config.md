@@ -117,6 +117,7 @@ checks 结构、验收项引用存在的 **test** check、重复 id；`acceptanc
 | `focus.broad-scope` | allowedPaths 含 `**`/`*`/`**/*`/`**/...` 过宽，或 >50 条 | 提示 |
 | `focus.no-regression` | 没有任何 required `kind=test` 检查在 id/purpose/command/args 上像整套回归（启发式） | 提示 |
 | `focus.unused-check` | checks 中既非 required、也未被 acceptance 引用的检查 | 提示 |
+| `focus.tests-outside-paths` | 验收项的 `tests` 有文件不在该项自己的 `paths` 内（Worker 无法新建或更新它，先红后绿可能无法完成；依据：G1 开发集 3 张工单因此未能 ready） | 提示 |
 
 输出示例：`HEPHI task lint: PASS <file> (...)`, 随后每行 `focus: <rule> <message>`；
 `--json` 输出 `{schemaVersion,ok,file,errors,warnings,focus:[{rule,message}],summary}`。

@@ -151,6 +151,23 @@ describe('hephi lint-task — C4.8 focus hints (advisory only)', () => {
     expect(focusRules(result)).toContain('focus.unused-check')
   })
 
+  it('focus.tests-outside-paths fires when an acceptance item names tests outside its own paths', async () => {
+    const v3 = (paths: string[]) => bundle({
+      allowedPaths: ['src/**', 'tests/**'],
+      task: {
+        version: 3, kind: 'code', goal: 'fix a defect', outOfScope: ['nothing else'],
+        acceptance: [{ id: 'a1', text: 'behaviour', check: 'full-regression', paths, tests: ['tests/price.test.js'] }],
+      },
+    })
+    const outside = await lintTask(v3(['src/price.js']))
+    expect(outside.code).toBe(0)
+    expect(focusRules(outside)).toContain('focus.tests-outside-paths')
+    expect(outside.out).toContain('tests/price.test.js')
+    const inside = await lintTask(v3(['src/price.js', 'tests/price.test.js']))
+    expect(inside.code).toBe(0)
+    expect(focusRules(inside)).not.toContain('focus.tests-outside-paths')
+  })
+
   it('--json exposes focus entries as {rule,message}', async () => {
     const dir = tempDir('hephi-lint-focus-json-')
     const file = join(dir, 'task.json')

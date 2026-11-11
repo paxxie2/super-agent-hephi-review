@@ -953,7 +953,7 @@ async function lintTaskCommand(args: string[], io: CliIo): Promise<number> {
     if (!LINT_BUNDLE_KEYS.has(key)) warnings.push(`unknown top-level field ignored: ${key}`)
   }
 
-  let card: { acceptance: Array<{ id: string; check: string }> } | null = null
+  let card: { acceptance: Array<{ id: string; check: string; paths: string[]; tests?: string[] }> } | null = null
   const cardResult = taskCardSchema.safeParse(taskInput)
   if (!cardResult.success) errors.push(...formatZodIssues(cardResult.error))
   else card = cardResult.data
@@ -1032,6 +1032,12 @@ async function lintTaskCommand(args: string[], io: CliIo): Promise<number> {
     const unused = verification.checks.filter(check => !check.required && !acceptedChecks.has(check.id)).map(check => check.id).sort()
     if (unused.length > 0) {
       focus.push({ rule: 'focus.unused-check', message: `checks neither required nor referenced by acceptance: ${unused.join(', ')}` })
+    }
+    for (const item of card.acceptance) {
+      const outside = (item.tests ?? []).filter(test => !allowedPath(test, item.paths))
+      if (outside.length > 0) {
+        focus.push({ rule: 'focus.tests-outside-paths', message: `acceptance ${item.id} names tests outside its own paths: ${outside.join(', ')}; the Worker cannot create or update them, so red-before-green cannot complete unless they already exist and fail; add them to paths` })
+      }
     }
   }
   if (Array.isArray(allowedPaths)) {
