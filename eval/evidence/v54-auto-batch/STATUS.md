@@ -54,3 +54,12 @@
 - **3086 未动**：冻结对照 6d24e1b 保持独立制品。
 - **未做**：未解除暂停、未派发任务、未开强绑定、未产生实验支出。T03 宿主路径、T08 Q4 正误 SHA 两例仍缺证据；真实端到端未验证通过。
 - **待用户决定**：是否解除暂停并从新 Issue 验收自动触发（A1 隔离验证起点）。
+
+## 2026-11-12 A1 真实端到端验收通过（issue #21 → PR #22）
+
+- **解除暂停**：settings-version:21 paused=false，重启宿主 pid 33924。
+- **自动触发链路**：GitHub issue #21（evidence offset le=10000）→ trigger 9ff28810 → ticket 46aa3f59 → prepare → 合同（pluginCommit=ab5f527）→ Worker 红绿 → ready.pass → PR #22（OPEN MERGEABLE，head 440712x）。
+- **decisions 链**：plan.recorded → scope.allowed(write) → check.blocked(红，exit 1 预期) → scope.allowed(edit×2) → check.pass×2(绿) → ready.pass。唯一 deny 是预期红态，无越界。
+- **修复过程问题**：指针目录初缺 scripts/prepare-dubbo.sh → prepare failed；补 scripts 后通过 POST tickets/:id/retry（x-orchestrator-request:1 头）成功重试。failed assignment 不自动重试。
+- **A1 隔离证据**：合同 pluginCommit=ab5f527 与实载一致；Worker 在独立 checkout 工作，状态目录由插件写入；diff 仅 diagnoses.py + 验收测试，无越界改动。
+- **真实端到端首次通过**（此前所有"未验证"项中，A1 起点现已有真实交付证据）。T10/T11 完整验收（四类无效证据拒绝 + 四种故障恢复）仍待后续。
