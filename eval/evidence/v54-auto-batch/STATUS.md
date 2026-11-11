@@ -142,3 +142,27 @@ Lead 终审重放：11/11 lint PASS、11/11 allowedPaths==acceptancePaths、隐�
 
 ### 清理教训（已入 exp-053）
 删除分支前须盘点该分支产物的**完整清单**（含 src 实现本体与 tests），本次 snapshot-seal.ts 实现直到重建 A7 套件时才发现缺失，属清理时未做全量产物盘点的遗漏。
+
+## 2026-11-12 第 4 批：DSH 宿主任务单 + T10 真实重跑
+
+### 用户指定四步的执行结果
+
+| 步骤 | 交付 | commit | 状态 |
+|---|---|---|---|
+| ① DSH 宿主任务单（能力A写权限 + 能力B四元绑定） | `hephi/docs/validation/2026-11-12-dsh-host-task-order.md`（264 行，88 处引用 0 problem） | a5ccbd9 + 781ff0c | ✅ 待宿主负责人受理 |
+| ② 3085 部署固定版本记录 | `eval/evidence/t10-rerun/deploy-record.md`（DSH rc.5 / SA cd384e7 / hephi ab5f527 + 生效配置 + OPEN PR 条件） | 5630f87 | ✅ 3086 未动 |
+| ③ 新 Issue 重跑 T10 | Issue#23 → ticket b17434f7 → 红→绿→ready.pass → PR#24（OPEN 未合并） | cca0e74 | ⛔ **T10 维持 blocked** |
+| ④ B 线并行 | B0/T02 额度申请单 + Dubbo 检查配置可审批清单 | 7ac424b + 17070f9 | ✅ 待负责人批准 |
+
+### T10 重跑核心结论（真实交付，非归档复算）
+
+- **攻击①伪造记录在 binding off 下仍被错误放行**（`ready.pass`，一票否决）——**跨交付复现**，证明不是旧 PR/旧合同特例。
+- binding on 下拒（`ready.binding` no native evidence）；②过期证据/③越界/④无害命令在 off/on 均拒。
+- **前台合法路径实测通过**；强绑定前台 `ready.output-unverified` = 部署约束；**后台 Job 实际尝试后判部署约束**（3 个 check 均 jobId=null；代码链证明冻结配置下 bash 仅在超时 promoted，promotion 时点=deadline 随即被 kill）。
+- 本次交付链另有 **4 条真实拦截**：protected asset 未授权修改 ×2、`scope.outside-task`（.git/PR_BODY.md）×1、预期红态 ×1。
+
+### 结论
+
+T10 要 pass，必须等宿主交付能力 A（Worker 写权限隔离）+ 能力 B（结构化四元绑定）。这不是 hephi 侧能修的。D1/D2 不升级，T10 维持 blocked。
+
+**真实支出**：本次 1 次真实 Worker 交付（用户授权的第 3 步）。
