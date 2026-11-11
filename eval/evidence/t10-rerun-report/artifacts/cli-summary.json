@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "ticketId": "b17434f743a24cab31575b737ea482a0",
+  "head": "8593867f16fa0f3fcddb245996ab61dfcd89b8b7",
+  "contractHash": "sha256:0362d314d5cb637c1469eb3558cfad0402d5b70c31e9fa5cff74ad88ec1e71e4",
+  "acceptance": [
+    {
+      "id": "records-offset-max",
+      "text": "offset=10001 调用 evidence records 端点返回 422；offset=0 正常返回 200",
+      "check": "acceptance",
+      "paths": [
+        "backend/app/api/diagnoses.py",
+        "backend/tests/acceptance/test_records_offset_max.py"
+      ],
+      "changedFiles": [
+        "backend/app/api/diagnoses.py",
+        "backend/tests/acceptance/test_records_offset_max.py"
+      ]
+    }
+  ],
+  "unassigned": [],
+  "plan": {
+    "files": [
+      "backend/app/api/diagnoses.py",
+      "backend/tests/acceptance/test_records_offset_max.py"
+    ],
+    "entries": 1,
+    "match": true
+  },
+  "coverage": {
+    "source": null,
+    "uncovered": [],
+    "summary": null
+  },
+  "decisions": {
+    "entries": 13,
+    "allow": 9,
+    "deny": 4,
+    "lastRule": "ready.pass",
+    "lastAt": "2026-11-11T22:22:36.616Z"
+  },
+  "generatedAt": "2026-11-11T22:24:16.385Z"
+}

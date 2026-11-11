@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "seq": 1,
+  "at": "2026-11-11T22:24:19.854Z",
+  "ticketId": "b17434f743a24cab31575b737ea482a0",
+  "sessionId": "worker-b17434f743a24cab31575b737ea482a0",
+  "callId": "t10-ready-call",
+  "tool": "orchestrator_report",
+  "mode": "enforce",
+  "effectiveDecision": "deny",
+  "wouldDecision": "deny",
+  "rule": "ready.other",
+  "reason": "evidence does not match the frozen check: acceptance: recorded argv differs from the frozen check",
+  "contractHash": "sha256:0362d314d5cb637c1469eb3558cfad0402d5b70c31e9fa5cff74ad88ec1e71e4",
+  "binding": {
+    "contract": false,
+    "host": true,
+    "effective": true
+  },
+  "pluginCommit": "ab5f527a11655dd3e935a634d3b5c62f0a265f51"
+}

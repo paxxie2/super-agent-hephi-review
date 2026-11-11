@@ -1,0 +1,51 @@
+{
+ "frames": 211,
+ "events": 388,
+ "types": {
+  "session": 1,
+  "permission/preset": 2,
+  "sandbox/mode": 2,
+  "approval/policy": 2,
+  "session/title": 1,
+  "agent/inbox/spliced": 2,
+  "turn/start": 1,
+  "step/start": 46,
+  "system/message": 1,
+  "user/message": 4,
+  "request/header": 1,
+  "request/context": 1,
+  "session-log-deepseek/delivery-accepted": 46,
+  "assistant/message": 46,
+  "tool/call": 57,
+  "tool/result": 57,
+  "job/registered": 35,
+  "job/settled": 35,
+  "step/end": 46,
+  "workspace/changes": 1,
+  "turn/end": 1
+ },
+ "structuredToolResultValues": 0,
+ "jobRegistered": 35,
+ "jobSettled": 35
+}
+hephi_check calls: 3 [
+  'call_00_ET_Vttu0FmNG1zwpActMHKv8200',
+  'call_00_ET_qtw1CMErBJgKFkIyCrNJ3941',
+  'call_00_ET_Ntp3F8ZH7MfpsKt51BLW9510'
+]
+inner check job events: 6 [
+  {
+    type: 'job/registered',
+    jobId: 'bash-382017be60b743f0',
+    callId: 'hephi-c2969eba-0987-4f87-829b-a70c0ee2cfa0',
+    root: 'call_00_ET_Vttu0FmNG1zwpActMHKv8200',
+    detail: undefined
+  },
+  {
+    type: 'job/settled',
+    jobId: 'bash-382017be60b743f0',
+    callId: 'hephi-c2969eba-0987-4f87-829b-a70c0ee2cfa0',
+    root: 'call_00_ET_Vttu0FmNG1zwpActMHKv8200',
+    detail: 'exit code: 1'
+  }
+]

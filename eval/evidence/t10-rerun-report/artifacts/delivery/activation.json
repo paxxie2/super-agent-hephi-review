@@ -1,0 +1,107 @@
+{
+  "version": 5,
+  "enabled": true,
+  "ticketId": "b17434f743a24cab31575b737ea482a0",
+  "repository": "paxxie2/b5-off-history-page-size",
+  "issueNumber": 23,
+  "workspace": "/Users/zm/dsh-instances/g1-exp/work/records-offset-cap-b17434f743a2",
+  "baseRef": "main",
+  "baseSha": "be9598827931787cc499dbfc74dbf5d5b4529448",
+  "allowedPaths": [
+    "backend/**",
+    "web/**",
+    "acceptance/**",
+    "contracts/**",
+    "scripts/**",
+    "docs/**",
+    "README.md",
+    "INTERFACES.md",
+    "pyproject.toml",
+    "uv.lock",
+    ".python-version",
+    ".gitignore",
+    ".env.example"
+  ],
+  "requirePullRequest": true,
+  "executionMode": "native",
+  "enforcement": "enforce",
+  "plugin": {
+    "version": "0.1.0",
+    "commit": "ab5f527a11655dd3e935a634d3b5c62f0a265f51"
+  },
+  "verification": {
+    "version": 1,
+    "checks": [
+      {
+        "id": "project-regression",
+        "kind": "test",
+        "purpose": "B5 generic narrowed check: pinned task bases cannot run the full project-regression suite (baseline data/package issues vary per base). Compile the backend app as a deterministic gate; behavioral correctness is evaluated by the task hidden test on the delivered head. (G1: unchanged; compileall never scans test directories, so it never includes acceptance/)",
+        "command": "sh",
+        "args": [
+          "-c",
+          "python3 -m compileall -q backend/app"
+        ],
+        "cwd": ".",
+        "required": true,
+        "timeoutMs": 120000
+      },
+      {
+        "id": "acceptance",
+        "kind": "test",
+        "purpose": "G1 acceptance check (T08 §8 pattern): run only acceptance tests, JUnit report in this run directory. Assumes pytest is available and acceptance tests live under backend/tests/acceptance/ (created by T15 tasks; the directory does not exist at staging time).",
+        "command": "sh",
+        "args": [
+          "-c",
+          "python3 -m pytest backend/tests/acceptance -q --junitxml=\"$HEPHI_RUN_DIR/junit.xml\""
+        ],
+        "cwd": ".",
+        "required": true,
+        "timeoutMs": 600000,
+        "assertionFailureTypes": [
+          "AssertionError"
+        ]
+      }
+    ],
+    "protectedAssets": [
+      "**/test/**",
+      "**/tests/**"
+    ],
+    "requirePlan": true
+  },
+  "evidence": {
+    "requireSessionBinding": false
+  },
+  "task": {
+    "version": 3,
+    "kind": "code",
+    "goal": "为 GET /api/diagnoses/{id}/evidence/{evidence_id}/records 的 offset 增加上限校验 le=10000",
+    "outOfScope": [
+      "web/**"
+    ],
+    "acceptance": [
+      {
+        "id": "records-offset-max",
+        "text": "offset=10001 调用 evidence records 端点返回 422；offset=0 正常返回 200",
+        "check": "acceptance",
+        "paths": [
+          "backend/app/api/diagnoses.py",
+          "backend/tests/acceptance/test_records_offset_max.py"
+        ],
+        "tests": [
+          "backend/tests/acceptance/test_records_offset_max.py"
+        ]
+      }
+    ],
+    "protect": [
+      "**/test/**",
+      "**/tests/**",
+      "**/__tests__/**",
+      "**/*.test.*",
+      "**/*.spec.*",
+      "**/*Test.java",
+      "**/*_test.go",
+      "**/test_*.py"
+    ]
+  },
+  "contractHash": "sha256:0362d314d5cb637c1469eb3558cfad0402d5b70c31e9fa5cff74ad88ec1e71e4"
+}

@@ -1,0 +1,39 @@
+{
+  "version": 3,
+  "pluginCommit": "ab5f527a11655dd3e935a634d3b5c62f0a265f51",
+  "runId": "t10-acceptance-4",
+  "sequence": 4,
+  "ticketId": "b17434f743a24cab31575b737ea482a0",
+  "contractHash": "sha256:0362d314d5cb637c1469eb3558cfad0402d5b70c31e9fa5cff74ad88ec1e71e4",
+  "checkId": "acceptance",
+  "sessionId": "worker-b17434f743a24cab31575b737ea482a0",
+  "callId": "call_t10_benign_outer",
+  "innerCallId": "hephi-t10-benign-inner",
+  "argv": [
+    "true"
+  ],
+  "cwd": "/Users/zm/dsh-instances/g1-exp/work/records-offset-cap-b17434f743a2",
+  "startedAt": "2026-11-11T19:40:00.000Z",
+  "status": "passed",
+  "exitCode": 0,
+  "before": {
+    "baseCommit": "be9598827931787cc499dbfc74dbf5d5b4529448",
+    "headCommit": "8593867f16fa0f3fcddb245996ab61dfcd89b8b7",
+    "patchHash": "sha256:afa8b3e61c0b510cae870c83e4ad6b43f76f351af2c34403092ac9f85ca831b7",
+    "changedFiles": [
+      "backend/app/api/diagnoses.py",
+      "backend/tests/acceptance/test_records_offset_max.py"
+    ]
+  },
+  "outputHash": "sha256:2861ed859df0b417819a2079a767da98c16fd137c1c3cc48008519f4c2a650d3",
+  "after": {
+    "baseCommit": "be9598827931787cc499dbfc74dbf5d5b4529448",
+    "headCommit": "8593867f16fa0f3fcddb245996ab61dfcd89b8b7",
+    "patchHash": "sha256:afa8b3e61c0b510cae870c83e4ad6b43f76f351af2c34403092ac9f85ca831b7",
+    "changedFiles": [
+      "backend/app/api/diagnoses.py",
+      "backend/tests/acceptance/test_records_offset_max.py"
+    ]
+  },
+  "finishedAt": "2026-11-11T19:40:01.000Z"
+}

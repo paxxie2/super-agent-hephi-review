@@ -1,0 +1,41 @@
+{
+  "version": 3,
+  "pluginCommit": "ab5f527a11655dd3e935a634d3b5c62f0a265f51",
+  "runId": "5dc5ffd7-37c2-46b9-9e30-a8f0c3059da2",
+  "sequence": 1,
+  "ticketId": "b17434f743a24cab31575b737ea482a0",
+  "contractHash": "sha256:0362d314d5cb637c1469eb3558cfad0402d5b70c31e9fa5cff74ad88ec1e71e4",
+  "checkId": "acceptance",
+  "phase": "red",
+  "sessionId": "worker-b17434f743a24cab31575b737ea482a0",
+  "callId": "call_00_ET_Vttu0FmNG1zwpActMHKv8200",
+  "innerCallId": "hephi-c2969eba-0987-4f87-829b-a70c0ee2cfa0",
+  "argv": [
+    "sh",
+    "-c",
+    "python3 -m pytest backend/tests/acceptance -q --junitxml=\"$HEPHI_RUN_DIR/junit.xml\""
+  ],
+  "cwd": "/Users/zm/dsh-instances/g1-exp/work/records-offset-cap-b17434f743a2",
+  "startedAt": "2026-11-11T22:21:47.366Z",
+  "status": "blocked",
+  "exitCode": 1,
+  "before": {
+    "baseCommit": "be9598827931787cc499dbfc74dbf5d5b4529448",
+    "headCommit": "7333905621a9739c6ae3feee2998c6c3ddfb043b",
+    "patchHash": "sha256:695e50c34b73712e376a2d078bda0ec2467e25140d5884dee2382fcde07fa0e7",
+    "changedFiles": [
+      "backend/tests/acceptance/test_records_offset_max.py"
+    ]
+  },
+  "outputHash": "sha256:872c540485d0630cd20f71956069272f4894cc7338a3d78a3b3d0b5cb03fa0c1",
+  "after": {
+    "baseCommit": "be9598827931787cc499dbfc74dbf5d5b4529448",
+    "headCommit": "7333905621a9739c6ae3feee2998c6c3ddfb043b",
+    "patchHash": "sha256:695e50c34b73712e376a2d078bda0ec2467e25140d5884dee2382fcde07fa0e7",
+    "changedFiles": [
+      "backend/tests/acceptance/test_records_offset_max.py"
+    ]
+  },
+  "reason": "red run failed as expected: exit code 1",
+  "finishedAt": "2026-11-11T22:21:48.564Z"
+}

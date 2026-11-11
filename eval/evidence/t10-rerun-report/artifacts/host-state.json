@@ -1,0 +1,78 @@
+{
+  "fetchedAt": "2026-11-11T22:24:16.314Z",
+  "host": "http://127.0.0.1:3085",
+  "response": {
+    "setup": {
+      "machine": {
+        "stateDir": "/Users/zm/dsh-instances/g1-exp/state",
+        "promptMaxChars": 100000,
+        "admissionContextMaxPages": 10,
+        "admissionContextTimeoutMs": 15000
+      },
+      "problem": null,
+      "feishuProblem": null,
+      "accounts": {
+        "repository": "paxxie2/b5-off-history-page-size",
+        "agent": "paxxie2",
+        "feishu": null
+      }
+    },
+    "load": {
+      "running": 0,
+      "queued": 0,
+      "maxWorkers": 3
+    },
+    "masterId": "orchestrator-a64f681b686002f9c4953a690b9d46b3",
+    "paused": false,
+    "health": {
+      "runtime": {
+        "state": "ready",
+        "detail": "Orchestrator is ready",
+        "at": "2026-11-11T19:27:29.558Z"
+      },
+      "relay": {
+        "state": "ready",
+        "detail": "Nothing waiting",
+        "at": "2026-11-11T22:22:37.852Z"
+      },
+      "notice": {
+        "state": "ready",
+        "detail": "Nothing waiting",
+        "at": "2026-11-11T20:12:14.139Z"
+      },
+      "launch": {
+        "state": "ready",
+        "detail": "Nothing waiting",
+        "at": "2026-11-11T22:20:13.172Z"
+      },
+      "delivery": {
+        "state": "ready",
+        "detail": "Nothing waiting",
+        "at": "2026-11-11T19:27:22.465Z"
+      },
+      "assessment": {
+        "state": "ready",
+        "detail": "Nothing waiting",
+        "at": "2026-11-11T22:20:01.672Z"
+      },
+      "reply": {
+        "state": "ready",
+        "detail": "Nothing waiting",
+        "at": "2026-11-11T22:22:44.299Z"
+      },
+      "evals": {
+        "state": "ready",
+        "detail": "No unavailable Eval in the last hour"
+      },
+      "models": {
+        "state": "ready",
+        "detail": "No managed Session is waiting on a model budget retry"
+      },
+      "github": {
+        "state": "ready",
+        "detail": "0 notifications; next poll ≥ 60s",
+        "at": "2026-11-11T22:23:59.142Z"
+      }
+    }
+  }
+}

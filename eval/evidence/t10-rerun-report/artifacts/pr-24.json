@@ -1,0 +1,11 @@
+{
+  "fetchedAt": "2026-11-11T22:24:16.314Z",
+  "pr": {
+    "baseRefName": "main",
+    "headRefOid": "8593867f16fa0f3fcddb245996ab61dfcd89b8b7",
+    "number": 24,
+    "state": "OPEN",
+    "title": "fix(api): cap evidence records endpoint offset at 10000",
+    "url": "https://github.com/paxxie2/b5-off-history-page-size/pull/24"
+  }
+}

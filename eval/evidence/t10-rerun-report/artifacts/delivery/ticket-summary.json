@@ -1,0 +1,23 @@
+{
+  "id": "b17434f743a24cab31575b737ea482a0",
+  "title": "为 evidence records 端点 offset 增加 le=10000 上限校验（T10 重跑验收）",
+  "origin": {
+    "triggerId": "4926d1cb90022b06793e731dd4a2ce09",
+    "triggerIds": [
+      "4926d1cb90022b06793e731dd4a2ce09"
+    ]
+  },
+  "execution": {
+    "name": "records-offset-cap-b17434f743a2",
+    "directory": "/Users/zm/dsh-instances/g1-exp/work/records-offset-cap-b17434f743a2",
+    "assignment": "Routing note (not the source request): T10 重跑，新 Issue 真实交付验收；按工单内的红绿顺序执行。"
+  },
+  "assignment": {
+    "id": "14daba5462daccf7483555f4504e147a",
+    "state": "running",
+    "createdAt": "2026-11-11T22:20:05.446Z",
+    "startedAt": "2026-11-11T22:20:13.160Z",
+    "reportState": "ready",
+    "reportSummary": "Delivered PR #24 (https://github.com/paxxie2/b5-off-history-page-size/pull/24), open for human review; a person merges it (auto-merge not enabled, not merged).\n\nUser-visible outcome: GET /api/diagnoses/{id}/evidence/{evidence_id}/records now rejects offset > 10000 with HTTP 422; offset=0 behaves as before. limit, list_diagnoses, list_evidence and other endpoints unchanged.\n\nRed-before-green evidence (task card v3):\n- Test-only commit 7333905 added backend/tests/acceptance/test_records_offset_max.py; hephi_check(acceptance, phase=red) failed as expected (offset=10001 returned 404 instead of 422).\n- Fix commit 8593867 added _guard_records_offset_max dependency (422 above OFFSET_MAX=10000, pre-validation as with existing guards) and le=OFFSET_MAX on the offset query.\n\nChecks after the final commit (HEAD 8593867, synced with origin, clean workspace):\n- hephi_check acceptance: passed (all backend/tests/acceptance tests).\n- hephi_check project-regression: passed (compileall backend/app).\n- Local pytest of the full acceptance directory: 6 passed.\n\nPR state: OPEN, MERGEABLE, non-draft; no CI checks configured on the repo/branch. No reviews requested or received, so no reviewer credits."
+  }
+}
