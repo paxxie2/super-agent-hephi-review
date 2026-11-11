@@ -1045,7 +1045,7 @@ def analyze(runs: list[Run], config: dict | None = None) -> dict:
         "treatment_unrelated_rate": (sum(1 for t, _ in worst_case_rows if t) / wc_total) if wc_total else None,
         "control_unrelated_rate": (sum(1 for _, c in worst_case_rows if c) / wc_total) if wc_total else None,
         "imputed_details": worst_case_imputed,
-        "note": "D-11 未批准，最不利补全为硬门口径：标签不完整配对按最不利方向补全（实验组缺失计 unrelated=True，对照组缺失计 unrelated=False）后的并列敏感性展示；不改变 LOCKED 判定与有效配对分母。",
+        "note": "D-11 未批准，最不利补全为硬门口径：标签不完整配对按最不利方向补全（实验组缺失计 unrelated=True，对照组缺失计 unrelated=False）后的并列敏感性展示；不改变 LOCKED 判定与有效配对分母。仅覆盖标签不完整配对，非所有缺失结果的完整补全；本段不参与当前 LOCKED 判定，正式执行口径待负责人确认 D-11。",
     }
 
     # F16/S04/N04：批次级标注一致性证据。校准证据必须绑定当前 batchId；
