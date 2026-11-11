@@ -21,7 +21,7 @@
       "id": "AC2",
       "text": "负例集覆盖脚本失败路径（坏版本、缺元数据、部署中断），每条负例 fail-closed 且错误可定位",
       "check": "project-regression",
-      "paths": ["scripts/host/test-deploy-hephi.mjs"],
+      "paths": ["scripts/host/test-deploy-hephi.mjs", "hephi/tests/control/deploy-script.test.ts"],
       "tests": ["hephi/tests/control/deploy-script.test.ts"]
     }
   ],

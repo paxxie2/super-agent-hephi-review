@@ -90,7 +90,8 @@ sed -n '23p;30,40p;96,111p' eval/evidence/t10-host-verification/report.md
 # 必须在隔离副本中运行；直接在归档目录运行会覆盖归档证据（2026-11-12 已发生过一次，见事故登记）：
 cp -R eval/evidence/t10-host-verification /tmp/t10-replay-$$ && (cd /tmp/t10-replay-$$ && node verify.mjs)
 # 期望：exit 1 + expectationFailed=2（PR#22 已 MERGED，两条 binding-off 用例走 ready.pr-mismatch）；
-# 回放历史 PR 状态可得 exit 0：T10_REPLAY_PR_STATE=open node verify.mjs（仅在 /tmp 副本中）
+# 回放历史 PR 状态（exit 0）：无内建开关——按 replay-drift.md §5（94-106 行）在 /tmp 副本内给 verify.mjs 的
+# pullRequest 加环境变量覆盖补丁（只改副本）后运行，禁止在归档目录运行
 git show docs/hephi-plan-v5.4:docs/hephi-95-plan-v5.4-20261112.md | sed -n '576,626p'
 sed -n '55p;59p;163,179p' hephi/docs/validation/2026-11-07-a2-final.md
 ```

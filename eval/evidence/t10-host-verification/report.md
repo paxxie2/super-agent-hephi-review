@@ -194,8 +194,7 @@ check 记录未改；拒绝在读取 check 记录之前（discipline 阶段）�
 REPLAY=$(mktemp -d /tmp/t10-replay-XXXXXX)
 cp -R eval/evidence/t10-host-verification "$REPLAY"/
 cd "$REPLAY/t10-host-verification" && node verify.mjs
-# 注意：PR #91 合并后隔离重放会按预登记漂移退出 1（ready.pr-mismatch，见 replay-drift.md）；
-# 复现本报告原始结果需 T10_REPLAY_PR_STATE=open node verify.mjs（replay-drift.md §96-104）。
+# 注意：PR#22 合并后隔离重放会按预登记漂移退出 1（ready.pr-mismatch，见 replay-drift.md）；
 # 历史原始运行（当时在本仓工作区执行）：
 cd /Users/zm/repos/hephi-review-main
 node eval/evidence/t10-host-verification/verify.mjs

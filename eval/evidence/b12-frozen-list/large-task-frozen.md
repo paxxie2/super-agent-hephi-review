@@ -51,7 +51,13 @@ reference.patch 行数实测（`wc -l`）：record-run 1121、daily-export-rewor
 
 ### B4 正式组
 
-- 按 legacy-system.md §1 约定**另选**，不在本清单。分组不重叠的依据**按内容与测试面**声明：B2 项的改动面/测试面在 hephi/scripts+probes、eval/record-run·daily-export·b7-matrix、scripts/host 部署链；B3 项在 hephi/src/control 三个控制模块（evidence-verifier/activation/stage-mount）、shadow parity 实验脚本、t21 归档清点、ab-metrics 指标——两集合无共享 paths/test 文件，且均不复用 site-pnl-diagnosis 22 卡的改动面；taskId 唯一性（`g-*` 新前缀，不占 b5-tasks.json 22 项）仅是辅助标识，不是不重叠的证明。
+- 按 legacy-system.md §1 约定**另选**，不在本清单。分组不重叠的依据**按内容与写权限面**声明：B2 项的改动面/测试面在 hephi/scripts+probes、eval/record-run·daily-export·b7-matrix、scripts/host 部署链；B3 项在 hephi/src/control 三个控制模块（evidence-verifier/activation/stage-mount）、shadow parity 实验脚本、t21 归档清点、ab-metrics 指标——**两集合 allowedPaths（写权限）互不相交、无共享可写文件**（task-32 K-1 修复后逐卡核对 11/11 allowedPaths==acceptance paths 并集；只读回归 tests 引用不构成写权限），且均不复用 site-pnl-diagnosis 22 卡的改动面；taskId 唯一性（`g-*` 新前缀，不占 b5-tasks.json 22 项）仅是辅助标识，不是不重叠的证明。
+
+task-32（Kimi 复审 82 分 blocking，2026-11-12）修正记录：
+- **K-1 扩权**：g-b3-3 allowedPaths 曾含 `hephi/tests/control/**`（两条 AC paths 均无此目录）——已收窄为仅 `hephi/src/control/stage-mount.ts`（tests 保留整目录只读回归，不进 allowedPaths）；复查发现另 3 张卡 allowedPaths 为 acceptance paths 严格超集：g-b2-2/g-b2-6 将 tests 文件补进对应 AC paths（Worker 需写测试的合法授权），g-b3-1 移除 evidence-verifier.test.ts（基线已存在且通过的测试不需写权限）。修正后脚本核对 11/11 union==allowedPaths，lint 11/11 PASS。
+- **K-2 伪命令**：material.md 的 `T10_REPLAY_PR_STATE=open node verify.mjs` 一行——实测 `grep -c T10_REPLAY_PR_STATE verify.mjs` = 0（脚本无此内建开关），已改为指向 replay-drift.md §5（94-106 行）的真实步骤（/tmp 副本内 patch pullRequest 后运行）。
+- **K-3 PR 号**：report.md §6 注释「PR #91 合并后…」已改为 **PR#22**（b5-off-history-page-size 的 A1 修复 PR，即漂移来源）；同段其余 PR 号核对均为 PR#22，无误。该行中同样伪命令的 `T10_REPLAY_PR_STATE=open` 提示一并删除（归档实质内容未动，仅笔误与不可复现提示）。
+- **K-4 记录修正**：①§2-B 关键输出由误记的 `Test Files 7 passed` 改为复放实测 `Test Files 5 passed (5)`（`cd hephi && npx vitest run tests/probes tests/control/evidence-verifier.test.ts tests/control/activation.test.ts` → exit 0，Tests 140 passed）；②§3.1 lint 记录由错误的 `main @ 63ba85b` 改为如实表述：首次 11/11 在 331a141 提交前工作树，63ba85b 提交本身复放 lint exit 1（卡缺 envelope，属实），修正后 11/11 自 bc90028+task-32 起成立。
 
 ## 2. 隐藏参考验收锚点实测记录（命令原文 + 退出码 + 关键输出）
 
@@ -60,7 +66,7 @@ reference.patch 行数实测（`wc -l`）：record-run 1121、daily-export-rewor
 | # | 命令原文 | 退出码 | 关键输出 |
 | --- | --- | --- | --- |
 | A | `node hephi/scripts/check-binding-host.mjs --self-test` | 0 | `SELF-TEST: PASS` |
-| B | `cd hephi && npx vitest run tests/probes tests/control/evidence-verifier.test.ts tests/control/activation.test.ts` | 0 | `Test Files 7 passed；Tests 140 passed (140)`（覆盖 probes + evidence-verifier + activation；**不含 activation-marker**） |
+| B | `cd hephi && npx vitest run tests/probes tests/control/evidence-verifier.test.ts tests/control/activation.test.ts` | 0 | `Test Files 5 passed (5)；Tests 140 passed (140)`（task-32 复放核对文件数，原文误记 7；覆盖 probes + evidence-verifier + activation；**不含 activation-marker**） |
 | C | `node eval/record-run.mjs --self-test` | 0 | `SELF-TEST: PASS（26 条断言…）` |
 | D | `node eval/b7-matrix.mjs --self-test` | 0 | `PASS: 36 assertions (b7-matrix self-test)` |
 | F | `cd hephi && npx vitest run tests/control` | 0 | `Test Files 28 passed (28)；Tests 498 passed (498)`（task-31 补跑整目录全绿基线） |
@@ -83,7 +89,9 @@ reference.patch 行数实测（`wc -l`）：record-run 1121、daily-export-rewor
 - 里程碑拆分只发生在实验组且须先过 B2 拆卡跑通（v5.4 §3.3 第 123 行）；对照组用平卡。v3 卡 outOfScope 两类（保留行为 + 禁改模块）按 issue-with-task-card.md §7。
 - `budget` 均未填写（未获"超出即拒绝"授权）；预估规模记在 §0 表。
 
-### 3.1 lint 实测记录（命令原文 + 退出码，2026-11-12，main @ 63ba85b）
+### 3.1 lint 实测记录（命令原文 + 退出码）
+
+首次 11/11 PASS 实测于 2026-11-12 task-30 提交 `331a141` 之前的工作树（内容即 331a141）；在 `63ba85b` 提交本身上复放 lint 为 exit 1（该提交的卡尚缺 ticketId/allowedPaths/checks envelope，Kimi 复审实测属实）。task-32 修正记录后 11/11 在 `bc90028` 起的卡上成立（g-b3-3 收窄后复验见下）。
 
 命令：`node hephi/lib/cli.mjs lint-task eval/evidence/b12-frozen-list/cards/<card>.json`，11 张卡逐一执行，**全部 exit 0，输出 `HEPHI task lint: PASS <card> (acceptance=2 checks=1 allowedPaths=N)`**：
 

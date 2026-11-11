@@ -26,8 +26,7 @@
     }
   ],
   "allowedPaths": [
-    "hephi/src/control/evidence-verifier.ts",
-    "hephi/tests/control/evidence-verifier.test.ts"
+    "hephi/src/control/evidence-verifier.ts"
   ],
   "checks": [
     {

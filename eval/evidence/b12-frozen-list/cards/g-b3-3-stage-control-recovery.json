@@ -26,8 +26,7 @@
     }
   ],
   "allowedPaths": [
-    "hephi/src/control/stage-mount.ts",
-    "hephi/tests/control/**"
+    "hephi/src/control/stage-mount.ts"
   ],
   "checks": [
     {

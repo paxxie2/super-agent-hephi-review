@@ -14,7 +14,7 @@
       "id": "AC1",
       "text": "探针内建合成数据自测场景全部通过（exit 0），自测不访问真实宿主",
       "check": "project-regression",
-      "paths": ["hephi/scripts/check-binding-host.mjs"],
+      "paths": ["hephi/scripts/check-binding-host.mjs", "hephi/tests/probes/check-binding-host.test.ts"],
       "tests": ["hephi/tests/probes/check-binding-host.test.ts"]
     },
     {
