@@ -1,0 +1,27 @@
+{
+  "version": 3,
+  "kind": "code",
+  "goal": "交付 daily-export 重做三里程碑链：数据层、导出器、校验器，跨模块合成后导出产物可被机械校验",
+  "outOfScope": [
+    "保留既有导出文件名与目录布局的对外契约（下游消费脚本不破坏）",
+    "不得改动 eval/record-run.mjs、eval/b7-matrix.mjs 及 b5 保留集证据",
+    "不得修改 site-pnl-diagnosis 任务集任何文件",
+    "不做格式化、重命名、依赖升级；不得合并 PR；失败如实报告 blocked，不绕过检查"
+  ],
+  "acceptance": [
+    {
+      "id": "AC1",
+      "text": "数据层与导出器交付后，导出产物由校验器逐项核对通过（自备 --self-test 子命令 exit 0）",
+      "check": "project-regression",
+      "paths": ["eval/daily-export.mjs"],
+      "tests": ["eval/tasks/hephi/daily-export-rework/hidden-test.sh"]
+    },
+    {
+      "id": "AC2",
+      "text": "校验器对负例（缺字段/错哈希/陈旧快照）fail-closed 并给出可定位错误",
+      "check": "project-regression",
+      "paths": ["eval/daily-export.mjs"],
+      "tests": ["eval/tasks/hephi/daily-export-rework/hidden-test.sh"]
+    }
+  ]
+}

@@ -1,0 +1,83 @@
+# B1.2 大任务可构造项冻结清单（正式草案，11 项）+ 1 项待批
+
+- 任务：task-26（v5.4 B1.2）。执行者：hephi-sync。日期：2026-11-12。
+- 基线：`agent/v54-batch2-20261112` @ `b4b74ade505b8f605c9b9038259832fcdff3a7c0`（回滚点，main 已合并 PR #91=b4b74ad，历史 commit 均仍在）。
+- 上游草案：`eval/evidence/b12-task-drafts/large-task.md`（hephi-rca，task-23）。本文件将其 11 个"可构造"项冻结为正式清单草案；**G-B2-1 维持"待批"不冻结**（依赖 v5.4 §3.4 产物钉 SHA，负责人前置处置项）。
+- 性质：清单冻结草案 + v3 任务卡草案；**未跑任何付费任务、未改源码**。正式启用（B2/B3 投跑）仍待负责人批准。
+- 经验注入：pack_sha256=4768c226ffac53544196458bb74fc4137678fb996af5f135163beb3552054673。
+
+## 0. 引用 commit 核对结果（本仓 b4b74ad 上实测）
+
+| commit | 存在 | 全 SHA | 父提交（= 该项参考 baseSha） | 规模（`git diff --stat <parent> <commit>`） | 模块跨度 |
+| --- | --- | --- | --- | --- | --- |
+| `c2cece1` | ✓ | c2cece1e5d6a6fcfbb64a7af1024ec649bc38afa | `88920d3` | 1 file, +1/−1 | eval/approvals（仅决定记录，G-B2-1 待批项） |
+| `ea0c544` | ✓ | ea0c5447448f92bf23ad8e953746780cc89f755a | `a5dc826` | 2 files, +887/−0 | hephi/scripts, hephi/docs/validation |
+| `c49b992` | ✓ | c49b992262d72f9e05a78a2eee4af81161642842 | `5efbf6a` | 6 files, +1226/−54 | hephi/scripts, hephi/tests/probes, docs |
+| `da6a388` | ✓ | da6a38804e6dbe80c59a358e02b3014a43e617e8 | `62ea0b9` | 11 files, +526/−0 | hephi/docs/validation(+e2e) |
+| `2409613` | ✓ | 240961395ce0fb323683bab21830fbdc123257d8 | `17d3827` | 3 files, +376/−101 | scripts/host, hephi/tests/control |
+| `5e037bf` | ✓ | 5e037bfe55f1ea8d41bacf177e13c1fda3c4febd | `858711a` | 2 files, +651/−0 | eval（B7.md + b7-matrix.mjs） |
+| `875624c` | ✓ | 875624c35936c065ecd2d3d450c95e120d50ecdb | `8b4740e`（p1）/ `e0dc82d`（p2，merge） | 214 files, +16608/−413 | eval/{evidence,t21-prep,g1-configs,label,schema,stats} 等 |
+| `9fa8598` | ✓ | 9fa8598f2beabe179b28733e484275c3775279d3 | `2c603c6` | 2 files, +100/−8 | docs（部署前置决定，G-B3-1 演化引证） |
+| `220e67e`（任务集引入线） | ✓ | —（parent `0b7bada`） | `0b7bada` | 126 files, +14227/−57 | eval/tasks/hephi + eval/tasks/site-pnl-diagnosis |
+
+reference.patch 行数实测（`wc -l`）：record-run 1121、daily-export-rework 919、b7-matrix 663、ab-metrics-mechanical 640、repro-manifest 584（均在 `eval/tasks/hephi/`）；frontend-form-feedback 1342、restore-health-service-id 828、restore-data-package 679（在 `eval/tasks/site-pnl-diagnosis/`）。草案 §0「4 张 vs 实测 8 张 ≥500 行」口径差异仍未裁决（feasibility.md §4 登记），不影响本清单 11 项。
+
+## 1. 冻结清单（11 项可构造；分组互不重叠）
+
+### B2 开发集（5 项冻结 + G-B2-1 待批）
+
+| # | taskId | 参考修复与精确 baseSha | 里程碑 | 隐藏参考验收命令（已实测锚点） | 卡文件 |
+| --- | --- | --- | --- | --- | --- |
+| G-B2-2 | `a2-evidence-chain-probe` | ea0c544(base `a5dc826`)+c49b992(base `5efbf6a`)+da6a388(base `62ea0b9`) | M1 探针→M2 模板→M3 夹具→M4 文档 | `node hephi/scripts/check-binding-host.mjs --self-test`（exit 0，SELF-TEST: PASS）+ `cd hephi && npx vitest run tests/probes`（exit 0） | cards/g-b2-2-a2-evidence-chain-probe.json |
+| G-B2-3 | `record-run-runbook-chain` | `eval/tasks/hephi/record-run/reference.patch`（1121 行，引入线 220e67e base `0b7bada`） | M1 采集→M2 schema→M3 导出比对 | `node eval/record-run.mjs --self-test`（exit 0，SELF-TEST: PASS，26 断言） | cards/g-b2-3-record-run-runbook-chain.json |
+| G-B2-4 | `daily-export-rework-cross` | `eval/tasks/hephi/daily-export-rework/reference.patch`（919 行，引入线 220e67e base `0b7bada`） | M1 数据层→M2 导出器→M3 校验器 | 同 record-run 模式：目标交付物自备 `--self-test` 子命令 exit 0 | cards/g-b2-4-daily-export-rework-cross.json |
+| G-B2-5 | `b7-multi-repo-matrix` | 5e037bf（base `858711a`，eval/B7.md+b7-matrix.mjs，+651） | M1 矩阵定义→M2 环境探测→M3 报告 | `node eval/b7-matrix.mjs --self-test`（exit 0，36 assertions） | cards/g-b2-5-b7-multi-repo-matrix.json |
+| G-B2-6 | `deploy-suite-hardening` | 2409613（base `17d3827`，deploy-hephi.sh+test-deploy-hephi.mjs+deploy-script.test.ts，+376/−101） | M1 脚本→M2 wrapper 断言→M3 负例集 | `cd hephi && npx vitest run tests/control/deploy-script.test.ts` + `node scripts/host/test-deploy-hephi.mjs`（假宿主；真实宿主排空门禁 fail-closed 属既有 blocked 史，测试面用假宿主） | cards/g-b2-6-deploy-suite-hardening.json |
+
+### B3 基线探查（6 项，与 B2 及 site-pnl-diagnosis 22 卡保留集互不重叠）
+
+| # | taskId | 参考实现线与 baseSha 语义 | 里程碑 | 隐藏参考验收命令（锚点实测） | 卡文件 |
+| --- | --- | --- | --- | --- | --- |
+| G-B3-1 | `evidence-verifier-a1out` | `hephi/src/control/evidence-verifier.ts`（末次 38f1cd7，父 790223e）；演化引证 9fa8598 线（base `2c603c6`） | M1 前台 kind 校验→M2 lossy 拒绝→M3 ready 映射 | `cd hephi && npx vitest run tests/control/evidence-verifier.test.ts`（exit 0，含于 140 passed） | cards/g-b3-1-evidence-verifier-a1out.json |
+| G-B3-2 | `activation-binding-policy` | `hephi/src/control/activation.ts`（末次 71abbe0；a2-final §6.1 引证 activation.ts:221-229 effective 计算） | M1 policy 计算→M2 环境开关→M3 合同冻结 | `cd hephi && npx vitest run tests/control/activation.test.ts tests/control/activation-marker.test.ts`（exit 0，含于 140 passed） | cards/g-b3-2-activation-binding-policy.json |
+| G-B3-3 | `stage-control-recovery` | `hephi/src/control/stage-mount.ts`（基线导入 83a79c2）+ `hephi/docs/stage-control.md` | M1 状态机→M2 readSession 恢复→M3 preflight | `cd hephi && npx vitest run tests/control`（整目录，当前全绿基线） | cards/g-b3-3-stage-control-recovery.json |
+| G-B3-4 | `shadow-mode-parity` | `hephi/docs/enforcement-modes.md` 已实施部分 + `scripts/experimental/check-shadow-parity.mjs`（末次 1ea45b9） | M1 决策日志→M2 allowUnavailable→M3 parity 比对 | `node scripts/experimental/check-shadow-parity.mjs` 对已导出清单跑通；真实对照导出依赖宿主操作者，按 enforcement-modes.md:22-23 标注边界 | cards/g-b3-4-shadow-mode-parity.json |
+| G-B3-5 | `t21-retention-sweep` | 875624c（merge，p1 base `8b4740e`）：T01–T20 + T21 prep，eval/evidence/t21-prep/（含 SHA256SUMS 29 行） | M1 manifest→M2 全模扫描→M3 哈希登记 | `cd eval/evidence/t21-prep && shasum -a 256 -c SHA256SUMS`（exit 0，29 项全 OK） | cards/g-b3-5-t21-retention-sweep.json |
+| G-B3-6 | `ab-metrics-mechanical-plus` | `eval/tasks/hephi/ab-metrics-mechanical/reference.patch`（640 行，引入线 220e67e base `0b7bada`） | M1 指标定义→M2 机械统计→M3 报告 | 既有 hidden-test.sh 扩展（目标交付物自备 `--self-test` exit 0 模式） | cards/g-b3-6-ab-metrics-mechanical-plus.json |
+
+### 不冻结（1 项待批）
+
+- **G-B2-1 `contract-standard-and-lint`**：参考 c2cece1 线（base `88920d3`，仅 +1/−1 决定记录；实际跨模块产物线见 v5.4 §3.4）。待批原因：§3.4 产物尚未按 v5.4 要求提交钉死 SHA（v5.4 第 132 行），须负责人先处置；处置前不生成卡。
+
+### B4 正式组
+
+- 按 legacy-system.md §1 约定**另选**，不在本清单；与 B2/B3 分组互不重叠由本清单 taskId 唯一性保证（全部 `g-*` 新前缀，不复用 site-pnl-diagnosis 22 卡 taskId，也不占用 b5-tasks.json 22 项）。
+
+## 2. 隐藏参考验收锚点实测记录（命令原文 + 退出码，2026-11-12）
+
+| 命令原文 | 退出码 | 关键输出 |
+| --- | --- | --- |
+| `node hephi/scripts/check-binding-host.mjs --self-test` | 0 | `SELF-TEST: PASS` |
+| `node eval/record-run.mjs --self-test` | 0 | `SELF-TEST: PASS（26 条断言…）` |
+| `node eval/b7-matrix.mjs --self-test` | 0 | `PASS: 36 assertions (b7-matrix self-test)` |
+| `cd hephi && npx vitest run tests/probes tests/control/evidence-verifier.test.ts tests/control/activation.test.ts` | 0 | `Tests 140 passed (140)` |
+| `cd eval/evidence/t21-prep && shasum -a 256 -c SHA256SUMS` | 0 | 29 行全 OK |
+| `node scripts/experimental/check-shadow-parity.mjs` | **未执行**（依赖宿主操作者导出的真实对照清单，当前环境无该导出；G-B3-4 边界已在表中标注） | — |
+| `node scripts/host/test-deploy-hephi.mjs` | **未执行**（G-B2-6 锚点在卡冻结阶段仅登记；投跑前由 hidden-test 落地） | — |
+
+## 3. 卡草案说明
+
+- 每项一张 v3 卡（`version:3, kind:code`，goal/outOfScope/acceptance[].id/text/check/paths/tests），存放于 `cards/`；隐藏验收命令**不写入卡内**（卡是 Worker 可见面），仅登记于本文件 §1/§2。
+- 里程碑拆分只发生在实验组且须先过 B2 拆卡跑通（v5.4 §3.3 第 123 行）；对照组用平卡。v3 卡 outOfScope 两类（保留行为 + 禁改模块）按 issue-with-task-card.md §7。
+- `budget` 均未填写（未获"超出即拒绝"授权）；预估规模记在 §0 表。
+- 投递前须 `hephi lint-task` / `eval/check-task.mjs --dry-run`（本阶段为草案，未执行 lint——卡尚未落入 task.json 目录结构）。
+
+## 4. 明确未做
+
+- 未构造 task.json/issue.md 实体（那是冻结批准后的 B1.3 步骤）；未跑付费任务；未改源码；未裁决「4 张 vs 8 张」口径差异。
+- 未执行 merge/rebase/checkout/clean/stash。
+
+## 5. 自测与回滚
+
+- 回滚点：`git reset --hard b4b74ade505b8f605c9b9038259832fcdff3a7c0`（或删除新增目录 `eval/evidence/b12-frozen-list/`）。
+- 本次提交仅含 `eval/evidence/b12-frozen-list/`（write_scopes 一致），提交后 `git log -1 --stat` 核对。
