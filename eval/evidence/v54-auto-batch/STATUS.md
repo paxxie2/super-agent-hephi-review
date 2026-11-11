@@ -39,7 +39,18 @@
 
 ## 2026-11-12 后续独立核对（PR 头 e282252）
 
-- 宿主端口均拒绝连接，三个实例目录、数据库和启动脚本仍在。三个 profile 的插件链接目标缺失。上表“g1 实例目录已删”已更正；3086 尚有一张无 ended 记录的旧票。
+- 宿主端口均拒绝连接，三个实例目录、数据库和启动脚本仍在。三个 profile 的插件链接目标缺失。11 月 8 日部署记录另记载两个 g1 实例为节省轮询配额主动停机。3086 的历史 Ticket d2e19228 在赫菲决策日志最后一条为 ready.pass / allow（实载 6d24e1b），编排器 SQLite 的 ticket.value 未记录顶层 ended；据此无法判定该票仍在运行。3086 为冻结对照，恢复时须保持其独立制品。
 - T08 的 11 项为 B4 标签缺失及基线不变性的合成聚焦测试。Q4 正确/错误制品 SHA 两条路径未核验。完整 T08 仍为部分验证。
 - D-10、D-11 已受托决定沿用 v5.3。D-8 以 −10pp 作估样依据，正式冻结仍须等 B3 成本与可行性数据，见决定记录末节。
 - T02 已补核历史 18 个 Worker 会话的原始 usage。989 条已记录合计 67,178,636 tokens；1 条消息缺 usage、4 个已启动 step 缺消息，审查、人工和实付未覆盖。真实端到端未验证通过。
+
+## 2026-11-12 3085 受控恢复（用户授权，ab5f527 固定候选）
+
+- **目标制品**：ab5f527a11655dd3e935a634d3b5c62f0a265f51（main 基线，Q4 对照同源；C1 尚未冻结，A 线从此基线开始）。
+- **发布**：release-meta prepare+check+宿主 Node 导入探针全过；不可变 release 落位 g1-exp/releases/hephi/ab5f527…/（formatVersion 2，zod 4.6.7 随包，3 peer 绝对路径链接）。
+- **指针修复**：重建 hephi-review/hephi 指针目录（cordis.patch.yml + package.json + skills + lib→release/lib + node_modules→release/node_modules）；profile symlink 恢复原始相对路径。首次误把 symlink 直指 release 根（缺 cordis.patch.yml）导致 bundle skip + 实载旧 9c5afb2，已纠正。
+- **派发暂停**：启动前 append settings-version:20（paused=true，保留 19 不动，SQLite 已备份 orchestrator.sqlite.bak-recovery-1794424012）。原 settings-version:19 paused=False 与 T20 记录不符，如实登记。
+- **实载回读**：host.log 两条 [hephi-activation] entry=index/tools commit=ab5f527… pid=21728=host.pid；端口 3085 LISTEN；SA 源码 cd384e7（与计划 L228/L565 核对一致）。
+- **3086 未动**：冻结对照 6d24e1b 保持独立制品。
+- **未做**：未解除暂停、未派发任务、未开强绑定、未产生实验支出。T03 宿主路径、T08 Q4 正误 SHA 两例仍缺证据；真实端到端未验证通过。
+- **待用户决定**：是否解除暂停并从新 Issue 验收自动触发（A1 隔离验证起点）。
