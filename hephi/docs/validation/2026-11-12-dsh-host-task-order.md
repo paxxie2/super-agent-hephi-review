@@ -174,7 +174,7 @@ node hephi/scripts/check-binding-host.mjs \
 | `rings[H2].evidence.structuredValueCount` | 等于 `bashResultCount`（全部 bash result 都有结构化 value） |
 | `samples[]` | `foreground` 有整数 `exitCodeField`；`promoted`/`background` 有 `jobId` 且无最终退出码 |
 
-> **前置缺陷（hephi 侧待办，不阻塞宿主交付）**：探针 `h2Ring` 目前只采样**前 5 条**结果（`hephi/scripts/check-binding-host.mjs:594`），用样本数（`:610`）与结果**总条数**比较（`:620`）——因此真实快照含 >5 条 bash result 时（历史生产快照 16 条，`hephi/docs/validation/2026-11-07-a2-final.md:55`；T10 快照 264 事件，`eval/evidence/t10-host-verification/report.md:23`），即使全部结构化也判"编码不统一 → fail"。**R1/B1 正式验收前，hephi 侧必须先修采样**（全量统计或另立全量 ring）；这是 hephi 侧待办，不影响宿主按 §3.1 交付字段。
+> **前置缺陷（hephi 侧，已修复 2026-11-12，commit `f901a74`）**：探针 `h2Ring` 旧实现只采样**前 5 条**结果（修复前 `hephi/scripts/check-binding-host.mjs:594/610/620`），用样本数与结果**总条数**比较——真实快照含 >5 条 bash result 时（历史生产快照 16 条，`hephi/docs/validation/2026-11-07-a2-final.md:55`；T10 快照 264 事件，`eval/evidence/t10-host-verification/report.md:23`），即使全部结构化也判"编码不统一 → fail"，R1/B1 验收不可达。**修复后实现见 `hephi/scripts/check-binding-host.mjs:599`（`h2Sample`）/`:618`（`h2CriterionProblem`）/`:631-656`（`h2Ring` 全量统计）**：全部 bash result 都参与统计与判据校验（`samples` 仅保留前 5 条供人读、不参与判定）。回归证据：7 条全结构化合成会话修复前 fail（`只有 5/7`，旧实现）→ 修复后 pass；7 条中 1 条真实缺失仍 fail；真实 3085 Session（32 条 bash result、真实 `structuredValueCount=0`）修复后仍 fail（**真实缺失必须仍 fail，未放宽判据**）。
 
 **B2 验收（宿主交付 + 操作者核对）**：宿主需提供：文档化的记录位置/查询方式、格式版本、生成时机（至少覆盖一次真实交付）、以及一条真实样例。操作者按下列四元逐项核对并归档：
 
@@ -193,7 +193,7 @@ node hephi/scripts/check-binding-host.mjs \
 
 | 项 | 内容 | 归属 |
 | --- | --- | --- |
-| 探针采样缺陷 | `h2Ring` 只采样前 5 条（`hephi/scripts/check-binding-host.mjs:594/610/620`）→ >5 条结果恒 fail；B1 验收前须修 | **hephi 侧待办**，不影响宿主交付 |
+| 探针采样缺陷（**已修复 2026-11-12，commit `f901a74`**） | 旧 `h2Ring` 只采样前 5 条（修复前 `hephi/scripts/check-binding-host.mjs:594/610/620`）→ >5 条结果恒 fail；现为全量统计+逐条判据校验（`:599`/`:618`/`:631-656`），`samples` 不参与判定；自测含 7 条全结构化→pass 等回归 | **hephi 已完成**（`npx vitest run tests/probes/check-binding-host.test.ts` 24 passed；`--self-test` SELF-TEST: PASS；未改 A1/A2 判定语义） |
 | 行号变动说明 | 任务卡引用的 `hephi/src/control/check-runner.ts:468-469` 在 `6a51c3e`（H6 检测恢复）后移至 `hephi/src/control/check-runner.ts:474-475`；本文一律使用当前 `48cc76f` 实读行号 | hephi 侧文档 |
 | 检测 ≠ 防护 | `hephi/src/control/snapshot-seal.ts` 只做 detect-only（`:5-23`；README 已知限制第 4 条 `hephi/README.md:95`；规则 `hephi/docs/decisions-format.md:44`）；**同 UID 可伪造合法帧/改写记录**，不能替代能力 A | 宿主具备能力 A 后才可能改变 H6 结论 |
 | 宿主实现细节 | UID/挂载/外置目录的具体选择、字段命名、记录落盘或 API 形态、工作量与排期：**未知/待补**（由宿主负责人决定，本文不虚构） | 宿主 |
@@ -242,7 +242,7 @@ sed -n '474,475p;580p' hephi/src/control/check-runner.ts
 sed -n '136p;512p;519p;533,534p;621p' hephi/src/control/evidence-verifier.ts
 sed -n '105,113p' hephi/src/control/check-store.ts
 sed -n '58p' hephi/src/control/decision-log.ts
-sed -n '594p;610p;620p' hephi/scripts/check-binding-host.mjs
+sed -n '599p;618p;631,656p' hephi/scripts/check-binding-host.mjs   # h2Sample/h2CriterionProblem/h2Ring 全量统计（task-38 修复后）
 sed -n '55p;59,60p;109p;256p' ROADMAP-95.md
 git show docs/hephi-plan-v5.4:docs/hephi-95-plan-v5.4-20261112.md | sed -n '576,594p;621p'
 sed -n '23,26p;74,75p' hephi/docs/host-compatibility.md
@@ -252,7 +252,7 @@ sed -n '95p' hephi/README.md && sed -n '44p' hephi/docs/decisions-format.md
 
 **引用核对结果（自动化全量审计，2026-11-12）**：对本文运行引用核对脚本——顺序扫描文本：①完整 `file:line` / `file:a-b` 引用；②同文件 `:line` 缩写按左侧最近的、已确认存在的文件路径解析；③独立文件路径作为后续缩写的解析上下文；对每处引用校验「文件存在且 `max(line) <= 该文件行数`」：
 
-- 合计 **88 处引用 / 17 个文件**，0 处缺失、0 处行号越界、0 处无法解析（0 problem）。
+- 合计 **93 处引用 / 17 个文件**，0 处缺失、0 处行号越界、0 处无法解析（0 problem）。
 - 覆盖文件：`ROADMAP-95.md`、`eval/evidence/t10-host-verification/report.md`、`eval/evidence/a2a3-binding-decision/material.md`、`hephi/README.md`、`hephi/docs/decisions-format.md`、`hephi/docs/host-compatibility.md`、`hephi/docs/threat-model.md`、`hephi/docs/validation/2026-11-07-a2-final.md`、`hephi/docs/validation/2026-11-07-evidence-chain-host.md`、`hephi/docs/validation/2026-11-11-dsh-host-requirements.md`、`hephi/scripts/check-binding-host.mjs`、`hephi/src/control/{activation,check-runner,check-store,decision-log,evidence-verifier,snapshot-seal}.ts`；v5.4 附录 A 经 `git show docs/hephi-plan-v5.4:docs/hephi-95-plan-v5.4-20261112.md` 实读（`sed -n '576,594p;621p'`，exit 0）。
 - 说明：审计前已把文中裸文件名引用（如 `report.md`、`material.md`、`snapshot-seal.ts`）统一补全为仓库内唯一完整路径，避免同名歧义；`ROADMAP-95.md` 位于仓库根，直接校验。
 - 本文未引用任何宿主现有联系人或排期（不存在可引用的真实来源），未声称宿主已具备任何能力。
