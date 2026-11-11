@@ -25,6 +25,13 @@ export type DecisionLogInput = {
   contractHash?: string
   /** Additive optional field; DECISION_LOG_VERSION stays 1 because old readers ignore unknown keys. */
   binding?: DecisionBinding
+  /**
+   * v5.4 §2 ② record-only plan width (rule `plan.width`). Additive audit fields; the
+   * decision they accompany is an allow observation and never gates ready.
+   */
+  planFiles?: number
+  changedFiles?: number
+  ratio?: number
 }
 
 export type DecisionLogResult = { ok: true; seq: number } | { ok: false; logError: string }

@@ -25,6 +25,34 @@ export type SnapshotSeal = {
 /** Why the seal could not be taken at check completion; ready fails closed when binding is effective. */
 export type SnapshotSealUnavailable = string
 
+/**
+ * v5.4 §2 ① prompt-only: how the workspace changed since the previous check run.
+ * Written for Worker feedback only; no verifier reads it, so it can never change a
+ * deny/allow decision. `scope` distinguishes "no previous check yet, measured from the
+ * contract base" from "measured from the previous check's head commit".
+ */
+export type IncrementalChanges = {
+  scope: 'previous-check' | 'base'
+  files: number
+  addedLines: number
+  removedLines: number
+  /** Whole seconds since the previous check finished; absent for the first check. */
+  sinceLastCheckSeconds?: number
+  fromCommit: string
+  toCommit: string
+}
+
+/**
+ * v5.4 §2 ② record-only plan width: declared plan file count vs the final changed file
+ * count. Stored on check records and logged as `plan.width`; never gates ready.
+ */
+export type PlanWidth = {
+  planFiles: number
+  changedFiles: number
+  /** changedFiles / planFiles (plan files are never empty, so the divisor is non-zero). */
+  ratio: number
+}
+
 export type CheckRunRecord = {
   version: 3; runId: string; sequence: number; ticketId: string; contractHash: string;
   /** Plugin build that produced this record; ready rejects a different build. */
@@ -45,6 +73,10 @@ export type CheckRunRecord = {
   snapshotSeal?: SnapshotSeal;
   /** Set instead of `snapshotSeal` when the host adapter could not seal the log. */
   snapshotSealUnavailable?: SnapshotSealUnavailable;
+  /** v5.4 §2 ① prompt-only delta since the previous check (or the contract base for the first check). */
+  incrementalChanges?: IncrementalChanges;
+  /** v5.4 §2 ② record-only plan width snapshot taken when this check ran. */
+  planWidth?: PlanWidth;
 }
 const SAFE_EVIDENCE_ID = /^[\w-]+$/
 export function checkRunDir(stateDir: string, ticketId: string, runId = ''): string {

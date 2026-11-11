@@ -1,5 +1,5 @@
 import { defineTool, type PreToolDecision, type ToolExecution } from '@deepseek-ai/dsh-tools'
-import { runCheck, type CheckTools, type NativeJobs } from './check-runner.js'
+import { incrementalSummaryLine, runCheck, type CheckTools, type NativeJobs } from './check-runner.js'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Context } from '@deepseek-ai/cordis'
 import { existsSync, readFileSync } from 'node:fs'
@@ -13,6 +13,7 @@ import { checkoutRelative, resolveWorkspace } from './workspace.js'
 import { DELEGATION_TOOLS, MODIFYING_TOOLS } from './stage-control.js'
 import { installStageControl, type StageAgents, type StageJobs, type StageSessionQuery, type StageSubagents } from './stage-mount.js'
 import { logDecision } from './decision-log.js'
+import type { IncrementalChanges } from './check-store.js'
 import type { SnapshotSealProvider } from './snapshot-seal.js'
 
 // Structural type for the host's public, agent-scoped prompt service.
@@ -96,6 +97,13 @@ export function workerTicketId(agent: Agent): string | undefined {
 // on compositions that do not mount the background-job runtime.
 function nativeJobs(ctx: Context): NativeJobs | undefined {
   try { return ctx.get?.('jobs') as NativeJobs | undefined } catch { return undefined }
+}
+
+/** v5.4 §2 ① (prompt-only): the hephi_check JSON result plus one readable delta line. */
+export function checkResultText(value: { incrementalChanges?: Partial<IncrementalChanges> } | undefined): string {
+  const json = JSON.stringify(value)
+  const summary = incrementalSummaryLine(value)
+  return summary === undefined ? json : `${json}\n${summary}`
 }
 
 /** Host plugin configuration that reaches the check runner (A3 / C4.5 trust boundary). */
@@ -188,7 +196,10 @@ export function mountWorkerGate(
         description: 'Set to "red" for the failing before-implementation run required by version 3 code task cards.',
       },
     },
-    output: { schema: { type: 'json' as const }, render: (_a, value) => [{ type: 'text' as const, text: JSON.stringify(value) }] },
+    output: {
+      schema: { type: 'json' as const },
+      render: (_a, value) => [{ type: 'text' as const, text: checkResultText(value as { incrementalChanges?: Partial<IncrementalChanges> } | undefined) }],
+    },
     execute: async (args, execution) => {
       const sessionId = String(agent.session.header.id)
       if (checking) {

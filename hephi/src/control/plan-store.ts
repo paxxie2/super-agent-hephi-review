@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { allowedPath } from './repository.js'
+import type { PlanWidth } from './check-store.js'
 
 /**
  * C4.2: append-only change plan per Ticket.
@@ -137,6 +138,18 @@ export async function readPlan(stateDir: string, ticketId: string, contractHash:
     }
   }
   return { contractHash, files, entries: matching.length }
+}
+
+/**
+ * v5.4 §2 ②: record-only width of the declared plan vs the actual changed files.
+ * Pure computation from two already-recorded counts; callers must never gate on it.
+ * `planFiles` comes from `PlanSummary.files.length` (non-empty by construction) and
+ * `changedFiles` from the final `ChangeSummary.files.length`.
+ */
+export function planWidthOf(planFiles: number, changedFiles: number): PlanWidth {
+  if (!Number.isSafeInteger(planFiles) || planFiles < 1) throw new Error(`plan width needs a positive plan file count, got ${String(planFiles)}`)
+  if (!Number.isSafeInteger(changedFiles) || changedFiles < 0) throw new Error(`plan width needs a non-negative changed file count, got ${String(changedFiles)}`)
+  return { planFiles, changedFiles, ratio: changedFiles / planFiles }
 }
 
 /** True when the merged plan for this contract declares `file` (exact path or glob). */

@@ -13,7 +13,7 @@ import { checkCommand, contained, sameSource, type NativeJobView, type NativeJob
 import { checkDiscipline } from './discipline.js'
 import { pluginCommit } from '../version.js'
 import { logDecision } from './decision-log.js'
-import { readPlan } from './plan-store.js'
+import { planWidthOf, readPlan } from './plan-store.js'
 import type { SnapshotSealVerifier } from './snapshot-seal.js'
 
 const exec = promisify(execFile)
@@ -580,6 +580,25 @@ export function createEvidenceVerifier(options: {
         if (outsidePlan.length > 0) {
           throw new Error(`plan.outside-plan: changed files outside the declared plan: ${samplePlanFiles(outsidePlan)}`)
         }
+        // v5.4 §2 ② (record-only): plan width is written as its own allow audit row so P3
+        // can report plan coverage. It is not part of this verification's result, and a
+        // log failure is swallowed by logDecision, so no ready verdict can change here.
+        const width = planWidthOf(plan.files.length, before.changedFiles.length)
+        await logDecision(options.stateDir, {
+          ticketId: contract.ticketId,
+          sessionId,
+          callId: String(execution.callId),
+          tool: 'orchestrator_report',
+          mode: 'enforce',
+          effectiveDecision: 'allow',
+          wouldDecision: 'allow',
+          rule: 'plan.width',
+          reason: `plan covers ${width.planFiles} files; final diff changes ${width.changedFiles} files (ratio ${width.ratio})`,
+          contractHash: contract.contractHash,
+          planFiles: width.planFiles,
+          changedFiles: width.changedFiles,
+          ratio: width.ratio,
+        })
       }
       return { ok: true }
     } catch (e) { return { ok: false, reason: e instanceof Error ? e.message : String(e) } }

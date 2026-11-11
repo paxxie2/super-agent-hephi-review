@@ -5,16 +5,70 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { ToolExecution, ToolExecutionInput, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import { verificationOf, type ActivationContract } from './activation.js'
-import { gitFingerprint, sha256 } from '../verification/fingerprint.js'
+import { gitFingerprint, sha256, type RepositoryFingerprint } from '../verification/fingerprint.js'
 import { clean, hasCommit, normalizeRepository, remoteRepository } from './repository.js'
 import { inScope } from './discipline.js'
 import { resolveWorkspace } from './workspace.js'
-import { checkRunDir, readRetryResets, readRuns, resolvedRunIds, saveRun, type CheckRunRecord } from './check-store.js'
+import { checkRunDir, readRetryResets, readRuns, resolvedRunIds, saveRun, type CheckRunRecord, type IncrementalChanges } from './check-store.js'
+import { planWidthOf, readPlan } from './plan-store.js'
 import type { SnapshotSealProvider } from './snapshot-seal.js'
 import { logDecision } from './decision-log.js'
 import { pluginCommit } from '../version.js'
 
 const exec = promisify(execFile)
+
+/**
+ * v5.4 §2 ① (prompt-only): workspace delta since the previous check run, measured with a
+ * real `git diff --numstat` between the previous check's head commit (or the contract base
+ * for the first check) and this check's head commit. Any git failure yields `undefined`;
+ * this value is feedback for the Worker and is never read by a deny/allow decision.
+ */
+async function incrementalChangesFor(
+  workspace: string, previous: CheckRunRecord | undefined, before: RepositoryFingerprint,
+): Promise<IncrementalChanges | undefined> {
+  const toCommit = before.headCommit
+  if (!toCommit) return undefined
+  const fromCommit = previous?.before.headCommit ?? previous?.before.baseCommit ?? before.baseCommit
+  try {
+    const { stdout } = await exec('git', ['diff', '--numstat', '-z', '--no-renames', fromCommit, toCommit, '--'],
+      { cwd: workspace, maxBuffer: 20 * 1024 * 1024 })
+    let files = 0, addedLines = 0, removedLines = 0
+    for (const entry of stdout.split('\0').filter(Boolean)) {
+      const [added, removed] = entry.split('\t')
+      // Binary entries report "-" for both counts; the file still counts, lines do not.
+      if (added === undefined || removed === undefined) continue
+      files += 1
+      if (added !== '-') addedLines += Number(added)
+      if (removed !== '-') removedLines += Number(removed)
+    }
+    const finishedAt = previous?.finishedAt
+    const seconds = finishedAt === undefined ? undefined : Math.max(0, Math.round((Date.now() - Date.parse(finishedAt)) / 1000))
+    return {
+      scope: previous === undefined ? 'base' : 'previous-check',
+      files, addedLines, removedLines,
+      ...(seconds === undefined || Number.isNaN(seconds) ? {} : { sinceLastCheckSeconds: seconds }),
+      fromCommit, toCommit,
+    }
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * v5.4 §2 ①: one readable summary line for the `hephi_check` tool text. Returns
+ * `undefined` when the recorded delta is absent or malformed (the JSON result still
+ * carries every other field; this line never changes the check outcome).
+ */
+export function incrementalSummaryLine(record: { incrementalChanges?: Partial<IncrementalChanges> } | undefined): string | undefined {
+  const delta = record?.incrementalChanges
+  const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0
+  if (!delta || !count(delta.files) || !count(delta.addedLines) || !count(delta.removedLines)) return undefined
+  const scope = delta.scope === 'base' ? 'incremental since base' : 'incremental since last check'
+  const seconds = typeof delta.sinceLastCheckSeconds === 'number' && Number.isSafeInteger(delta.sinceLastCheckSeconds) && delta.sinceLastCheckSeconds >= 0
+    ? ` (${delta.sinceLastCheckSeconds}s since last check)`
+    : ''
+  return `${scope}: ${delta.files} files, +${delta.addedLines}/-${delta.removedLines}${seconds}`
+}
 
 export type CheckTools = { execute(input: ToolExecutionInput): Promise<ToolExecutionResult> }
 
@@ -613,6 +667,16 @@ export async function runCheck(options: {
     collection?.dispose()
     options.internal?.()
     record.finishedAt = new Date().toISOString()
+    // v5.4 §2 ① (prompt-only): delta since the previous check; a git failure just omits it.
+    try {
+      record.incrementalChanges = await incrementalChangesFor(workspace, old.at(-1), record.before)
+    } catch { /* prompt-only, never a check failure */ }
+    // v5.4 §2 ② (record-only): plan width snapshot when a plan for this contract exists.
+    // A corrupt plan log must not change this check's outcome; ready still fails closed on it.
+    try {
+      const plan = await readPlan(stateDir, contract.ticketId, contract.contractHash)
+      if (plan !== undefined) record.planWidth = planWidthOf(plan.files.length, record.before.changedFiles.length)
+    } catch { /* record-only, never a check failure */ }
     // H6=C detect-only: seal the Session log prefix before the record becomes durable.
     // A seal failure never changes the check result; it is recorded for ready to fail closed.
     if (options.sealSnapshot) {
