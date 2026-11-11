@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "filter": {
+    "rulePrefix": null
+  },
+  "tickets": [
+    {
+      "ticketId": "46aa3f5947c125330ef14d8014a88477",
+      "entries": 8,
+      "matched": 8,
+      "corruptLines": 0,
+      "rules": {
+        "plan.recorded": 1,
+        "scope.allowed": 3,
+        "check.blocked": 1,
+        "check.pass": 2,
+        "ready.pass": 1
+      },
+      "modes": {
+        "enforce": 8,
+        "shadow": 0
+      },
+      "effectiveDecision": {
+        "allow": 7,
+        "deny": 1
+      },
+      "earliest": "2026-11-11T19:28:48.418Z",
+      "latest": "2026-11-11T19:30:11.553Z"
+    }
+  ],
+  "totals": {
+    "tickets": 1,
+    "entries": 8,
+    "matched": 8,
+    "corruptLines": 0,
+    "skippedTickets": 0,
+    "modes": {
+      "enforce": 8,
+      "shadow": 0
+    },
+    "effectiveDecision": {
+      "allow": 7,
+      "deny": 1
+    },
+    "rules": {
+      "plan.recorded": 1,
+      "scope.allowed": 3,
+      "check.blocked": 1,
+      "check.pass": 2,
+      "ready.pass": 1
+    },
+    "earliest": "2026-11-11T19:28:48.418Z",
+    "latest": "2026-11-11T19:30:11.553Z"
+  }
+}

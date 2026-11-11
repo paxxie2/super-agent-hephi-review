@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "seq": 1,
+  "at": "2026-11-11T20:00:47.750Z",
+  "ticketId": "46aa3f5947c125330ef14d8014a88477",
+  "sessionId": "worker-46aa3f5947c125330ef14d8014a88477",
+  "callId": "t10-ready-call",
+  "tool": "orchestrator_report",
+  "mode": "enforce",
+  "effectiveDecision": "deny",
+  "wouldDecision": "deny",
+  "rule": "ready.evidence-missing",
+  "reason": "missing, failed or stale evidence: acceptance",
+  "contractHash": "sha256:596f93f3357743548486180098193b619080184898635cd053b5dd63fb3df1b2",
+  "binding": {
+    "contract": false,
+    "host": true,
+    "effective": true
+  },
+  "pluginCommit": "ab5f527a11655dd3e935a634d3b5c62f0a265f51"
+}
