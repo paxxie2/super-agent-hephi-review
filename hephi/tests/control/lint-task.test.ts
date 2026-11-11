@@ -182,6 +182,36 @@ describe('hephi lint-task — C4.8 focus hints (advisory only)', () => {
     expect(Array.isArray(payload.focus)).toBe(true)
     expect(payload.focus.some(item => item.rule === 'focus.no-regression' && typeof item.message === 'string')).toBe(true)
   })
+
+  // B1.1/T03: tests-outside-paths 提示语义 — 只读测试可作验收证据；确需编辑才补 paths。
+  const v3Card = (paths: string[]) => bundle({
+    allowedPaths: ['src/**', 'tests/**'],
+    task: {
+      version: 3, kind: 'code', goal: 'fix a defect', outOfScope: ['nothing else'],
+      acceptance: [{ id: 'a1', text: 'behaviour', check: 'full-regression', paths, tests: ['tests/price.test.js'] }],
+    },
+  })
+
+  it('B1.1/T03 read-only baseline tests: hint stays advisory (exit 0) and says they can remain acceptance evidence', async () => {
+    const result = await lintTask(v3Card(['src/price.js']))
+    expect(result.code).toBe(0) // focus hints are advisory and never fail the lint
+    expect(focusRules(result)).toContain('focus.tests-outside-paths')
+    expect(result.out).toContain('existing tests that already fail on the baseline can remain read-only acceptance evidence')
+  })
+
+  it('B1.1/T03 tests that need editing: hint is actionable — add to paths only then', async () => {
+    const result = await lintTask(v3Card(['src/price.js']))
+    expect(result.code).toBe(0)
+    expect(result.out).toContain('add them to paths only if the task requires creating or updating them')
+    expect(result.out).toContain('tests/price.test.js')
+  })
+
+  it('B1.1/T03 explicitly authorized cross-file change: adding the test to paths clears the hint', async () => {
+    const result = await lintTask(v3Card(['src/price.js', 'tests/price.test.js']))
+    expect(result.code).toBe(0)
+    expect(focusRules(result)).not.toContain('focus.tests-outside-paths')
+    expect(result.out).toContain('HEPHI task lint: PASS')
+  })
 })
 
 describe('check-task — C4.6 optional environment block', () => {

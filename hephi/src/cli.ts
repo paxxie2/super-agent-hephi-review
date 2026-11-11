@@ -1036,7 +1036,7 @@ async function lintTaskCommand(args: string[], io: CliIo): Promise<number> {
     for (const item of card.acceptance) {
       const outside = (item.tests ?? []).filter(test => !allowedPath(test, item.paths))
       if (outside.length > 0) {
-        focus.push({ rule: 'focus.tests-outside-paths', message: `acceptance ${item.id} names tests outside its own paths: ${outside.join(', ')}; the Worker cannot create or update them, so red-before-green cannot complete unless they already exist and fail; add them to paths` })
+        focus.push({ rule: 'focus.tests-outside-paths', message: `acceptance ${item.id} names tests outside its own paths: ${outside.join(', ')}; add them to paths only if the task requires creating or updating them; existing tests that already fail on the baseline can remain read-only acceptance evidence` })
       }
     }
   }

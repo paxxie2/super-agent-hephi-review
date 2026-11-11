@@ -106,7 +106,11 @@ v1/v2 卡不接受 `kind`/`tests`/`cases`（会被拒绝）；已有 v1 示例�
 }
 ```
 
-> `tests` 里的文件要同时写进该验收项的 `paths`：Worker 需要新建或更新它来完成先红后绿，不在 `paths` 内会被范围检查拒绝（`hephi lint-task` 会给出 `focus.tests-outside-paths` 提示）。若该测试文件已存在且命中受保护资产清单，还需要 `authorizes` 授权 `modify`。
+> `tests` 与 `paths` 的关系分两种情况：
+> - **需要 Worker 新写或修改测试**（本例）：测试文件要同时写进该验收项的 `paths`，否则会被范围检查拒绝，先红后绿做不完。若该文件已存在且命中受保护资产清单，还需要 `authorizes` 授权 `modify`。
+> - **测试已存在且在基线上就失败**：它只作为验收依据，不需要写权限，不要列入 `paths`（红色运行可以直接在基线提交上完成）。
+>
+> `hephi lint-task` 的 `focus.tests-outside-paths` 只是提示，由任务作者判断属于哪一种。
 
 ### 6.2 行为保持型重构（kind: refactor）
 
@@ -140,16 +144,17 @@ v1/v2 卡不接受 `kind`/`tests`/`cases`（会被拒绝）；已有 v1 示例�
 | 字段 | 要求 | 原因 |
 | --- | --- | --- |
 | `version` / `kind` | 统一 3。修复和新功能用 `code`；获授权的结构改造单独开 `refactor` 卡，不与修复混在一张卡 | 在入口区分授权的重构和顺手重构 |
-| `acceptance[].paths` | 只写精确文件，不写目录 glob | 每个改动文件都要对应某条验收项 |
-| `acceptance[].tests` | 必填，且同时列入本项 `paths` | 见 §6.1 说明 |
+| `acceptance[].paths` | 只写精确文件，不写目录 glob；只列这条验收项需要新增或修改的文件 | 路径就是写权限，不多给 |
+| `acceptance[].tests` | `code` 卡必填。需要新写或修改的测试同时列入本项 `paths`；已存在且在基线上失败的测试不列入 | 见 §6.1 说明 |
 | `outOfScope` | 遗留系统必须写两类：① 必须保留的对外行为（接口签名、返回值、异常、配置项）；② 不得改动的模块、类或函数。写具体名字，不写“不要乱改” | 每轮都会出现在 Worker 的系统提示里 |
-| `budget` | 必填 `maxFiles` 与 `maxChangedLines`。由需求方按预期改动规模给出，建议取预估的 2 到 3 倍 | 已有的硬上限：超出即拒绝。它是需求方事前给的授权边界，不是审查者事后按规模判断 |
+| `budget` | **只有负责人或需求方明确批准“超出即拒绝”时才填写**。未填时默认的 8 个文件、400 行只记录不拒绝；一旦填写，超限就会被拒绝 | 硬边界要有人批准。只想观察改动规模时，把预估的文件数和行数写在任务元数据里，不要写进 `budget` |
 | `authorizes` | 需要修改已有的受保护测试时，在对应验收项里精确授权“文件 + 操作” | 否则合法的测试同步会被拒绝 |
 
 大任务拆分：
 
 - 一张卡只对应一个里程碑；跨模块依赖按“先接口、后调用点”拆成多张卡，依次交付。
-- 每张卡各自有精确 `paths` 和 `budget`。不要用一张范围很宽的卡覆盖整个大任务。
+- 每张卡各自有精确 `paths`。不要用一张范围很宽的卡覆盖整个大任务。
+- 拆卡不改变验收单位：大任务的结果按原始需求最终合并的整份改动来评，不按单张卡评。
 
 遗留系统修复示例：
 
@@ -173,9 +178,10 @@ v1/v2 卡不接受 `kind`/`tests`/`cases`（会被拒绝）；已有 v1 示例�
       "tests": ["src/test/order/OrderServiceCancelTest.java"],
       "cases": ["已发货订单取消被拒", "未发货订单取消成功"]
     }
-  ],
-  "budget": { "maxFiles": 2, "maxChangedLines": 80 }
+  ]
 }
 ```
 
-投递前必须运行 `hephi lint-task`，并处理 `focus.tests-outside-paths` 与 `focus.broad-scope` 提示。
+示例没有写 `budget`：预估规模（2 个文件、约 40 行）记在任务元数据里。只有获批准的硬边界才写成 `"budget": { "maxFiles": 2, "maxChangedLines": 80 }`。
+
+投递前必须运行 `hephi lint-task`，并逐条判断 `focus.tests-outside-paths` 与 `focus.broad-scope` 提示。
