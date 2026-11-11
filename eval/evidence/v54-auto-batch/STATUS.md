@@ -166,3 +166,40 @@ Lead 终审重放：11/11 lint PASS、11/11 allowedPaths==acceptancePaths、隐�
 T10 要 pass，必须等宿主交付能力 A（Worker 写权限隔离）+ 能力 B（结构化四元绑定）。这不是 hephi 侧能修的。D1/D2 不升级，T10 维持 blocked。
 
 **真实支出**：本次 1 次真实 Worker 交付（用户授权的第 3 步）。
+
+## 2026-11-12 DSH 宿主任务单：进入原生队列
+
+### 查重（提交前）
+三个原生队列共 **181 张 Ticket** 逐条检索：
+- g1-exp（3085）23 张
+- experiment 49 张
+- desktop superagent 109 张
+
+**无任何 DSH 宿主能力实施单**；被监听 GitHub 仓亦无对应 Issue。→ 首次提交，非重复建单。
+
+### 提交（Super Agent 原生入口）
+| 项 | 值 |
+|---|---|
+| Issue | `paxxie2/g1-at81#4` |
+| Ticket | `1d04c373fe1665d21538c0ceb7f12944` |
+| 接单实例 | 3085（DSH 0.2.1-rc.5 / SA cd384e7 / hephi ab5f527） |
+| 状态 | `running`（assignment 6bd9c09aafc9，2026-11-11T23:16:51Z） |
+| HEPHI 合同 | 无（g1-at81 不在 prepare.sh 匹配范围，符合 AT-81） |
+
+已回填到任务单 §7（commit b8644ae）。
+
+### 交付边界（如实登记）
+DSH 宿主以 `app.asar` 分发，本地无源码仓；上游 `deepseek-ai/deepseek-harness` 只读、`paxxie2` 无 fork。→ 该 Ticket 可交付物限定为**参考补丁草案 + 验收 harness**；能力本体须 DSH 团队实施，上游未交付前状态视为 `blocked-on-upstream`。
+
+### T10 维持 blocked（用户确认）
+3085 真实交付已到 PR #24；冻结配置下关闭强绑定会错误放行、开启强绑定无法验证合法前台输出 → **当前版本可信交付真实端到端未验证通过**。PR #24 留作本次失败证据，3086 继续冻结。
+
+### 后续（等上游交付固定版本后）
+1. 3085 用**实际 Worker 身份**验证：证据目录受保护 + 工作区可写 + 宿主可写；
+2. 核对结构化记录能关联本次 Ticket/Session/执行结果/最终 SHA；
+3. 两项通过后从**新 Issue** 重跑 T10（四类无效证据 + 合法交付路径逐项）。
+
+### B 线（并行审批，等负责人）
+- B0/T02 单次额度申请单：`eval/evidence/b-line/b0-t02-budget-request.md`
+- Dubbo 检查配置可审批清单：`eval/evidence/b-line/dubbo-check-config-proposal.md`
+- B3 的 50 元与 D-8 界值：继续等实测成本
