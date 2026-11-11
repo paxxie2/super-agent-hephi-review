@@ -1,7 +1,8 @@
 {
+  "ticketId": "g-b3-6-ab-metrics-mechanical-plus",
   "version": 3,
   "kind": "code",
-  "goal": "交付 AB 度量机械统计扩展三里程碑：指标定义、机械统计、报告，扩展现有 ab-metrics 任务 hidden-test 并全绿",
+  "goal": "交付 AB 度量机械统计扩展三里程碑：指标定义、机械统计、报告，扩展现有 ab-metrics 任务验收并全绿",
   "outOfScope": [
     "保留既有 ab-metrics 指标口径与导出字段兼容性（历史数据可复算）",
     "不得改动 eval/record-run.mjs、eval/b7-matrix.mjs 及 b5 保留集证据",
@@ -18,10 +19,25 @@
     },
     {
       "id": "AC2",
-      "text": "报告输出含新旧指标并可通过既有 hidden-test 扩展（exit 0）",
+      "text": "报告输出含新旧指标并通过既有验收扩展（exit 0）",
       "check": "project-regression",
       "paths": ["eval/ab-metrics.mjs"],
       "tests": ["eval/tasks/hephi/ab-metrics-mechanical/hidden-test.sh"]
+    }
+  ],
+  "allowedPaths": [
+    "eval/ab-metrics.mjs"
+  ],
+  "checks": [
+    {
+      "id": "project-regression",
+      "kind": "test",
+      "purpose": "hephi 测试回归套件（typecheck/test/build 中的 test 段）",
+      "command": "pnpm",
+      "args": ["test"],
+      "cwd": "hephi",
+      "required": true,
+      "timeoutMs": 600000
     }
   ]
 }

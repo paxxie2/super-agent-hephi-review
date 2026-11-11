@@ -1,4 +1,5 @@
 {
+  "ticketId": "g-b3-1-evidence-verifier-a1out",
   "version": 3,
   "kind": "code",
   "goal": "交付 A1-OUT fail-closed 链三里程碑：前台 kind 校验、jobs.readAt lossy 拒绝、ready 映射，合成后 evidence-verifier 套件全绿",
@@ -22,6 +23,22 @@
       "check": "project-regression",
       "paths": ["hephi/src/control/evidence-verifier.ts"],
       "tests": ["hephi/tests/control/evidence-verifier.test.ts"]
+    }
+  ],
+  "allowedPaths": [
+    "hephi/src/control/evidence-verifier.ts",
+    "hephi/tests/control/evidence-verifier.test.ts"
+  ],
+  "checks": [
+    {
+      "id": "project-regression",
+      "kind": "test",
+      "purpose": "hephi 测试回归套件（typecheck/test/build 中的 test 段）",
+      "command": "pnpm",
+      "args": ["test"],
+      "cwd": "hephi",
+      "required": true,
+      "timeoutMs": 600000
     }
   ]
 }

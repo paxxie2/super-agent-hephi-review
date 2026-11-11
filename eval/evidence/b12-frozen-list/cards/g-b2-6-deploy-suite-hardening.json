@@ -1,4 +1,5 @@
 {
+  "ticketId": "g-b2-6-deploy-suite-hardening",
   "version": 3,
   "kind": "code",
   "goal": "交付部署套件加固三里程碑：deploy-hephi.sh 脚本修正、test-deploy-hephi.mjs wrapper 断言、负例集，合成后部署测试全过（假宿主）",
@@ -22,6 +23,23 @@
       "check": "project-regression",
       "paths": ["scripts/host/test-deploy-hephi.mjs"],
       "tests": ["hephi/tests/control/deploy-script.test.ts"]
+    }
+  ],
+  "allowedPaths": [
+    "scripts/host/deploy-hephi.sh",
+    "scripts/host/test-deploy-hephi.mjs",
+    "hephi/tests/control/deploy-script.test.ts"
+  ],
+  "checks": [
+    {
+      "id": "project-regression",
+      "kind": "test",
+      "purpose": "hephi 测试回归套件（typecheck/test/build 中的 test 段）",
+      "command": "pnpm",
+      "args": ["test"],
+      "cwd": "hephi",
+      "required": true,
+      "timeoutMs": 600000
     }
   ]
 }

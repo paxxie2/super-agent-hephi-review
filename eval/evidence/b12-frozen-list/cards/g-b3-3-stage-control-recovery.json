@@ -1,4 +1,5 @@
 {
+  "ticketId": "g-b3-3-stage-control-recovery",
   "version": 3,
   "kind": "code",
   "goal": "交付 staged 阶段控制三里程碑：状态机、readSession 恢复、preflight，行为与 hephi/docs/stage-control.md 约定一致",
@@ -14,14 +15,30 @@
       "text": "状态机非法迁移被拒绝，readSession 恢复后阶段状态与中断前一致",
       "check": "project-regression",
       "paths": ["hephi/src/control/stage-mount.ts"],
-      "tests": ["hephi/tests/control/"]
+      "tests": ["hephi/tests/control/**"]
     },
     {
       "id": "AC2",
       "text": "preflight 对缺失前置产物 fail-closed；hephi/tests/control 整目录回归全绿",
       "check": "project-regression",
       "paths": ["hephi/src/control/stage-mount.ts"],
-      "tests": ["hephi/tests/control/"]
+      "tests": ["hephi/tests/control/**"]
+    }
+  ],
+  "allowedPaths": [
+    "hephi/src/control/stage-mount.ts",
+    "hephi/tests/control/**"
+  ],
+  "checks": [
+    {
+      "id": "project-regression",
+      "kind": "test",
+      "purpose": "hephi 测试回归套件（typecheck/test/build 中的 test 段）",
+      "command": "pnpm",
+      "args": ["test"],
+      "cwd": "hephi",
+      "required": true,
+      "timeoutMs": 600000
     }
   ]
 }

@@ -1,4 +1,5 @@
 {
+  "ticketId": "g-b2-4-daily-export-rework-cross",
   "version": 3,
   "kind": "code",
   "goal": "交付 daily-export 重做三里程碑链：数据层、导出器、校验器，跨模块合成后导出产物可被机械校验",
@@ -11,7 +12,7 @@
   "acceptance": [
     {
       "id": "AC1",
-      "text": "数据层与导出器交付后，导出产物由校验器逐项核对通过（自备 --self-test 子命令 exit 0）",
+      "text": "数据层与导出器交付后，导出产物由校验器逐项核对通过（内建自测全部通过，exit 0）",
       "check": "project-regression",
       "paths": ["eval/daily-export.mjs"],
       "tests": ["eval/tasks/hephi/daily-export-rework/hidden-test.sh"]
@@ -22,6 +23,21 @@
       "check": "project-regression",
       "paths": ["eval/daily-export.mjs"],
       "tests": ["eval/tasks/hephi/daily-export-rework/hidden-test.sh"]
+    }
+  ],
+  "allowedPaths": [
+    "eval/daily-export.mjs"
+  ],
+  "checks": [
+    {
+      "id": "project-regression",
+      "kind": "test",
+      "purpose": "hephi 测试回归套件（typecheck/test/build 中的 test 段）",
+      "command": "pnpm",
+      "args": ["test"],
+      "cwd": "hephi",
+      "required": true,
+      "timeoutMs": 600000
     }
   ]
 }

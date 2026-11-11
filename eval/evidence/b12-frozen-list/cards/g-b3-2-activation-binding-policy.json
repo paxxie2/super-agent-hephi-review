@@ -1,4 +1,5 @@
 {
+  "ticketId": "g-b3-2-activation-binding-policy",
   "version": 3,
   "kind": "code",
   "goal": "交付绑定开关策略三里程碑：policy 计算、环境开关、合同冻结，合成后 activation 套件全绿（a2-final §6.1 引证 effective 计算线）",
@@ -22,6 +23,21 @@
       "check": "project-regression",
       "paths": ["hephi/src/control/activation.ts"],
       "tests": ["hephi/tests/control/activation-marker.test.ts"]
+    }
+  ],
+  "allowedPaths": [
+    "hephi/src/control/activation.ts"
+  ],
+  "checks": [
+    {
+      "id": "project-regression",
+      "kind": "test",
+      "purpose": "hephi 测试回归套件（typecheck/test/build 中的 test 段）",
+      "command": "pnpm",
+      "args": ["test"],
+      "cwd": "hephi",
+      "required": true,
+      "timeoutMs": 600000
     }
   ]
 }

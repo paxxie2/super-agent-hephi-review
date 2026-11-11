@@ -67,10 +67,30 @@ reference.patch 行数实测（`wc -l`）：record-run 1121、daily-export-rewor
 
 ## 3. 卡草案说明
 
-- 每项一张 v3 卡（`version:3, kind:code`，goal/outOfScope/acceptance[].id/text/check/paths/tests），存放于 `cards/`；隐藏验收命令**不写入卡内**（卡是 Worker 可见面），仅登记于本文件 §1/§2。
+- 每项一张 v3 卡（`version:3, kind:code`，goal/outOfScope/acceptance[].id/text/check/paths/tests），存放于 `cards/`；隐藏验收命令**不写入卡内**（卡是 Worker 可见面），仅登记于本文件 §1/§2。卡内验收文本只写可观察行为（如"内建自测场景全部通过（exit 0）"），不出现具体命令行。
+- **task-30 修复（2026-11-12，Kimi blocking）**：① 原 4 处目录 pattern（`hephi/docs/validation/`、`eval/schema/`、`eval/evidence/t21-prep/`、`hephi/tests/control/`）在 allowedPath 的 `node:path.matchesGlob` 语义下不匹配内部文件（Lead 实测 `matchesGlob(file,'dir/')=false`），已全部改为精确文件路径或 `dir/**`；g-b3-5 的清点工具落位约定为 `eval/retention-sweep.mjs`（新文件，登记于 allowedPaths）。② g-b2-2/g-b2-3/g-b2-4/g-b2-5/g-b3-5 卡内文本原先泄漏隐藏锚点命令原文，已改为行为描述，命令原文仅保留在本文件 §1/§2。③ 每张卡补齐 lint 必需的 envelope 字段（`ticketId`/`allowedPaths`/`checks`，check 为真实可跑的 `pnpm test`@hephi 回归），11 张卡全部通过真实 `node hephi/lib/cli.mjs lint-task`（见 §3.1）。
 - 里程碑拆分只发生在实验组且须先过 B2 拆卡跑通（v5.4 §3.3 第 123 行）；对照组用平卡。v3 卡 outOfScope 两类（保留行为 + 禁改模块）按 issue-with-task-card.md §7。
 - `budget` 均未填写（未获"超出即拒绝"授权）；预估规模记在 §0 表。
-- 投递前须 `hephi lint-task` / `eval/check-task.mjs --dry-run`（本阶段为草案，未执行 lint——卡尚未落入 task.json 目录结构）。
+
+### 3.1 lint 实测记录（命令原文 + 退出码，2026-11-12，main @ 63ba85b）
+
+命令：`node hephi/lib/cli.mjs lint-task eval/evidence/b12-frozen-list/cards/<card>.json`，11 张卡逐一执行，**全部 exit 0，输出 `HEPHI task lint: PASS <card> (acceptance=2 checks=1 allowedPaths=N)`**：
+
+| 卡 | allowedPaths 数 | 退出码 |
+| --- | --- | --- |
+| g-b2-2-a2-evidence-chain-probe | 3 | 0 |
+| g-b2-3-record-run-runbook-chain | 2 | 0 |
+| g-b2-4-daily-export-rework-cross | 1 | 0 |
+| g-b2-5-b7-multi-repo-matrix | 2 | 0 |
+| g-b2-6-deploy-suite-hardening | 3 | 0 |
+| g-b3-1-evidence-verifier-a1out | 2 | 0 |
+| g-b3-2-activation-binding-policy | 1 | 0 |
+| g-b3-3-stage-control-recovery | 2 | 0 |
+| g-b3-4-shadow-mode-parity | 2 | 0 |
+| g-b3-5-t21-retention-sweep | 2 | 0 |
+| g-b3-6-ab-metrics-mechanical-plus | 1 | 0 |
+
+glob 修复真实性核对（`node:path.matchesGlob` 实测）：`hephi/docs/validation/x.md`→`hephi/docs/validation/**`=true；`eval/evidence/t21-prep/SHA256SUMS`→精确路径=true；`hephi/tests/control/a.test.ts`→`hephi/tests/control/**`=true；`eval/schema/run.schema.json`→精确路径=true。11 张卡 JSON.parse 全部 OK。
 
 ## 4. 明确未做
 
@@ -79,5 +99,5 @@ reference.patch 行数实测（`wc -l`）：record-run 1121、daily-export-rewor
 
 ## 5. 自测与回滚
 
-- 回滚点：`git reset --hard b4b74ade505b8f605c9b9038259832fcdff3a7c0`（或删除新增目录 `eval/evidence/b12-frozen-list/`）。
-- 本次提交仅含 `eval/evidence/b12-frozen-list/`（write_scopes 一致），提交后 `git log -1 --stat` 核对。
+- task-26 回滚点：`git reset --hard b4b74ade505b8f605c9b9038259832fcdff3a7c0`；task-30 修复回滚点：`git reset --hard 63ba85b347836a0ea33d3ad36c9d8ca40b86db3e`（main，PR #92 合并后）。
+- 两次提交均仅含 `eval/evidence/b12-frozen-list/`（write_scopes 一致），提交后 `git log -1 --stat` 核对。

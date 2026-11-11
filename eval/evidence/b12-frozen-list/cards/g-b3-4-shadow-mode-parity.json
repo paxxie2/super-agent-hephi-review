@@ -1,4 +1,5 @@
 {
+  "ticketId": "g-b3-4-shadow-mode-parity",
   "version": 3,
   "kind": "code",
   "goal": "交付 P4 shadow 观察面三里程碑：决策日志、allowUnavailable 处理、parity 比对脚本，对已导出清单跑通（enforcement-modes.md 边界内）",
@@ -22,6 +23,22 @@
       "check": "project-regression",
       "paths": ["scripts/experimental/check-shadow-parity.mjs", "hephi/docs/enforcement-modes.md"],
       "tests": ["scripts/experimental/check-shadow-parity.mjs"]
+    }
+  ],
+  "allowedPaths": [
+    "scripts/experimental/check-shadow-parity.mjs",
+    "hephi/docs/enforcement-modes.md"
+  ],
+  "checks": [
+    {
+      "id": "project-regression",
+      "kind": "test",
+      "purpose": "hephi 测试回归套件（typecheck/test/build 中的 test 段）",
+      "command": "pnpm",
+      "args": ["test"],
+      "cwd": "hephi",
+      "required": true,
+      "timeoutMs": 600000
     }
   ]
 }
