@@ -15,7 +15,7 @@ const harness = `${repoRoot}scripts/host/test-deploy-hephi.mjs`
 describe('deploy-hephi.sh 假宿主契约（R3 + X1-X3/P1-P3 + F-02 drain + T1 发布/激活）', () => {
   it('全部场景通过', async () => {
     const { stdout } = await run(process.execPath, [harness], { timeout: 900_000, cwd: repoRoot })
-    expect(stdout).toContain('PASS: 302 assertions (R3 fake-host suite')
+    expect(stdout).toContain('PASS: 303 assertions (R3 fake-host suite')
     expect(stdout).not.toMatch(/^FAIL /m)
   }, 900_000)
 })
