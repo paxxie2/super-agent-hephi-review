@@ -262,3 +262,24 @@ sed -n '95p' hephi/README.md && sed -n '44p' hephi/docs/decisions-format.md
 - 未修改任何源码、测试、既有记录；只新增本文件。
 - 未执行能力 A/B 的宿主验收（需一次性真实 profile/宿主实现），未连接任何宿主，未运行付费任务。
 - 未向宿主仓库提交/转达（转达方式由负责人决定），未评估宿主工作量。
+
+## 7. 原生队列状态（2026-11-12 回填）
+
+| 项 | 值 |
+| --- | --- |
+| 提交渠道 | Super Agent 原生入口（GitHub Issue → 自动接单） |
+| Issue | `paxxie2/g1-at81#4` — https://github.com/paxxie2/g1-at81/issues/4 |
+| Ticket | `1d04c373fe1665d21538c0ceb7f12944` |
+| Ticket 标题 | DSH 宿主能力 A/B 实施单：Worker 无权改写交付证据 + 结构化四元绑定（g1-at81） |
+| 接单实例 | 3085（g1-exp，实载 DSH 0.2.1-rc.5 / SA cd384e7 / hephi ab5f527） |
+| 负责人 | 未具名（该实例无宿主负责人字段；操作者为 `zm`）。**不得代填姓名**，由负责人受理时补录 |
+| 状态 | `running`（assignment `6bd9c09aafc9`，2026-11-11T23:16:51Z 接单） |
+| 合同 | 无 HEPHI 合同（g1-at81 不在 `prepare.sh` 匹配范围，符合 AT-81 既有结论） |
+
+**提交前查重记录**：三个原生队列共 181 张 Ticket（g1-exp 23 / experiment 49 / desktop superagent 109）逐条检索，**无任何 DSH 宿主能力实施单**；GitHub 被监听仓亦无对应 Issue。因此本次为**首次提交，非重复建单**。
+
+**交付边界（重要）**：DSH 宿主以 `app.asar` 打包分发，本地无 DSH 源码仓；上游 `deepseek-ai/deepseek-harness` 只读（无推送权限）；`paxxie2` 无 fork。因此该 Ticket 在本仓的可交付物限定为：
+1. 对上游 DSH 的**参考补丁草案**（会话持久化与 `tool/result` 结构化编码的最小改动，`git format-patch` 形式）；
+2. **验收 harness**（在 3085 上以实际 Worker 身份执行能力 A 正反向 + 能力 B 四元核验的脚本）。
+
+能力本体仍须 DSH 团队实施；上游未交付前，本单状态应视为 `blocked-on-upstream`。
