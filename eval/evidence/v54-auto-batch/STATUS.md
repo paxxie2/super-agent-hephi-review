@@ -63,3 +63,22 @@
 - **修复过程问题**：指针目录初缺 scripts/prepare-dubbo.sh → prepare failed；补 scripts 后通过 POST tickets/:id/retry（x-orchestrator-request:1 头）成功重试。failed assignment 不自动重试。
 - **A1 隔离证据**：合同 pluginCommit=ab5f527 与实载一致；Worker 在独立 checkout 工作，状态目录由插件写入；diff 仅 diagnoses.py + 验收测试，无越界改动。
 - **真实端到端首次通过**（此前所有"未验证"项中，A1 起点现已有真实交付证据）。T10/T11 完整验收（四类无效证据拒绝 + 四种故障恢复）仍待后续。
+
+## 2026-11-12 多 agent-team 并行批次（evolve 驱动，4 任务）
+
+| 任务 | 执行者 | commit | 结论 |
+|---|---|---|---|
+| T08/Q4 制品 SHA 正误两例 | impl-worker | b7fb5f3 | ✅ 6/6 PASS，无回归 |
+| B1.2 两场景探查任务草拟 | hephi-rca | cbe8437 | ✅ 草案落盘，Dubbo 配置缺失证实，5 项待决 |
+| T11 四状态恢复验证 | hephi-dev | e845422 | ✅ 18/18 PASS，真实 3085 CLI，状态目录字节不变 |
+| T10 四类无效证据拒绝 | hephi-evidence | 0f606c2 | ⛔ **blocked**：binding off 攻击①误放行（一票否决）；binding on 合法前台被 output-unverified 拒（部署约束） |
+
+### T10 关键发现（如实登记，不伪造通过）
+- 生产配置（binding off，与 PR#22 一致）：3/4 拒，**①伪造记录误放行 ready.pass** → v5.4 §10 一票否决 → T10 不达标。
+- 收紧绑定（binding on）：4/4 拒，但合法前台交付被 ready.output-unverified 拒（真实 Session 结构化 tool/result value=0）→ 部署约束（附录A 明示为设计行为）。
+- 后台 Job 合法路径：未验证（零付费红线 + check-runner 仅接受结构化 promoted/background）→ 部署约束。
+- **兼得需 H6 隔离 + 宿主 R1 结构化 value**（与 dsh-host-requirements.md 一致）。不据此升级 D1/D2。
+- 事故：cpSync git worktree 致误提交 2 个，已 reset --hard 440712d9 恢复（Lead 核验 HEAD/clean），改用 clone --no-hardlinks + 守卫。
+
+### 经验沉淀
+exp-037（Q4 SHA）、exp-038（B1.2）、exp-039（T11）、exp-040（T10 blocked），validate-log OK 40 行。
