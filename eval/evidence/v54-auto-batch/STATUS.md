@@ -106,3 +106,25 @@ exp-037（Q4 SHA）、exp-038（B1.2）、exp-039（T11）、exp-040（T10 block
 
 **经验层**：exp-028~044（17 条），validate-log OK 44 行。
 **PR 历史**：#91（batch1）+ #92（batch2）均已合并 main；PR #22（A1 fix）已合并 b5-off-history-page-size。
+
+## 2026-11-12 批次 3：双席审核 + 修复轮 + Proposer
+
+### 双席审核结果（均 blocking，已全部修复）
+
+| 轮次 | Kimi | GPT | 处理 |
+|---|---|---|---|
+| 第 1 轮（batch2 deliverables） | 76 blocking：glob 目录 pattern 不可执行 + 3 卡泄漏隐藏命令 | 72 blocking：同上 + B-03 g-b3-6 隐藏测试责任冲突 + B-04 锚点声明超出记录 | 全部采纳无豁免：task-30（331a141）、task-31（bc90028） |
+| 第 2 轮（修复复审） | 82 blocking：K-1 g-b3-3 allowedPaths 扩权 + K-2 Lead 伪回放命令 + K-3 PR#91 笔误 + K-4 140/lint 记录不符 | —（GPT 席未复审） | 全部采纳：task-32（d0f35d5） |
+
+Lead 终审重放：11/11 lint PASS、11/11 allowedPaths==acceptancePaths、隐藏命令 grep 无命中、T10_REPLAY_PR_STATE 计数 0。
+
+### 丢失文档重建（task-28, 63ba85b）
+5 份原建于已删除 agent/roadmap95 分支的 validation 文档按现存证据重建，每份标注「重建版，非原始文件」+ 依据清单 + 丢失确证（git log --all 各 0 commits）；68 处 file:line 引用核对 0 problem。
+
+### T10 漂移定性（task-29, 8ca1996）
+`ready.pr-mismatch` 属 §11.5 预登记 PR 生命周期漂移，**不是攻击①已修复**；隔离实验（PR 状态回放 OPEN）证明 attack-1-forged-record-binding-off 仍返回 ready.pass → **T10 blocked 不变**。
+
+### 经验层 + Proposer
+- exp-045（勘误 exp-043 退出码）、exp-046（重建文档）、exp-047（双席 blocking 仲裁）、exp-048（勘误 exp-044 隔离声明）、exp-049（B-03/B-04 修复）、exp-050（复审轮新发现含 Lead 自身错误）、exp-051（K-1..K-4 修复）、exp-052（Proposer 运行）
+- `harness-assets/proposals/2026-11-12-run1.json`：5 条提案（P-001 前提事实状态门 / P-002 逐命令退出码契约 / P-003 授权路径等值与 glob 门禁 / P-004 隐藏验收双向隔离 / P-005 只读复算协议），全部 `status=proposed`，未改生产资产
+- validate-log OK 52 行
