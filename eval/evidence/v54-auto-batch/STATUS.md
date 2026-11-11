@@ -9,7 +9,7 @@
 |---|---|---|---|
 | B1.1/T03 合同聚焦 | lint-task +3 测试、budget-advisory 9 测试；Devin 4 语义文件收编 | 25795b8 | typecheck exit 0；38/38 pass；Lead 重放 9/9 |
 | T08 统计入口 | report.py worst_case_imputation 并列段（+54 纯新增）；t08_worst_case_test.py | d08ac7a | self-test PASS；T08 7/7（实验2/10 对照1/10）；known-answers 9/9 无回归 |
-| B0 离线底稿 | events.jsonl 22 条 deny 逐事件分类（有效拦截13/流程摩擦5/预期红态4/未知0）+ ledger.md | (b0-ledger 提交中) | 每条附 ticketId/seq/rule/reason原文/basis/evidence 路径 |
+| B0 离线底稿 | events.jsonl 22 条 + ledger.md 182 行（18合同→10父任务P1-P10，双条件核验，实际重做diff证据） | c8435fe | 哈希核对一致；contractHash mismatch=0；22事件逐字段回比 problems=[] |
 
 ## 关键实测发现（B0）
 
@@ -28,8 +28,11 @@
 | T12/P6 观察 | 物理 14 天窗口，压缩不了 |
 | B1.2 任务构造 | Dubbo 检查配置待负责人批准；大任务原始需求待准备 |
 
-## 审核状态
+## 审核状态（双席 + 仲裁完成）
 
 - Kimi 执行审 task-17：pass，score 92，pack af8eda9f…（5 条非阻断建议）
-- GPT 交叉审 task-17+18：进行中（中继 subagent 346f976d）
-- 经验沉淀：exp-030（task-17）、exp-031（task-18），validate-log OK 31 行
+- GPT 交叉审 task-17+18：blocking，score 80，pack 0e5afc79…（唯一阻塞 B1：T03 权限/验收路径证据）
+- Lead 仲裁（exp-032，分差12<30 但一席 blocking 强制留痕）：B1 部分采纳。GPT 误数 it=10 驳回（实测9，全量611/611绿）；真实权限路径既有覆盖（redteam RT-SCOPE-01/02+LEGAL-01、protected-assets C1-05/06）；T03 端到端集成证据需真实宿主→标 blocked（A线/T10）。task-17/18 交付维持有效。GPT 测试补强建议采纳为 task-19。
+- B1.1 出口全量验证：hephi 42 files 611 tests passed exit 0（HEAD d08ac7a，含 redteam+protected-assets 真实权限路径）
+- 经验沉淀：exp-030/031/032，validate-log OK 32 行
+- P10 口径裁决：按 v5.4 决定7（原始需求父任务评）采用归并口径（1父8尝试），分仓口径作敏感性标注
