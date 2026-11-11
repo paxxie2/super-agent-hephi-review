@@ -128,3 +128,17 @@ Lead 终审重放：11/11 lint PASS、11/11 allowedPaths==acceptancePaths、隐�
 - exp-045（勘误 exp-043 退出码）、exp-046（重建文档）、exp-047（双席 blocking 仲裁）、exp-048（勘误 exp-044 隔离声明）、exp-049（B-03/B-04 修复）、exp-050（复审轮新发现含 Lead 自身错误）、exp-051（K-1..K-4 修复）、exp-052（Proposer 运行）
 - `harness-assets/proposals/2026-11-12-run1.json`：5 条提案（P-001 前提事实状态门 / P-002 逐命令退出码契约 / P-003 授权路径等值与 glob 门禁 / P-004 隐藏验收双向隔离 / P-005 只读复算协议），全部 `status=proposed`，未改生产资产
 - validate-log OK 52 行
+
+### 批次 3 补充：丢失产物恢复（task-33/34）
+
+| 产物 | 原建于 | 恢复 commit | 验证 |
+|---|---|---|---|
+| A7 宿主契约套件（host-contract.test.ts + 文档） | task-15 已删分支 | 090560b | 带 env 1 passed / 不带 env 1 skipped / typecheck 0 |
+| H6 检测能力（snapshot-seal.ts + 21 tests + 3 处文档） | task-9 已删分支（a583edc） | 6a51c3e | typecheck 0；snapshot-seal 21 passed；tests/control 519 passed；**全量 639 passed / 1 skipped**；另只读校验 1385 个真实 session 文件全部帧对齐+封存+回环 OK |
+| 5 份 validation 文档 | 已删分支 | 63ba85b | 标注重建版 + 68 处引用核对 0 problem |
+| A1 验收修复 PR | — | PR#22 已合并 | 真实端到端 ready.pass |
+
+**H6 恢复的边界**：detect-only，adapter 默认未接线（需配置 sessionLogRoot）；同 UID 仍可伪造合法帧 → **H6 根因未变，D1 仍 L1，T10 仍 blocked**，不得据此升级。
+
+### 清理教训（已入 exp-053）
+删除分支前须盘点该分支产物的**完整清单**（含 src 实现本体与 tests），本次 snapshot-seal.ts 实现直到重建 A7 套件时才发现缺失，属清理时未做全量产物盘点的遗漏。
