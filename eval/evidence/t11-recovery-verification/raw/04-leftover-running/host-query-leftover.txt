@@ -1,0 +1,6 @@
+# host process query at 2026-11-11T19:57:21Z
+$ ps -o pid=,user=,command= -p 33924
+33924 zm /Users/zm/.nvm/versions/node/v26.1.0/bin/node /Users/zm/dsh-instances/runtime/node_modules/@deepseek-ai/dsh/lib/bin.js --profile g1-exp --no-open
+$ scan ps -ax for the recorded inner call marker
+no process matches 'hephi-t11-acceptance-44444444' (scan of ps -ax output)
+scan-exit=0

@@ -1,0 +1,5 @@
+# host process query at 2026-11-11T19:57:19Z
+$ ps -o pid=,ppid=,user=,command= -p 63953
+63953 63870 zm sleep 240
+$ ps -o pid=,user=,command= -p 33924
+33924 zm /Users/zm/.nvm/versions/node/v26.1.0/bin/node /Users/zm/dsh-instances/runtime/node_modules/@deepseek-ai/dsh/lib/bin.js --profile g1-exp --no-open

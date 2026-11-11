@@ -1,0 +1,1 @@
+--basis host-terminal requires --status terminated (a host query confirmed the end of the execution)

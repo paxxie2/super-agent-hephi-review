@@ -1,0 +1,1 @@
+operator resolutions are disabled: operator config /tmp/t11-recovery-20261111T195718Z/raw/05-operator-gate/operator-config-0644.json is accessible by group/other (mode 644); require mode 0600 (mode & 0o077 === 0)

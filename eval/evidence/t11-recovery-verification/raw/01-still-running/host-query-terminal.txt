@@ -1,0 +1,5 @@
+# host process query after operator stop request at 2026-11-11T19:57:19Z
+$ ps -o pid=,command= -p 63953
+ps exit=1 (no process with the recorded pid 63953)
+$ ps -o pid=,user=,command= -p 33924
+33924 zm /Users/zm/.nvm/versions/node/v26.1.0/bin/node /Users/zm/dsh-instances/runtime/node_modules/@deepseek-ai/dsh/lib/bin.js --profile g1-exp --no-open

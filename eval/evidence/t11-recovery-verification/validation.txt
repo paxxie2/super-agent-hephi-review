@@ -1,0 +1,24 @@
+$ node /tmp/t11-tools/validate-evidence.mjs eval/evidence/t11-recovery-verification
+
+PASS recoveries.jsonl parses with 5 rows (4 recoveries + 1 authorization gate)
+PASS still-running: ticket/run scoped and contract hash recorded
+PASS query-unavailable: ticket/run scoped and contract hash recorded
+PASS result-lost: ticket/run scoped and contract hash recorded
+PASS leftover-running: ticket/run scoped and contract hash recorded
+PASS still-running: first attempt refused with exit 1 and the running message
+PASS still-running: recovery recorded (exit 0) and the original record bytes are unchanged
+PASS still-running: idempotent repeat adds no record
+PASS query-unavailable: refused without explicit risk acceptance (exit 2)
+PASS query-unavailable: wrong basis refused (exit 2) and recovery uses operator-risk-accepted
+PASS query-unavailable: the failed host query (curl exit 7) is recorded as the authorization basis
+PASS result-lost: host-terminal resolution allowed (exit 0) but the execution is not passing evidence
+PASS leftover-running: refused without host query (exit 2) and while classified running (exit 1)
+PASS leftover-running: host query found no process, resolution recorded, repeat is idempotent
+PASS operator-gate: no config / group-readable config / env-only are all refused (exit 1) without writing a resolution
+PASS host facts identify the 3085 deployment and the CLI digest
+PASS real 3085 state directory is byte-identical before and after (no pollution)
+PASS 3086 frozen control was not started by this verification
+
+18/18 checks passed
+
+validator exit=0

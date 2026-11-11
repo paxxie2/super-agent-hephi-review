@@ -1,0 +1,9 @@
+{
+  "ticketDir": "/tmp/t11-recovery-20261111T195718Z/state/hephi/46aa3f5947c125330ef14d8014a88477",
+  "runs": {
+    "stillRunning": "11111111-aaaa-4bbb-8ccc-111111111111",
+    "unavailable": "22222222-aaaa-4bbb-8ccc-222222222222",
+    "resultLost": "33333333-aaaa-4bbb-8ccc-333333333333",
+    "leftoverRunning": "44444444-aaaa-4bbb-8ccc-444444444444"
+  }
+}

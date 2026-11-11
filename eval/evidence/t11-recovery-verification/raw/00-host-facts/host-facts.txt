@@ -1,0 +1,50 @@
+# T11 host facts (read-only) captured at 2026-11-11T19:57:18Z
+## evidence repo HEAD
+cbe84373ffb1a33ac53b7088b11431e05da7a060
+## 3085 host process
+33924 zm /Users/zm/.nvm/versions/node/v26.1.0/bin/node /Users/zm/dsh-instances/runtime/node_modules/@deepseek-ai/dsh/lib/bin.js --profile g1-exp --no-open
+## 3085 http status (no token)
+http=401
+## 3086 frozen control (read-only probe; not touched)
+http=000
+## activation marker
+[hephi-activation] entry=tools plugin=hephi-superagent-plugin commit=ab5f527a11655dd3e935a634d3b5c62f0a265f51 pid=24643
+[hephi-activation] entry=index plugin=hephi-superagent-plugin commit=ab5f527a11655dd3e935a634d3b5c62f0a265f51 pid=33924
+[hephi-activation] entry=tools plugin=hephi-superagent-plugin commit=ab5f527a11655dd3e935a634d3b5c62f0a265f51 pid=33924
+## CLI
+-rwxr-xr-x@ 1 zm  staff  46604 Nov 12 03:05 /Users/zm/dsh-instances/g1-exp/hephi-review/hephi/lib/cli.mjs
+f518b2f05e58a7ecff008ac56497b05fb50f1ad01c837832b099fabd3c7cafd6  /Users/zm/dsh-instances/g1-exp/hephi-review/hephi/lib/cli.mjs
+## operator config
+-rw-------@ 1 zm  staff  35 Nov  8 21:31 /Users/zm/dsh-instances/g1-exp/operator-config.json
+{"allowOperatorResolutions": true}
+## resolve CLI usage (deployed ab5f527 build)
+usage: hephi prepare
+       hephi resolve --ticket <id> --run <runId>
+                     --basis <host-terminal|operator-risk-accepted>
+                     --status <running|terminated|unavailable>
+                     (--host-query <raw query output> | --host-query-file <path>)
+                     --operator <name> [--accept-risk] [--state-dir <dir>]
+                     [--operator-config <path>]
+       hephi resolve --kind retry-reset --ticket <id> --check <checkId>
+                     --basis <host-terminal|operator-risk-accepted>
+                     --status <running|terminated|unavailable>
+                     (--host-query <raw query output> | --host-query-file <path>)
+                     --operator <name> [--accept-risk] [--state-dir <dir>]
+                     [--operator-config <path>]
+       hephi stats [--state-dir <dir>] [--ticket <id>] [--rule <prefix>] [--json]
+       hephi summary --ticket <id> [--state-dir <dir>] [--coverage-hint <file>] [--json] [--out <file>]
+       hephi lint-task <task.json> [--json]
+
+hephi stats reads (never writes) decision logs under <stateDir>/hephi/<ticketId>/decisions.jsonl.
+With --ticket it summarizes one Ticket; without it scans every Ticket directory and prints a
+per-Ticket table. Corrupt lines are counted and reported on stderr, never trusted. --json emits
+machine-readable output; --rule filters by rule-number prefix.
+
+hephi lint-task validates a task bundle offline (no network/git): task card (hephi-task JSON),
+ticketId, allowedPaths and the project checks referenced by every acceptance item. It only reads
+the given file; warnings (too many acceptance items, too-wide allowedPaths) do not fail the lint.
+
+hephi resolve records an A3 operator resolution. With the default --kind run-unblock it
+applies to one unresolved (running/unknown) execution; it only restores the right to run
+the check again, the resolved execution stays non-passing evidence, and its
+run.json/output.log are never edited.

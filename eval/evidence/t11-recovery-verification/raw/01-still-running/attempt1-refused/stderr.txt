@@ -1,0 +1,1 @@
+host still reports the check as running; stop it, confirm a terminal state and then resolve
