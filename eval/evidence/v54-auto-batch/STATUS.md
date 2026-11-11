@@ -203,3 +203,33 @@ DSH 宿主以 `app.asar` 分发，本地无源码仓；上游 `deepseek-ai/deeps
 - B0/T02 单次额度申请单：`eval/evidence/b-line/b0-t02-budget-request.md`
 - Dubbo 检查配置可审批清单：`eval/evidence/b-line/dubbo-check-config-proposal.md`
 - B3 的 50 元与 D-8 界值：继续等实测成本
+
+## 2026-11-12 DSH 宿主 Ticket 产物（PR #5）与 hephi 侧并行开发
+
+### DSH Ticket 1d04c373 的 Worker 产物（PR paxxie2/g1-at81#5，OPEN）
+
+Worker 按其自报状态：**整体 fail/blocked**（因为它无法实施宿主本体），但产出了**限定范围内的高质量交付**：
+
+| 产物 | 内容 |
+|---|---|
+| `patches/0001-tools-persist-tool-result-message-value.patch` | 能力 B1 参考补丁：`ToolResultMessage.value` 可选字段 + `output.contractValue` 投影器 + bash 声明 `{kind:'foreground',exitCode}` / `{kind,jobId}` 且超时/信号/停止时**省略 exitCode** + agent-loop 单次落入持久化 `tool/result` |
+| `patches/0002-guard-worker-evidence-carrier-writes.patch` | 能力 A 参考补丁：新增 `@deepseek-ai/dsh-evidence-write-guard`，默认护 `<dshHome>/sessions` + 可配额外根（如 HEPHI state 目录）；Worker 进程被 shell executor 无条件包裹，macOS 用 Seatbelt `deny-file-write subpaths`、Linux 用 bwrap 只读 bind、**其他平台 fail-closed 而非无守卫运行** |
+| `docs/host-capability-ab/b2-binding-record.schema.json` + `.example.json` | 能力 B2 四元绑定记录 schema：`ticket{id,repository,issue}` / `session{id,origin,agentPreset}` / `execution` oneOf(foreground{toolCallId,kind,exitCode} \| bg/promoted{toolCallId,kind,jobId}) / `finalCommit{sha,baseSha,prNumber}` |
+| `docs/host-capability-ab/acceptance-runbook.md` + `baseline-2026-11-12.md` | 验收 runbook 与基线（`tag dsh-v0.2.1-rc.5, commit b830ec95`） |
+
+Worker 报告如实标注：A 三项全 `blocked`（无销毁性写入探针）、B1 `fail`（真实快照 163 条 bash result / 0 结构化）、B2 `blocked`（无记录供给）、需人工签署。**未声称宿主已具备能力。**
+
+### hephi 侧并行开发（三个 task）
+
+| task | 内容 | 状态 |
+|---|---|---|
+| task-38 | h2Ring 全量统计（R1 验收硬前置） | ✅ f901a74+4a7998c（合成 7 条全结构化：旧 fail 5/7 → 新 pass 7/7；真实快照 32 条真无结构化仍 fail，未放宽） |
+| task-39 | 增量 diff 反馈 + 计划宽度记录（只记录不拦截） | 进行中 |
+| task-40 | 四元绑定记录消费器（binding on 才生效，off 零回归） | 进行中；已按 PR#5 的 schema 对齐（增强字段 optional） |
+
+### 关键契约对齐
+hephi 消费器与 PR#5 的 B2 schema 已对齐：最小必填 = 四元核心（`ticket.id`/`session.id`/`execution`/`finalCommit.sha+baseSha`），Worker 增强字段（`repository`/`issue`/`origin`/`agentPreset`/`prNumber`）作 optional 校验。
+
+### 待办
+- task-39/40 完成后跑全量回归 + 双席审核
+- 上游交付 A/B 能力后：3085 实际 Worker 身份验证 → 新 Issue 重跑 T10
