@@ -2,27 +2,28 @@
   "ticketId": "g-b3-6-ab-metrics-mechanical-plus",
   "version": 3,
   "kind": "code",
-  "goal": "交付 AB 度量机械统计扩展三里程碑：指标定义、机械统计、报告，扩展现有 ab-metrics 任务验收并全绿",
+  "goal": "交付 AB 度量机械统计扩展三里程碑：指标定义、机械统计、报告（实现 + 公开内建自测；隐藏验收扩展不在本卡范围，由独立验收方完成）",
   "outOfScope": [
     "保留既有 ab-metrics 指标口径与导出字段兼容性（历史数据可复算）",
     "不得改动 eval/record-run.mjs、eval/b7-matrix.mjs 及 b5 保留集证据",
     "不得修改 site-pnl-diagnosis 任务集任何文件",
+    "不得修改 eval/tasks/hephi/ab-metrics-mechanical/ 下任何文件（hidden-test.sh 等验收资产由独立验收方维护，Worker 无写权限）",
     "不做格式化、重命名、依赖升级；不得合并 PR；失败如实报告 blocked，不绕过检查"
   ],
   "acceptance": [
     {
       "id": "AC1",
-      "text": "新增指标为纯机械统计（无模型调用），定义与实现一致并有自测断言",
+      "text": "新增指标为纯机械统计（无模型调用），定义与实现一致并有公开自测断言",
       "check": "project-regression",
       "paths": ["eval/ab-metrics.mjs"],
-      "tests": ["eval/tasks/hephi/ab-metrics-mechanical/hidden-test.sh"]
+      "tests": ["eval/ab-metrics.mjs"]
     },
     {
       "id": "AC2",
-      "text": "报告输出含新旧指标并通过既有验收扩展（exit 0）",
+      "text": "报告输出含新旧指标且公开内建自测全部通过（exit 0）",
       "check": "project-regression",
       "paths": ["eval/ab-metrics.mjs"],
-      "tests": ["eval/tasks/hephi/ab-metrics-mechanical/hidden-test.sh"]
+      "tests": ["eval/ab-metrics.mjs"]
     }
   ],
   "allowedPaths": [

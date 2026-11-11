@@ -26,24 +26,24 @@ reference.patch 行数实测（`wc -l`）：record-run 1121、daily-export-rewor
 
 ### B2 开发集（5 项冻结 + G-B2-1 待批）
 
-| # | taskId | 参考修复与精确 baseSha | 里程碑 | 隐藏参考验收命令（已实测锚点） | 卡文件 |
-| --- | --- | --- | --- | --- | --- |
-| G-B2-2 | `a2-evidence-chain-probe` | ea0c544(base `a5dc826`)+c49b992(base `5efbf6a`)+da6a388(base `62ea0b9`) | M1 探针→M2 模板→M3 夹具→M4 文档 | `node hephi/scripts/check-binding-host.mjs --self-test`（exit 0，SELF-TEST: PASS）+ `cd hephi && npx vitest run tests/probes`（exit 0） | cards/g-b2-2-a2-evidence-chain-probe.json |
-| G-B2-3 | `record-run-runbook-chain` | `eval/tasks/hephi/record-run/reference.patch`（1121 行，引入线 220e67e base `0b7bada`） | M1 采集→M2 schema→M3 导出比对 | `node eval/record-run.mjs --self-test`（exit 0，SELF-TEST: PASS，26 断言） | cards/g-b2-3-record-run-runbook-chain.json |
-| G-B2-4 | `daily-export-rework-cross` | `eval/tasks/hephi/daily-export-rework/reference.patch`（919 行，引入线 220e67e base `0b7bada`） | M1 数据层→M2 导出器→M3 校验器 | 同 record-run 模式：目标交付物自备 `--self-test` 子命令 exit 0 | cards/g-b2-4-daily-export-rework-cross.json |
-| G-B2-5 | `b7-multi-repo-matrix` | 5e037bf（base `858711a`，eval/B7.md+b7-matrix.mjs，+651） | M1 矩阵定义→M2 环境探测→M3 报告 | `node eval/b7-matrix.mjs --self-test`（exit 0，36 assertions） | cards/g-b2-5-b7-multi-repo-matrix.json |
-| G-B2-6 | `deploy-suite-hardening` | 2409613（base `17d3827`，deploy-hephi.sh+test-deploy-hephi.mjs+deploy-script.test.ts，+376/−101） | M1 脚本→M2 wrapper 断言→M3 负例集 | `cd hephi && npx vitest run tests/control/deploy-script.test.ts` + `node scripts/host/test-deploy-hephi.mjs`（假宿主；真实宿主排空门禁 fail-closed 属既有 blocked 史，测试面用假宿主） | cards/g-b2-6-deploy-suite-hardening.json |
+| # | taskId | 参考修复与精确 baseSha | 里程碑 | 隐藏参考验收命令 | 锚点状态 | 卡文件 |
+| --- | --- | --- | --- | --- | --- | --- |
+| G-B2-2 | `a2-evidence-chain-probe` | ea0c544(base `a5dc826`)+c49b992(base `5efbf6a`)+da6a388(base `62ea0b9`) | M1 探针→M2 模板→M3 夹具→M4 文档 | `node hephi/scripts/check-binding-host.mjs --self-test` + `cd hephi && npx vitest run tests/probes` | **已执行**（§2-A/B：exit 0，SELF-TEST: PASS；probes 含于 140 passed run） | cards/g-b2-2-a2-evidence-chain-probe.json |
+| G-B2-3 | `record-run-runbook-chain` | `eval/tasks/hephi/record-run/reference.patch`（1121 行，引入线 220e67e base `0b7bada`） | M1 采集→M2 schema→M3 导出比对 | `node eval/record-run.mjs --self-test` | **已执行**（§2-C：exit 0，26 断言） | cards/g-b2-3-record-run-runbook-chain.json |
+| G-B2-4 | `daily-export-rework-cross` | `eval/tasks/hephi/daily-export-rework/reference.patch`（919 行，引入线 220e67e base `0b7bada`） | M1 数据层→M2 导出器→M3 校验器 | 目标交付物自备内建自测（同 record-run 模式） | **待构造**（自测属未来交付物方案，非已执行锚点） | cards/g-b2-4-daily-export-rework-cross.json |
+| G-B2-5 | `b7-multi-repo-matrix` | 5e037bf（base `858711a`，eval/B7.md+b7-matrix.mjs，+651） | M1 矩阵定义→M2 环境探测→M3 报告 | `node eval/b7-matrix.mjs --self-test` | **已执行**（§2-D：exit 0，36 assertions） | cards/g-b2-5-b7-multi-repo-matrix.json |
+| G-B2-6 | `deploy-suite-hardening` | 2409613（base `17d3827`，deploy-hephi.sh+test-deploy-hephi.mjs+deploy-script.test.ts，+376/−101） | M1 脚本→M2 wrapper 断言→M3 负例集 | `cd hephi && npx vitest run tests/control/deploy-script.test.ts` + `node scripts/host/test-deploy-hephi.mjs`（假宿主） | **部分已执行**：vitest 段未单独运行过（仅含于 §2-F 整目录 498 passed）；test-deploy-hephi.mjs 段**待构造**（假宿主面，投跑前由 hidden-test 落地） | cards/g-b2-6-deploy-suite-hardening.json |
 
 ### B3 基线探查（6 项，与 B2 及 site-pnl-diagnosis 22 卡保留集互不重叠）
 
-| # | taskId | 参考实现线与 baseSha 语义 | 里程碑 | 隐藏参考验收命令（锚点实测） | 卡文件 |
-| --- | --- | --- | --- | --- | --- |
-| G-B3-1 | `evidence-verifier-a1out` | `hephi/src/control/evidence-verifier.ts`（末次 38f1cd7，父 790223e）；演化引证 9fa8598 线（base `2c603c6`） | M1 前台 kind 校验→M2 lossy 拒绝→M3 ready 映射 | `cd hephi && npx vitest run tests/control/evidence-verifier.test.ts`（exit 0，含于 140 passed） | cards/g-b3-1-evidence-verifier-a1out.json |
-| G-B3-2 | `activation-binding-policy` | `hephi/src/control/activation.ts`（末次 71abbe0；a2-final §6.1 引证 activation.ts:221-229 effective 计算） | M1 policy 计算→M2 环境开关→M3 合同冻结 | `cd hephi && npx vitest run tests/control/activation.test.ts tests/control/activation-marker.test.ts`（exit 0，含于 140 passed） | cards/g-b3-2-activation-binding-policy.json |
-| G-B3-3 | `stage-control-recovery` | `hephi/src/control/stage-mount.ts`（基线导入 83a79c2）+ `hephi/docs/stage-control.md` | M1 状态机→M2 readSession 恢复→M3 preflight | `cd hephi && npx vitest run tests/control`（整目录，当前全绿基线） | cards/g-b3-3-stage-control-recovery.json |
-| G-B3-4 | `shadow-mode-parity` | `hephi/docs/enforcement-modes.md` 已实施部分 + `scripts/experimental/check-shadow-parity.mjs`（末次 1ea45b9） | M1 决策日志→M2 allowUnavailable→M3 parity 比对 | `node scripts/experimental/check-shadow-parity.mjs` 对已导出清单跑通；真实对照导出依赖宿主操作者，按 enforcement-modes.md:22-23 标注边界 | cards/g-b3-4-shadow-mode-parity.json |
-| G-B3-5 | `t21-retention-sweep` | 875624c（merge，p1 base `8b4740e`）：T01–T20 + T21 prep，eval/evidence/t21-prep/（含 SHA256SUMS 29 行） | M1 manifest→M2 全模扫描→M3 哈希登记 | `cd eval/evidence/t21-prep && shasum -a 256 -c SHA256SUMS`（exit 0，29 项全 OK） | cards/g-b3-5-t21-retention-sweep.json |
-| G-B3-6 | `ab-metrics-mechanical-plus` | `eval/tasks/hephi/ab-metrics-mechanical/reference.patch`（640 行，引入线 220e67e base `0b7bada`） | M1 指标定义→M2 机械统计→M3 报告 | 既有 hidden-test.sh 扩展（目标交付物自备 `--self-test` exit 0 模式） | cards/g-b3-6-ab-metrics-mechanical-plus.json |
+| # | taskId | 参考实现线与 baseSha 语义 | 里程碑 | 隐藏参考验收命令 | 锚点状态 | 卡文件 |
+| --- | --- | --- | --- | --- | --- | --- |
+| G-B3-1 | `evidence-verifier-a1out` | `hephi/src/control/evidence-verifier.ts`（末次 38f1cd7，父 790223e）；演化引证 9fa8598 线（base `2c603c6`） | M1 前台 kind 校验→M2 lossy 拒绝→M3 ready 映射 | `cd hephi && npx vitest run tests/control/evidence-verifier.test.ts` | **已执行**（该文件含于 §2-B 140 passed run 与 §2-F 整目录 498 passed，未单独运行） | cards/g-b3-1-evidence-verifier-a1out.json |
+| G-B3-2 | `activation-binding-policy` | `hephi/src/control/activation.ts`（末次 71abbe0；a2-final §6.1 引证 activation.ts:221-229 effective 计算） | M1 policy 计算→M2 环境开关→M3 合同冻结 | `cd hephi && npx vitest run tests/control/activation.test.ts tests/control/activation-marker.test.ts` | **已执行**（§2-G：exit 0，Test Files 2 passed，Tests 48 passed——task-31 补跑，覆盖 activation-marker，原 140 run 不含该文件） | cards/g-b3-2-activation-binding-policy.json |
+| G-B3-3 | `stage-control-recovery` | `hephi/src/control/stage-mount.ts`（基线导入 83a79c2）+ `hephi/docs/stage-control.md` | M1 状态机→M2 readSession 恢复→M3 preflight | `cd hephi && npx vitest run tests/control`（整目录） | **已执行**（§2-F：exit 0，Test Files 28 passed，Tests 498 passed——task-31 补跑全绿基线记录） | cards/g-b3-3-stage-control-recovery.json |
+| G-B3-4 | `shadow-mode-parity` | `hephi/docs/enforcement-modes.md` 已实施部分 + `scripts/experimental/check-shadow-parity.mjs`（末次 1ea45b9） | M1 决策日志→M2 allowUnavailable→M3 parity 比对 | `node scripts/experimental/check-shadow-parity.mjs` 对已导出清单跑通 | **已实现未执行**（脚本在库（1ea45b9），真实对照导出依赖宿主操作者，当前环境无该导出；边界按 enforcement-modes.md:22-23） | cards/g-b3-4-shadow-mode-parity.json |
+| G-B3-5 | `t21-retention-sweep` | 875624c（merge，p1 base `8b4740e`）：T01–T20 + T21 prep，eval/evidence/t21-prep/（含 SHA256SUMS 29 行） | M1 manifest→M2 全模扫描→M3 哈希登记 | `cd eval/evidence/t21-prep && shasum -a 256 -c SHA256SUMS` | **已执行**（§2-H：exit 0，29 项全 OK） | cards/g-b3-5-t21-retention-sweep.json |
+| G-B3-6 | `ab-metrics-mechanical-plus` | `eval/tasks/hephi/ab-metrics-mechanical/reference.patch`（640 行，引入线 220e67e base `0b7bada`） | M1 指标定义→M2 机械统计→M3 报告 | 公开面：目标交付物内建自测；隐藏面：hidden-test.sh 扩展由**独立验收方**在隔离面完成（B-03 责任划分，Worker 卡不含 hidden-test 写权限） | **待构造**（公开自测与隐藏扩展均为未来交付物，非已执行锚点） | cards/g-b3-6-ab-metrics-mechanical-plus.json |
 
 ### 不冻结（1 项待批）
 
@@ -51,19 +51,30 @@ reference.patch 行数实测（`wc -l`）：record-run 1121、daily-export-rewor
 
 ### B4 正式组
 
-- 按 legacy-system.md §1 约定**另选**，不在本清单；与 B2/B3 分组互不重叠由本清单 taskId 唯一性保证（全部 `g-*` 新前缀，不复用 site-pnl-diagnosis 22 卡 taskId，也不占用 b5-tasks.json 22 项）。
+- 按 legacy-system.md §1 约定**另选**，不在本清单。分组不重叠的依据**按内容与测试面**声明：B2 项的改动面/测试面在 hephi/scripts+probes、eval/record-run·daily-export·b7-matrix、scripts/host 部署链；B3 项在 hephi/src/control 三个控制模块（evidence-verifier/activation/stage-mount）、shadow parity 实验脚本、t21 归档清点、ab-metrics 指标——两集合无共享 paths/test 文件，且均不复用 site-pnl-diagnosis 22 卡的改动面；taskId 唯一性（`g-*` 新前缀，不占 b5-tasks.json 22 项）仅是辅助标识，不是不重叠的证明。
 
-## 2. 隐藏参考验收锚点实测记录（命令原文 + 退出码，2026-11-12）
+## 2. 隐藏参考验收锚点实测记录（命令原文 + 退出码 + 关键输出）
 
-| 命令原文 | 退出码 | 关键输出 |
+已执行锚点（A–H，2026-11-12，main 上实测）：
+
+| # | 命令原文 | 退出码 | 关键输出 |
+| --- | --- | --- | --- |
+| A | `node hephi/scripts/check-binding-host.mjs --self-test` | 0 | `SELF-TEST: PASS` |
+| B | `cd hephi && npx vitest run tests/probes tests/control/evidence-verifier.test.ts tests/control/activation.test.ts` | 0 | `Test Files 7 passed；Tests 140 passed (140)`（覆盖 probes + evidence-verifier + activation；**不含 activation-marker**） |
+| C | `node eval/record-run.mjs --self-test` | 0 | `SELF-TEST: PASS（26 条断言…）` |
+| D | `node eval/b7-matrix.mjs --self-test` | 0 | `PASS: 36 assertions (b7-matrix self-test)` |
+| F | `cd hephi && npx vitest run tests/control` | 0 | `Test Files 28 passed (28)；Tests 498 passed (498)`（task-31 补跑整目录全绿基线） |
+| G | `cd hephi && npx vitest run tests/control/activation.test.ts tests/control/activation-marker.test.ts` | 0 | `Test Files 2 passed (2)；Tests 48 passed (48)`（task-31 补跑，覆盖 activation-marker，修正原 140 声明） |
+| H | `cd eval/evidence/t21-prep && shasum -a 256 -c SHA256SUMS` | 0 | 29 行全 OK |
+
+（编号保留 A–H 习惯位；E 位无独立运行——evidence-verifier 单文件未单独跑过，只含于 B 与 F，§1 引用如实写"含于 B/F"。）
+
+未执行锚点（如实标注）：
+
+| 命令原文 | 状态 | 原因 |
 | --- | --- | --- |
-| `node hephi/scripts/check-binding-host.mjs --self-test` | 0 | `SELF-TEST: PASS` |
-| `node eval/record-run.mjs --self-test` | 0 | `SELF-TEST: PASS（26 条断言…）` |
-| `node eval/b7-matrix.mjs --self-test` | 0 | `PASS: 36 assertions (b7-matrix self-test)` |
-| `cd hephi && npx vitest run tests/probes tests/control/evidence-verifier.test.ts tests/control/activation.test.ts` | 0 | `Tests 140 passed (140)` |
-| `cd eval/evidence/t21-prep && shasum -a 256 -c SHA256SUMS` | 0 | 29 行全 OK |
-| `node scripts/experimental/check-shadow-parity.mjs` | **未执行**（依赖宿主操作者导出的真实对照清单，当前环境无该导出；G-B3-4 边界已在表中标注） | — |
-| `node scripts/host/test-deploy-hephi.mjs` | **未执行**（G-B2-6 锚点在卡冻结阶段仅登记；投跑前由 hidden-test 落地） | — |
+| `node scripts/experimental/check-shadow-parity.mjs` | 已实现未执行 | 依赖宿主操作者导出的真实对照清单，当前环境无该导出（G-B3-4 边界按 enforcement-modes.md:22-23） |
+| `node scripts/host/test-deploy-hephi.mjs` | 待构造 | G-B2-6 假宿主面锚点，投跑前由 hidden-test 落地 |
 
 ## 3. 卡草案说明
 
