@@ -67,7 +67,7 @@ describe('B2 ① plan width: PlanSummary files union + entries count (readPlan)'
 describe('B2 ② incremental change awareness: summarizeChanges from a real git diff', () => {
   it('counts modified, added and deleted files and their changed lines', async () => {
     const r = await gitRepo()
-    // modify src-a.js (2 removed, 1 added), add lib/new.js (3 lines), delete src-b.js (1 line)
+    // modify src-a.js (replace a1\na2\n with a1\n → 1 line removed), add lib/new.js (3 lines), delete src-b.js (1 line)
     await writeFile(join(r.dir, 'src-a.js'), 'a1\n')
     await mkdir(join(r.dir, 'lib'))
     await writeFile(join(r.dir, 'lib', 'new.js'), 'n1\nn2\nn3\n')
