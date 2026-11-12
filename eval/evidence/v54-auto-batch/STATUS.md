@@ -318,3 +318,30 @@ Teammate subagent 模型路由失败，Lead 直接执行全部 5 条加固。com
 
 ### B3 预算建议
 基于 T02 实测：单父任务 62.8K tokens / 2.5 min。B3 探查（12 任务）建议暂定 50 元（与 D-6 一致）。
+
+## 2026-11-12 B 线最终状态
+
+### SA Eval Timeout Bug（阻塞所有新任务投递）
+- 3085 重启后新 Issue eval 超时（7min41s → decision.kind=unavailable）
+- 根因：SA master session eval LLM 调用超时，非 hephi 问题
+- 影响：T02 新计量、T10 重跑、B3 探查均被阻塞
+- 文档：`eval/evidence/sa-eval-timeout-bug/report.md`（commit 9338309）
+- **需 DSH 团队修复**
+
+### B3/D-8 准备完成（但不可启动）
+- B3 冻结清单：遗留系统 6 + 大任务 6 = 12 父任务
+- D-8 建议：维持 −10pp，标注 6+6 功效不足
+- 前置条件 6 项均未满足（Dubbo prepare/base commit/m2 预热/SA bug/宿主稳定/预注册）
+- 文档：`eval/evidence/b3-d8-prep/report.md`（commit 486fbca）
+
+### 本轮总交付
+
+| commit | 内容 |
+|---|---|
+| e92a82e | Dubbo 检查配置落地 |
+| ecb022f | B0/T02 计量报告（62.8K tokens） |
+| 23c3d67 | GPT 5 条加固 |
+| 9338309 | SA eval timeout bug 诊断 |
+| 486fbca | B3/D-8 准备材料 |
+
+经验层 exp-064~085（89 行），validate-log OK。
