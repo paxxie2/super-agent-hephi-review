@@ -1,5 +1,6 @@
 import { defineTool, type PreToolDecision, type ToolExecution } from '@deepseek-ai/dsh-tools'
-import { incrementalSummaryLine, runCheck, type CheckTools, type NativeJobs } from './check-runner.js'
+import { incrementalSummaryLine, runCheck, type NativeJobs } from './check-runner.js'
+import { createNativeCheckExecutor } from './native-check-execution.js'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Context } from '@deepseek-ai/cordis'
 import { existsSync, readFileSync } from 'node:fs'
@@ -182,6 +183,9 @@ export function mountWorkerGate(
 
   let checking = false
   let internalCall: string | undefined
+  // The check runs a nested bash call through the installed host's invocation
+  // API; the adapter keeps the legacy single-call surface on older hosts.
+  const checkExecution = createNativeCheckExecutor({ ctx: agent.ctx, tools: agent.ctx.tools })
   const removeCheckGuard = scopeOnly ? () => {} : agent.ctx.tools.guard(e => {
     if (e.callId === internalCall) return
     if (checking && (MODIFYING_TOOLS.has(e.name) || DELEGATION_TOOLS.has(e.name) || e.name === 'hephi_check'
@@ -213,7 +217,7 @@ export function mountWorkerGate(
       try {
         const phase = (args as { phase?: unknown }).phase === 'red' ? 'red' as const : undefined
         const record = await runCheck({ stateDir, contract: await loadBoundActivation(), checkId: args.checkId, phase,
-          outer: execution, tools: agent.ctx.tools as unknown as CheckTools, jobs: nativeJobs(ctx), sessionCwd: agent.session.header.cwd,
+          outer: execution, tools: checkExecution, jobs: nativeJobs(ctx), sessionCwd: agent.session.header.cwd,
           allowOperatorResolutions: options.allowOperatorResolutions === true, retryLimit: options.retryLimit,
           sealSnapshot: options.sealSnapshot, internal: id => { internalCall = id } })
         const passed = record.status === 'passed' && record.exitCode === 0

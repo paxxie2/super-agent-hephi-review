@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { ActivationContract } from '../../src/control/activation.js'
 import type { VerificationCheck } from '../../src/contracts/checks.js'
 import {
-  CHECK_FAILURE_GUIDANCE, runCheck,
+  CHECK_FAILURE_GUIDANCE, retryFailureCount, runCheck,
   type CheckFailureRule, type NativeJobEvent, type NativeJobView, type NativeJobs, type CheckTools,
 } from '../../src/control/check-runner.js'
 import { checkRunDir, readRuns } from '../../src/control/check-store.js'
@@ -290,6 +290,55 @@ describe('native background check jobs', () => {
     })
     expect(changed.status).toBe('blocked')
     expect(changed.reason).toBe('source changed during check')
+  })
+})
+
+describe('host invocation preflight and identity', () => {
+  it('records an unavailable host invocation surface as check not started, without poisoning later checks', async () => {
+    const x = await setup()
+    const unavailable = await runCheck({
+      stateDir: x.stateDir, contract: x.c, checkId: 'build', outer: outer(), tools: {
+        checkAvailable: async () => { throw new Error('pipeline module unavailable') },
+        execute: async () => { throw new Error('unavailable host must not execute') },
+      },
+    })
+    expect(unavailable.status).toBe('blocked')
+    expect(unavailable.reason).toBe('check not started: pipeline module unavailable')
+    expect(retryFailureCount(await readRuns(x.stateDir, 'ticket-1'), 'build', x.c.contractHash)).toBe(0)
+    // The refusal is not an unfinished run: the same contract still starts a real check.
+    const passed = await x.execute(bashResult({
+      kind: 'foreground', cwd: x.r.dir, exitCode: 0, signal: null, timedOut: false, aborted: false, timeoutMs: 5000,
+      stdout: { text: 'ok\n', truncated: false }, stderr: { text: '', truncated: false },
+    }))
+    expect(passed.status).toBe('passed')
+  })
+
+  it('forwards the call id, root call, parent token, agent, step admission and signal to the host', async () => {
+    const x = await setup()
+    const parent = Symbol('outer-token')
+    const execution = {
+      ...outer(), token: parent, toolSet: { admitted: ['bash'] },
+    } as unknown as ToolExecution
+    let seen: Record<string, unknown> | undefined
+    const record = await runCheck({
+      stateDir: x.stateDir, contract: x.c, checkId: 'build', outer: execution, tools: {
+        execute: async received => {
+          seen = received as unknown as Record<string, unknown>
+          return {
+            isError: false, content: [], value: {
+              kind: 'foreground', cwd: x.r.dir, exitCode: 0, signal: null, timedOut: false, aborted: false, timeoutMs: 5000,
+              stdout: { text: 'ok\n', truncated: false }, stderr: { text: '', truncated: false },
+            },
+          } as never
+        },
+      },
+    })
+    expect(record.status).toBe('passed')
+    expect(seen).toMatchObject({
+      name: 'bash', callId: record.innerCallId, rootCallId: 'outer-check', parent,
+      agent: execution.agent, signal: execution.signal, toolSet: { admitted: ['bash'] },
+    })
+    expect(seen?.arguments).toMatchObject({ description: 'HEPHI build', workdir: record.cwd })
   })
 })
 
