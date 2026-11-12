@@ -406,3 +406,15 @@ checks 结构、验收项引用存在的 **test** check、重复 id；`acceptanc
    这是 A2 实验会话的统一要求，与本节两个检查一起构成验收前置；缺 PR 或 PR base/head 不匹配会在 ready 被拒。
 7. 该配置由 prepare 冻结进合同并纳入 `contractHash`；T11 下同 ticket 的 re-prepare 复用既有合同，
    修改检查配置不会自动生效，需要新合同（新 ticket，或人工移除合同后重新 prepare）。
+
+### Dubbo (apache/dubbo)
+
+| 字段 | 值 |
+| --- | --- |
+| `HEPHI_VERIFICATION_FILE` | `hephi/docs/project-config/dubbo-checks.json` |
+| `HEPHI_SOURCE_REPO` | `/Users/zm/workspace/app/dubbo`（本地 clone；远端 `https://github.com/apache/dubbo.git`） |
+| `HEPHI_ALLOWED_PATHS` | `["dubbo-common/**", "dubbo-rpc/**", "dubbo-remoting/**", "dubbo-config/**", "dubbo-metadata/**", "dubbo-registry/**", "dubbo-cluster/**", "dubbo-plugin/**", "**/pom.xml", "**/*.md"]` |
+
+检查配置：`dubbo-checks.json`（version 1，5 项）。其中 `dubbo-compile-core`（build, required）和 `dubbo-unit-core`（test, required）已有实测通过证据（P10，见 `eval/B7-data.md:21`）；`dubbo-static`、`dubbo-full-compile`、`dubbo-full-regression` 标 `required=false`，command/args 为占位符 `PENDING_OWNER_APPROVAL`（未编造）。
+
+注意：全仓离线编译当前失败（缺 `netty:3.2.10.Final`），需先预热 `~/.m2` 依赖才能启用 `dubbo-full-compile`。任务 base commit 待负责人指定（现有 `42bd630…` 仅为干净克隆 HEAD，非任务 base）。

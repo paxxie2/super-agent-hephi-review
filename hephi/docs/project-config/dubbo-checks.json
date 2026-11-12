@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "checks": [
+    {
+      "id": "dubbo-compile-core",
+      "kind": "build",
+      "purpose": "dubbo-common scope offline compile (verified P10)",
+      "command": "mvn",
+      "args": ["-o", "-B", "-pl", "dubbo-common", "-am", "-DskipTests", "compile"],
+      "cwd": ".",
+      "required": true,
+      "timeoutMs": 60000
+    },
+    {
+      "id": "dubbo-unit-core",
+      "kind": "test",
+      "purpose": "dubbo-common unit tests (verified P10: 37 tests/0 failures)",
+      "command": "mvn",
+      "args": ["-o", "-B", "-pl", "dubbo-common", "-Dtest=StringUtilsTest", "test"],
+      "cwd": ".",
+      "required": true,
+      "timeoutMs": 120000
+    },
+    {
+      "id": "dubbo-static",
+      "kind": "build",
+      "purpose": "Static analysis (checkstyle/spotbugs); command pending owner approval",
+      "command": "PENDING_OWNER_APPROVAL",
+      "args": [],
+      "cwd": ".",
+      "required": false,
+      "timeoutMs": 60000
+    },
+    {
+      "id": "dubbo-full-compile",
+      "kind": "build",
+      "purpose": "Full repo offline compile (currently fails: missing netty; requires dependency warmup)",
+      "command": "PENDING_OWNER_APPROVAL",
+      "args": [],
+      "cwd": ".",
+      "required": false,
+      "timeoutMs": 300000
+    },
+    {
+      "id": "dubbo-full-regression",
+      "kind": "test",
+      "purpose": "Full regression suite; command and scope pending owner approval",
+      "command": "PENDING_OWNER_APPROVAL",
+      "args": [],
+      "cwd": ".",
+      "required": false,
+      "timeoutMs": 600000
+    }
+  ]
+}
