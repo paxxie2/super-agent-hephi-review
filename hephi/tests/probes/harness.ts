@@ -105,16 +105,20 @@ export const snapshot = (events: SessionSnapshot['events'], id = SESSION, inheri
  * (B1 + B2 delivered), so a matching record is written before verification; deployment-level
  * failures of the gate itself are covered by tests/control/binding-record.test.ts.
  */
-async function writeBindingRecordFixture(p: Project, contract: ActivationContract): Promise<void> {
+async function writeBindingRecordFixture(p: Project, contract: ActivationContract, overrideKind?: 'foreground' | 'background' | 'promoted'): Promise<void> {
   const needed = new Set(contract.verification.checks.filter(check => check.required).map(check => check.id))
   for (const item of contract.task?.acceptance ?? []) needed.add(item.check)
   const records = await readRuns(p.stateDir, contract.ticketId)
   const record = [...records].reverse().find(item => needed.has(item.checkId)
     && item.contractHash === contract.contractHash && item.status === 'passed' && item.exitCode === 0)
   if (record === undefined || record.before.headCommit === undefined) return
-  const execution = record.jobId === undefined
-    ? { kind: 'foreground' as const, exitCode: record.exitCode!, toolCallId: record.innerCallId }
-    : { kind: 'background' as const, jobId: record.jobId, toolCallId: record.innerCallId }
+  const execution = overrideKind !== undefined
+    ? (overrideKind === 'foreground'
+        ? { kind: 'foreground' as const, exitCode: record.exitCode!, toolCallId: record.innerCallId }
+        : { kind: overrideKind, jobId: record.jobId ?? 'fixture-job-id', toolCallId: record.innerCallId })
+    : record.jobId === undefined
+      ? { kind: 'foreground' as const, exitCode: record.exitCode!, toolCallId: record.innerCallId }
+      : { kind: 'background' as const, jobId: record.jobId, toolCallId: record.innerCallId }
   await mkdir(join(p.stateDir, 'binding'), { recursive: true })
   await writeFile(join(p.stateDir, 'binding', `${contract.ticketId}.json`), JSON.stringify({
     version: 1,

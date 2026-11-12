@@ -1,10 +1,10 @@
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ActivationContract } from '../../src/control/activation.js'
 import type { VerificationCheck } from '../../src/contracts/checks.js'
 import {
@@ -651,3 +651,29 @@ describe('B2 binding record: ready gate (fixture integration)', () => {
     expect(text).not.toContain('ready.binding-record')
   })
 })
+
+  it('binding off: readBindingRecord is never called even with bad records at all three lookup paths', async () => {
+    const x = await gateSetup()
+    // Place a malformed record at the default path (<stateDir>/binding/<ticket>.json)
+    const defaultPath = join(x.stateDir, 'binding', x.contract.ticketId + '.json')
+    await mkdir(dirname(defaultPath), { recursive: true })
+    await writeFile(defaultPath, '{invalid json')
+    // Place another bad record at an explicit config path
+    const configPath = join(x.stateDir, 'config-binding.json')
+    await writeFile(configPath, '{also invalid')
+
+    const spyModule = await import('../../src/control/binding-record.js')
+    const spy = vi.spyOn(spyModule, 'readBindingRecord')
+
+    const off = createEvidenceVerifier({ stateDir: x.stateDir, bindingRecordPath: configPath })
+    expect(await off(x.contract, readyReport(x.r.dir))).toEqual({ ok: true })
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
+  it('readyRule classifies binding-record deny even when reason path contains rate-limit text', async () => {
+    // The reason string includes the file path; if that path happens to contain
+    // "rate limit", the old heuristic would misclassify as ready.github-unavailable.
+    const { readyRule } = await import('../../src/control/evidence-verifier.js')
+    expect(readyRule('ready.binding-record: /some/rate limit/path/record.json: ticket mismatch')).toBe('ready.binding-record')
+  })

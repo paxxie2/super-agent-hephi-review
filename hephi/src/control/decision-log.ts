@@ -32,6 +32,11 @@ export type DecisionLogInput = {
   planFiles?: number
   changedFiles?: number
   ratio?: number
+  /**
+   * v5.4 B2 observability: unknown fields from the host binding record are logged here
+   * (rule `binding-record.warnings`). Additive; never changes the ready verdict.
+   */
+  warnings?: string[]
 }
 
 export type DecisionLogResult = { ok: true; seq: number } | { ok: false; logError: string }

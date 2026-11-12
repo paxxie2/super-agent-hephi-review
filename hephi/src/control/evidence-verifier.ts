@@ -414,17 +414,17 @@ async function bindingRecordDenial(input: {
   baseSha: string
   usedRuns: readonly CheckRunRecord[]
   nativeExecutions: ReadonlyArray<{ innerCallId: string; kind?: NativeExecutionKind }>
-}): Promise<string | undefined> {
+}): Promise<{ problem: string | undefined; warnings: string[] }> {
   const lookup = await readBindingRecord({
     stateDir: input.stateDir,
     ticketId: input.ticketId,
     configuredPath: input.bindingRecordPath,
   })
   if (!lookup.found) {
-    return `ready.binding-record: binding is on but no binding record is available: ${lookup.path} (${lookup.problem})`
+    return { problem: `ready.binding-record: binding is on but no binding record is available: ${lookup.path} (${lookup.problem})`, warnings: [] }
   }
   const validation = validateBindingRecord(lookup.value)
-  if (!validation.ok) return `ready.binding-record: ${lookup.path}: ${validation.problem}`
+  if (!validation.ok) return { problem: `ready.binding-record: ${lookup.path}: ${validation.problem}`, warnings: [] }
   const problem = bindingRecordProblem(validation.record, {
     ticketId: input.ticketId,
     sessionId: input.sessionId,
@@ -433,7 +433,7 @@ async function bindingRecordDenial(input: {
     usedRuns: input.usedRuns,
     nativeExecutions: input.nativeExecutions,
   })
-  return problem === undefined ? undefined : `ready.binding-record: ${lookup.path}: ${problem}`
+  return { problem: problem === undefined ? undefined : `ready.binding-record: ${lookup.path}: ${problem}`, warnings: validation.warnings ?? [] }
 }
 
 export function createEvidenceVerifier(options: {
@@ -599,7 +599,7 @@ export function createEvidenceVerifier(options: {
         // B2: binding effective means the host must also deliver the four-way delivery binding
         // record (Ticket ↔ Session ↔ accepted execution ↔ final commit). Absence or a mismatch
         // is fail-closed; a binding-off deployment never reaches this branch and reads nothing.
-        const bindingProblem = await bindingRecordDenial({
+        const { problem: bindingProblem, warnings: bindingWarnings } = await bindingRecordDenial({
           stateDir: options.stateDir,
           bindingRecordPath: options.bindingRecordPath,
           ticketId: contract.ticketId,
@@ -610,6 +610,26 @@ export function createEvidenceVerifier(options: {
           nativeExecutions,
         })
         if (bindingProblem) throw new Error(bindingProblem)
+        // Warnings from the binding record validation are observability-only; they never
+        // change the ready verdict. Log them as an allow audit row so operators can see
+        // that the host is sending fields we do not yet consume.
+        if (bindingWarnings.length > 0) {
+          try {
+            await logDecision(options.stateDir, {
+              ticketId: contract.ticketId,
+              sessionId,
+              callId: String(execution.callId),
+              tool: 'orchestrator_report',
+              mode: 'enforce',
+              effectiveDecision: 'allow',
+              wouldDecision: 'allow',
+              rule: 'binding-record.warnings',
+              reason: `host binding record contains ${bindingWarnings.length} unknown field(s): ${bindingWarnings.join(', ')}`,
+              contractHash: contract.contractHash,
+              warnings: bindingWarnings,
+            })
+          } catch { /* observation-only */ }
+        }
       }
       // C3: approvals are verified against the PR reviews; the same PR must be open and
       // point at the local HEAD. A contract with approvers therefore needs a PR number
@@ -657,24 +677,26 @@ export function createEvidenceVerifier(options: {
           throw new Error(`plan.outside-plan: changed files outside the declared plan: ${samplePlanFiles(outsidePlan)}`)
         }
         // v5.4 §2 ② (record-only): plan width is written as its own allow audit row so P3
-        // can report plan coverage. It is not part of this verification's result, and a
-        // log failure is swallowed by logDecision, so no ready verdict can change here.
-        const width = planWidthOf(plan.files.length, before.changedFiles.length)
-        await logDecision(options.stateDir, {
-          ticketId: contract.ticketId,
-          sessionId,
-          callId: String(execution.callId),
-          tool: 'orchestrator_report',
-          mode: 'enforce',
-          effectiveDecision: 'allow',
-          wouldDecision: 'allow',
-          rule: 'plan.width',
-          reason: `plan covers ${width.planFiles} files; final diff changes ${width.changedFiles} files (ratio ${width.ratio})`,
-          contractHash: contract.contractHash,
-          planFiles: width.planFiles,
-          changedFiles: width.changedFiles,
-          ratio: width.ratio,
-        })
+        // can report plan coverage. It is not part of this verification's result.
+        // Fault-isolated: an exception in the observation must never change the ready verdict.
+        try {
+          const width = planWidthOf(plan.files.length, before.changedFiles.length)
+          await logDecision(options.stateDir, {
+            ticketId: contract.ticketId,
+            sessionId,
+            callId: String(execution.callId),
+            tool: 'orchestrator_report',
+            mode: 'enforce',
+            effectiveDecision: 'allow',
+            wouldDecision: 'allow',
+            rule: 'plan.width',
+            reason: `plan covers ${width.planFiles} files; final diff changes ${width.changedFiles} files (ratio ${width.ratio})`,
+            contractHash: contract.contractHash,
+            planFiles: width.planFiles,
+            changedFiles: width.changedFiles,
+            ratio: width.ratio,
+          })
+        } catch { /* observation-only: swallow; ready verdict unaffected */ }
       }
       return { ok: true }
     } catch (e) { return { ok: false, reason: e instanceof Error ? e.message : String(e) } }
@@ -704,13 +726,14 @@ export function createEvidenceVerifier(options: {
 
 /** Stable rule ids for ready denials; P3 aggregates by rule. */
 export function readyRule(reason: string): string {
-  // T14/AT-43: a GitHub rate-limit failure is environment unavailability, not a failed
-  // check; give it its own rule so P3 does not count it as an evidence/check failure.
-  if (/rate limit|API rate limit exceeded/i.test(reason)) return 'ready.github-unavailable'
-  // C3: waiting for a human approval is its own denial class (a wait state, not a failed check).
+  // Structured rule prefixes first: a reason that already carries an explicit rule name
+  // must not be reclassified by text heuristics (e.g. a path containing "rate limit").
   if (reason.includes('ready.snapshot-tampered')) return 'ready.snapshot-tampered'
   if (reason.includes('ready.binding-record')) return 'ready.binding-record'
   if (reason.includes('ready.awaiting-approval')) return 'ready.awaiting-approval'
+  // T14/AT-43: a GitHub rate-limit failure is environment unavailability, not a failed
+  // check; give it its own rule so P3 does not count it as an evidence/check failure.
+  if (/rate limit|API rate limit exceeded/i.test(reason)) return 'ready.github-unavailable'
   // A1-BIND/A1-OUT: an unreadable Job terminal state or unverifiable output is not a
   // generic binding mismatch; keep them distinguishable for P3 aggregation.
   if (reason.includes('Job terminal state is unavailable')) return 'ready.job-unavailable'

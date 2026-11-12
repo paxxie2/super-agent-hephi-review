@@ -176,15 +176,19 @@ function neededCheckIds(c: ActivationContract): Set<string> {
  * mismatched record, binding-off zero regression) is covered by
  * tests/control/binding-record.test.ts.
  */
-async function writeBindingRecordFixture(stateDir: string, contract: ActivationContract): Promise<void> {
+async function writeBindingRecordFixture(stateDir: string, contract: ActivationContract, overrideKind?: 'foreground' | 'background' | 'promoted'): Promise<void> {
   const needed = neededCheckIds(contract)
   const records = await readRuns(stateDir, contract.ticketId)
   const record = [...records].reverse().find(item => needed.has(item.checkId)
     && item.contractHash === contract.contractHash && item.status === 'passed' && item.exitCode === 0)
   if (record === undefined || record.before.headCommit === undefined) return
-  const execution = record.jobId === undefined
-    ? { kind: 'foreground' as const, exitCode: record.exitCode!, toolCallId: record.innerCallId }
-    : { kind: 'background' as const, jobId: record.jobId, toolCallId: record.innerCallId }
+  const execution = overrideKind !== undefined
+    ? (overrideKind === 'foreground'
+        ? { kind: 'foreground' as const, exitCode: record.exitCode!, toolCallId: record.innerCallId }
+        : { kind: overrideKind, jobId: record.jobId ?? 'fixture-job-id', toolCallId: record.innerCallId })
+    : record.jobId === undefined
+      ? { kind: 'foreground' as const, exitCode: record.exitCode!, toolCallId: record.innerCallId }
+      : { kind: 'background' as const, jobId: record.jobId, toolCallId: record.innerCallId }
   await mkdir(join(stateDir, 'binding'), { recursive: true })
   await writeFile(join(stateDir, 'binding', `${contract.ticketId}.json`), JSON.stringify({
     version: 1,
