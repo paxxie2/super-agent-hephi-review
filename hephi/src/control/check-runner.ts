@@ -3,8 +3,9 @@ import { join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { ToolExecution, ToolExecutionInput, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+import type { ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import { verificationOf, type ActivationContract } from './activation.js'
+import type { NativeCheckInput } from './native-check-execution.js'
 import { gitFingerprint, sha256, type RepositoryFingerprint } from '../verification/fingerprint.js'
 import { clean, hasCommit, normalizeRepository, remoteRepository } from './repository.js'
 import { inScope } from './discipline.js'
@@ -70,7 +71,17 @@ export function incrementalSummaryLine(record: { incrementalChanges?: Partial<In
   return `${scope}: ${delta.files} files, +${delta.addedLines}/-${delta.removedLines}${seconds}`
 }
 
-export type CheckTools = { execute(input: ToolExecutionInput): Promise<ToolExecutionResult> }
+export type CheckTools = {
+  /** Nested invocation bound to the installed host's API (legacy or staged). */
+  execute(input: NativeCheckInput): Promise<ToolExecutionResult>
+  /**
+   * Optional preflight for the host invocation surface. It runs before the run
+   * record is written, so an unavailable surface is recorded as a start-up
+   * refusal (`check not started`) instead of a `running` run that hardens into
+   * `unknown` and blocks every later check.
+   */
+  checkAvailable?: () => Promise<void>
+}
 
 /** Public projection of one native background Job; only what a check reads. */
 export type NativeJobView = {
@@ -506,6 +517,19 @@ export async function runCheck(options: {
     return record
   }
   record.cwd = cwd
+  // The host invocation surface is resolved before the run starts. A host that
+  // cannot provide it refuses the check like an out-of-directory start-up
+  // failure; recording `running` here would leave an `unknown` run that blocks
+  // every later check under this contract.
+  try {
+    await options.tools.checkAvailable?.()
+  } catch (error) {
+    record.status = 'blocked'
+    record.reason = `check not started: ${error instanceof Error ? error.message : String(error)}`
+    record.finishedAt = new Date().toISOString()
+    await saveRun(stateDir, record)
+    return record
+  }
   await saveRun(stateDir, record)
   const collection = startJobCollection(options.jobs, record.sessionId)
   let terminal = false
@@ -514,8 +538,12 @@ export async function runCheck(options: {
     // The contract deadline covers the whole native execution, including a Job
     // that the host promotes or starts in the background.
     const deadline = Date.now() + check.timeoutMs
+    // The host mints the nested token from `parent`; the outer step admission
+    // (`toolSet`) is forwarded so the nested call resolves the same tool set.
+    const toolSet = (outer as ToolExecution & { readonly toolSet?: unknown }).toolSet
     const result = await options.tools.execute({ name: 'bash', callId: innerCallId as never, parent: outer.token,
       rootCallId: outer.callId, agent: outer.agent, signal: outer.signal,
+      ...(toolSet === undefined ? {} : { toolSet }),
       arguments: { description: `HEPHI ${check.id}`, command, workdir: cwd, timeoutMs: check.timeoutMs } })
     const value = result.value as { kind?: string; jobId?: string; exitCode?: number; timedOut?: boolean; aborted?: boolean; signal?: string | null;
       stdout?: { text?: string; truncated?: boolean }; stderr?: { text?: string; truncated?: boolean } } | undefined
