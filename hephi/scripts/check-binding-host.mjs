@@ -596,6 +596,10 @@ function textOfMessage(message) {
  * 导致 >5 条 bash result 的真实快照即使全部结构化也恒判 fail（R1 验收硬前置缺陷，task-38 修复）。
  * `samples` 仅保留前 5 条供人读，**不参与判定**。
  */
+function hasOwnField(value, key) {
+  return value !== null && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, key)
+}
+
 function h2Sample(event) {
   const message = event.data.message
   const text = textOfMessage(message)
@@ -604,9 +608,14 @@ function h2Sample(event) {
     callId: maskId(message.toolCallId),
     isError: message.isError ?? null,
     hasStructuredValue: Boolean(value && typeof value === 'object' && typeof value.kind === 'string'),
-    kind: value?.kind ?? null,
-    exitCodeField: value?.exitCode ?? null,
-    jobIdField: value?.jobId ?? null,
+    // Keep the raw values: the verdict must distinguish "field absent" from an explicit
+    // JSON null. `?? null` here would collapse both and let an explicit
+    // `{"kind":"promoted","jobId":"j","exitCode":null}` pass H2 (GPT-B3).
+    kind: value?.kind,
+    exitCodeField: value?.exitCode,
+    exitCodePresent: hasOwnField(value, 'exitCode'),
+    jobIdField: value?.jobId,
+    jobIdPresent: hasOwnField(value, 'jobId'),
     textExitCodeMarker: /\[exit code: -?\d+\]/.exec(text)?.[0] ?? null,
     promotedMarker: /\[still running after \d+ms; moved to background job [^\]]+\]/.exec(text)?.[0] ?? null,
     truncatedMarker: text.includes('[output truncated') ? '[output truncated' : null,
@@ -618,11 +627,16 @@ function h2Sample(event) {
 function h2CriterionProblem(sample) {
   if (!sample.hasStructuredValue) return 'missing-structured-value'
   if (sample.kind === 'foreground') {
+    // Foreground must carry an integer exit code; an explicit null is not an integer.
     return Number.isInteger(sample.exitCodeField) ? null : 'foreground-without-integer-exit-code'
   }
   if (sample.kind === 'promoted' || sample.kind === 'background') {
-    if (typeof sample.jobIdField !== 'string' || sample.jobIdField.length === 0) return `${sample.kind}-without-jobId`
-    if (sample.exitCodeField !== undefined && sample.exitCodeField !== null) return `${sample.kind}-with-final-exit-code`
+    if (!sample.jobIdPresent || typeof sample.jobIdField !== 'string' || sample.jobIdField.length === 0) {
+      return `${sample.kind}-without-jobId`
+    }
+    // The frozen contract says a promoted/background result OMITS the final exit code.
+    // Any present field (including an explicit JSON null) violates it; only field absence passes.
+    if (sample.exitCodePresent) return `${sample.kind}-with-final-exit-code`
     return null
   }
   return 'unknown-kind'
@@ -1156,6 +1170,27 @@ function selfTest(asJson) {
   record('回归（task-38）：promoted 缺 jobId → H2 fail',
     h2PromotedNoJob.status === 'fail' && h2PromotedNoJob.evidence?.problemCounts?.['promoted-without-jobId'] === 1,
     JSON.stringify(h2PromotedNoJob.evidence?.problemCounts))
+
+  // GPT-B3（task-43）：显式 exitCode:null 与字段缺席必须可区分；非前台分支"字段存在即 fail"。
+  const h2PromotedNull = h2Full([{ kind: 'promoted', jobId: 'bash-null-1', exitCode: null }])
+  record('负例（GPT-B3）：promoted 显式 exitCode:null → H2 fail（字段存在即违规）',
+    h2PromotedNull.status === 'fail' && h2PromotedNull.evidence?.problemCounts?.['promoted-with-final-exit-code'] === 1,
+    JSON.stringify({ status: h2PromotedNull.status, problems: h2PromotedNull.evidence?.problemCounts }))
+
+  const h2BackgroundNull = h2Full([{ kind: 'background', jobId: 'bash-null-2', exitCode: null }])
+  record('负例（GPT-B3）：background 显式 exitCode:null → H2 fail（字段存在即违规）',
+    h2BackgroundNull.status === 'fail' && h2BackgroundNull.evidence?.problemCounts?.['background-with-final-exit-code'] === 1,
+    JSON.stringify({ status: h2BackgroundNull.status, problems: h2BackgroundNull.evidence?.problemCounts }))
+
+  const h2PromotedAbsent = h2Full([{ kind: 'promoted', jobId: 'bash-null-3' }])
+  record('负例（GPT-B3）：promoted 无 exitCode 字段 → H2 pass（缺席才是合法编码）',
+    h2PromotedAbsent.status === 'pass' && h2PromotedAbsent.evidence?.samples?.[0]?.exitCodePresent === false,
+    JSON.stringify({ status: h2PromotedAbsent.status, sample: h2PromotedAbsent.evidence?.samples?.[0] }))
+
+  const h2ForegroundNull = h2Full([{ kind: 'foreground', exitCode: null }])
+  record('负例（GPT-B3）：foreground 显式 exitCode:null → H2 fail（不是整数）',
+    h2ForegroundNull.status === 'fail' && h2ForegroundNull.evidence?.problemCounts?.['foreground-without-integer-exit-code'] === 1,
+    JSON.stringify({ status: h2ForegroundNull.status, problems: h2ForegroundNull.evidence?.problemCounts }))
 
   const h2PromotedOk = h2Full([foregroundValue(0), promotedValue('bash-3')])
   record('回归（task-38）：foreground 合规 + promoted 合规（jobId、无最终 exitCode）→ H2 pass',

@@ -323,5 +323,27 @@ describe('H2 full-set structured-value statistics (task-38)', () => {
     expect(ring.evidence?.uncoveredKinds).toEqual(['background', 'promoted'])
     expect(String(ring.notes)).toContain('未覆盖分支')
   })
+
+  // GPT-B3 (task-43): an explicit `exitCode: null` must not be indistinguishable from an
+  // absent field. The contract says background/promoted results OMIT the final exit code,
+  // so any present field (including JSON null) fails; only absence passes.
+  it('distinguishes an explicit exitCode:null from an absent exitCode (fails the present one)', () => {
+    const promotedNull = h2([{ kind: 'promoted', jobId: 'bash-null', exitCode: null }])
+    expect(promotedNull.status).toBe('fail')
+    expect(promotedNull.evidence?.problemCounts?.['promoted-with-final-exit-code']).toBe(1)
+    expect(promotedNull.evidence?.samples?.[0]?.exitCodePresent).toBe(true)
+
+    const backgroundNull = h2([{ kind: 'background', jobId: 'bash-null', exitCode: null }])
+    expect(backgroundNull.status).toBe('fail')
+    expect(backgroundNull.evidence?.problemCounts?.['background-with-final-exit-code']).toBe(1)
+
+    const promotedAbsent = h2([{ kind: 'promoted', jobId: 'bash-absent' }])
+    expect(promotedAbsent.status).toBe('pass')
+    expect(promotedAbsent.evidence?.samples?.[0]?.exitCodePresent).toBe(false)
+
+    const foregroundNull = h2([{ kind: 'foreground', exitCode: null }])
+    expect(foregroundNull.status).toBe('fail')
+    expect(foregroundNull.evidence?.problemCounts?.['foreground-without-integer-exit-code']).toBe(1)
+  })
 })
 
