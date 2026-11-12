@@ -8,7 +8,9 @@ import { runFeishu } from '../src/sources/feishu-loops.ts'
 import { commentTrigger, githubAddress, githubChannel, issueTrigger, type GithubComment, type GithubIssue } from '../src/sources/github-trigger.ts'
 import { claimPull, observePull, pullEndNotices, pullOf, ticketBranch, type Pull } from '../src/sources/github-pull.ts'
 import { ciCounts, ciFact, ciSummary } from '../src/sources/github-read.ts'
-import { apply as applyGithub, githubKind, pollFailure, pollRound } from '../src/sources/github.ts'
+import { apply as applyGithub, githubKind, GithubWebhookSupervisor, pollFailure, pollRound } from '../src/sources/github.ts'
+import { startGithubWebhook, webhookSettings, WEBHOOK_PATH, WEBHOOK_PORT_VARIABLE, WEBHOOK_SECRET_VARIABLE }
+  from '../src/sources/github-webhook.ts'
 import { pollThreads as pollGithubThreads } from '../src/sources/github.ts'
 import { SourceRegistry } from '../src/sources/registry.ts'
 import { cursorAt, POLL_HORIZON_MS } from '../src/sources/poll.ts'
@@ -22,6 +24,9 @@ import { SetupError, type SetupProblem } from '../src/setup.ts'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createHmac } from 'node:crypto'
+import { createServer as createHttpServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 
 const MEMBER = 'ou_alice'
 function host(overrides: Partial<SourceContextDeps> = {}) {
@@ -1473,5 +1478,264 @@ describe('multiple GitHub repositories', () => {
     h.store.close()
 
 
+  })
+})
+
+describe('GitHub issue webhook', () => {
+  const SECRET = 'dsh-webhook-test-secret'
+  /** Makes the GitHub Source watch `widgets` and observe new Issues, with any extra configuration. */
+  function observe(h: ReturnType<typeof host>, config: Record<string, unknown> = {}): void {
+    const settings = h.store.settings()
+    h.store.saveSettings({ ...settings, sources: { ...settings.sources,
+      github: { enabled: true, config: { repository: 'acme/widgets', cli: 'gh', observeIssues: true, ...config } } } })
+  }
+  /** An Issue as the webhook payload carries it. */
+  const issueOf = (number: number, repository = 'acme/widgets', fields: Partial<GithubIssue> = {}): GithubIssue => ({
+    id: 1000 + number, number, title: 'Login fails', body: 'details on Safari', state: 'open', created_at: '2026-09-09T00:00:00Z',
+    html_url: `https://github.com/${repository}/issues/${number}`, user: { login: 'alice', type: 'User' }, ...fields })
+  /** The delivery body and headers GitHub sends; `secret` signs it with another secret and `signature` spoofs the header. */
+  function delivery(payload: unknown, options: { secret?: string; signature?: string; event?: string } = {}): { body: string; headers: Record<string, string> } {
+    const body = JSON.stringify(payload)
+    return { body, headers: { 'content-type': 'application/json', 'x-github-event': options.event ?? 'issues',
+      'x-hub-signature-256': options.signature ?? `sha256=${createHmac('sha256', options.secret ?? SECRET).update(body).digest('hex')}` } }
+  }
+  const opened = (number: number, repository = 'acme/widgets', fields: Partial<GithubIssue> = {}) =>
+    delivery({ action: 'opened', repository: { full_name: repository }, issue: issueOf(number, repository, fields) })
+  async function post(port: number, target: { body: string; headers: Record<string, string> }, path = WEBHOOK_PATH): Promise<Response> {
+    return fetch(`http://127.0.0.1:${port}${path}`, { method: 'POST', headers: target.headers, body: target.body })
+  }
+  async function freePort(): Promise<number> {
+    const server = createHttpServer()
+    await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
+    const port = (server.address() as AddressInfo).port
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    return port
+  }
+  /** Runs one polling round in which the notification stream reports `issue` and the repository-wide streams are quiet. */
+  function pollIssue(h: ReturnType<typeof host>, issue: GithubIssue): void {
+    h.store.set('github-since', '2026-09-08T00:00:00.000Z')
+    github(h, { notifications: [{ id: `n${issue.number}`, updated_at: issue.created_at, reason: 'mention',
+      repository: { full_name: 'acme/widgets' },
+      subject: { url: `https://api.github.com/repos/acme/widgets/issues/${issue.number}`, type: 'Issue', title: issue.title } }],
+      issues: [], [`issues/${issue.number}`]: issue, [`issues/${issue.number}/comments`]: [], [`pulls/${issue.number}`]: openPull(issue.number) })
+  }
+
+  it('takes a signed issues.opened delivery as the Trigger polling reads, and keeps one Trigger when the poll repeats it', async () => {
+    const h = host()
+    observe(h)
+    const webhook = await startGithubWebhook({ context: h, port: 0, secret: SECRET })
+    try {
+      const response = await post(webhook.port, opened(12))
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({ ok: true, result: 'stored', triggerId: key('github-issue', '12') })
+      expect(h.receive).toHaveBeenCalledOnce()
+      expect(h.receive.mock.calls[0]![0]).toMatchObject({ id: key('github-issue', '12'), source: 'github',
+        threads: [{ source: 'github', id: '12' }], actor: { source: 'github', id: 'alice' }, human: true, at: '2026-09-09T00:00:00Z',
+        text: 'Login fails\n\ndetails on Safari', url: 'https://github.com/acme/widgets/issues/12',
+        channel: { source: 'github', thread: 'github:12', address: { number: '12', repository: 'acme/widgets' } },
+        meta: { number: 12, isPr: false, kind: 'issue', repository: 'acme/widgets' } })
+      // The poll produces the same Trigger ID, so the Issue is stored once.
+      pollIssue(h, issueOf(12))
+      await pollRound(h)
+      expect(h.receive).toHaveBeenCalledTimes(2)
+      expect(h.store.read.threadTriggers('github:12', 10).map(item => item.id)).toEqual([key('github-issue', '12')])
+    } finally { await webhook.close(); h.store.close() }
+  })
+  it('keeps Issues of the same number in two watched repositories apart, as polling does', async () => {
+    const h = host()
+    Object.assign(h.deployment, { repositories: ['acme/widgets', 'acme/gadgets'] })
+    observe(h, { additionalRepositories: [{ repository: 'acme/gadgets' }] })
+    const webhook = await startGithubWebhook({ context: h, port: 0, secret: SECRET })
+    try {
+      expect((await post(webhook.port, opened(71))).status).toBe(200)
+      expect((await post(webhook.port, opened(71, 'acme/gadgets'))).status).toBe(200)
+    } finally { await webhook.close() }
+    const taken = h.receive.mock.calls.map(([trigger]) => trigger)
+    expect(taken.map(trigger => trigger.id)).toEqual([key('github-issue', '71'), key('acme/gadgets', key('github-issue', '71'))])
+    expect(taken.map(trigger => trigger.threads[0]!.id)).toEqual(['71', 'acme/gadgets:71'])
+    expect(taken.map(trigger => trigger.meta.repository)).toEqual(['acme/widgets', 'acme/gadgets'])
+    expect(h.store.read.threadTriggers('github:71', 10)).toHaveLength(1)
+    expect(h.store.read.threadTriggers('github:acme/gadgets:71', 10)).toHaveLength(1)
+    h.store.close()
+  })
+  it('rejects a delivery whose signature does not match the secret before it parses the body', async () => {
+    const h = host()
+    observe(h)
+    const webhook = await startGithubWebhook({ context: h, port: 0, secret: SECRET })
+    try {
+      expect((await post(webhook.port, delivery({ action: 'opened', repository: { full_name: 'acme/widgets' }, issue: issueOf(12) },
+        { secret: 'another-secret' }))).status).toBe(401)
+      expect((await post(webhook.port, { body: opened(12).body, headers: { 'x-github-event': 'issues' } })).status).toBe(401)
+      // A body that cannot be parsed still fails on its signature first; a correctly signed one reaches the parser.
+      const malformed = '{ "action": "opened", '
+      const signature = (secret: string): string => `sha256=${createHmac('sha256', secret).update(malformed).digest('hex')}`
+      expect((await post(webhook.port, { body: malformed, headers: { 'x-github-event': 'issues', 'x-hub-signature-256': signature('another-secret') } })).status).toBe(401)
+      expect((await post(webhook.port, { body: malformed, headers: { 'x-github-event': 'issues', 'x-hub-signature-256': signature(SECRET) } })).status).toBe(400)
+      expect(h.receive).not.toHaveBeenCalled()
+    } finally { await webhook.close(); h.store.close() }
+  })
+  it('ignores deliveries while the Source is off and closes the loopback port until the Source is on again', async () => {
+    const h = host()
+    observe(h)
+    const port = await freePort()
+    const supervisor = new GithubWebhookSupervisor(h, { env: { [WEBHOOK_PORT_VARIABLE]: String(port), [WEBHOOK_SECRET_VARIABLE]: SECRET } })
+    await supervisor.sync()
+    try {
+      expect(supervisor.port).toBe(port)
+      const settings = h.store.settings()
+      h.store.saveSettings({ ...settings, sources: { ...settings.sources, github: { enabled: false, config: {} } } })
+      expect(await (await post(port, opened(12))).json()).toMatchObject({ ignored: 'source_off' })
+      expect(h.receive).not.toHaveBeenCalled()
+      await supervisor.sync()
+      expect(supervisor.port).toBeUndefined()
+      await expect(post(port, opened(12))).rejects.toThrow()
+      observe(h)
+      await supervisor.sync()
+      expect(supervisor.port).toBe(port)
+    } finally { await supervisor.close(); h.store.close() }
+  })
+  it('ignores an Issue from a repository the Source does not watch', async () => {
+    const h = host()
+    observe(h)
+    const webhook = await startGithubWebhook({ context: h, port: 0, secret: SECRET })
+    try {
+      expect(await (await post(webhook.port, opened(9, 'acme/other'))).json()).toMatchObject({ ignored: 'repository_not_configured' })
+      expect(h.receive).not.toHaveBeenCalled()
+    } finally { await webhook.close(); h.store.close() }
+  })
+  it('answers ping for connectivity and serves only POST /github/issues', async () => {
+    const h = host()
+    observe(h)
+    const webhook = await startGithubWebhook({ context: h, port: 0, secret: SECRET })
+    try {
+      const answered = await post(webhook.port, delivery({ zen: 'Keep it simple.', hook_id: 7 }, { event: 'ping' }))
+      expect(answered.status).toBe(200)
+      expect(await answered.json()).toMatchObject({ ok: true, message: 'pong' })
+      expect((await post(webhook.port, opened(12), '/orchestrator/api/settings')).status).toBe(404)
+      expect((await fetch(`http://127.0.0.1:${webhook.port}${WEBHOOK_PATH}`)).status).toBe(405)
+      expect(h.receive).not.toHaveBeenCalled()
+    } finally { await webhook.close(); h.store.close() }
+  })
+  it('refuses a body over its limit without parsing it or taking it in', async () => {
+    const h = host()
+    observe(h)
+    const webhook = await startGithubWebhook({ context: h, port: 0, secret: SECRET, maxBodyBytes: 100 })
+    try {
+      const body = delivery({ action: 'opened', repository: { full_name: 'acme/widgets' }, issue: issueOf(12), padding: 'x'.repeat(1000) })
+      expect((await post(webhook.port, body)).status).toBe(413)
+      expect(h.receive).not.toHaveBeenCalled()
+    } finally { await webhook.close(); h.store.close() }
+  })
+  it('logs receipt and ingest times without the secret or the Issue body', async () => {
+    const h = host()
+    observe(h)
+    const lines: string[] = []
+    const webhook = await startGithubWebhook({ context: h, port: 0, secret: SECRET, log: line => lines.push(line) })
+    try {
+      expect((await post(webhook.port, opened(12))).status).toBe(200)
+      const stored = lines.find(line => line.includes(`id=${key('github-issue', '12')}`))
+      expect(stored).toMatch(/received=\S+ ingested=\S+/)
+      const logged = lines.join('\n')
+      expect(logged).not.toContain(SECRET)
+      expect(logged).not.toContain('details on Safari')
+      expect(logged).not.toContain('Login fails')
+    } finally { await webhook.close(); h.store.close() }
+  })
+  it('takes in the agent\'s own Issue only with the opt-in and a mentioning body, as polling does', async () => {
+    const h = host()
+    observe(h)
+    const webhook = await startGithubWebhook({ context: h, port: 0, secret: SECRET })
+    try {
+      const agentIssue = (body: string) => opened(20, 'acme/widgets', { user: { login: 'agent-bot', type: 'User' }, body })
+      expect(await (await post(webhook.port, agentIssue('Login fails'))).json()).toMatchObject({ ignored: 'self_authored' })
+      expect(h.receive).not.toHaveBeenCalled()
+      observe(h, { allowSelfAuthoredIssues: true })
+      const accepted = await post(webhook.port, agentIssue('@agent-bot please fix'))
+      expect(accepted.status).toBe(200)
+      expect(await accepted.json()).toMatchObject({ result: 'stored' })
+      expect(h.receive).toHaveBeenCalledOnce()
+      expect(h.receive.mock.calls[0]![0]).toMatchObject({ human: true, addressed: 'mention' })
+    } finally { await webhook.close(); h.store.close() }
+  })
+  it('does not take Issues while observation is off, and ignores other actions and events', async () => {
+    const h = host()
+    const webhook = await startGithubWebhook({ context: h, port: 0, secret: SECRET })
+    try {
+      expect(await (await post(webhook.port, opened(12))).json()).toMatchObject({ ignored: 'issues_not_observed' })
+      observe(h)
+      expect(await (await post(webhook.port, delivery({ action: 'edited', repository: { full_name: 'acme/widgets' }, issue: issueOf(12) }))).json())
+        .toMatchObject({ ignored: 'action' })
+      expect(await (await post(webhook.port, delivery({ action: 'opened', repository: { full_name: 'acme/widgets' }, issue: issueOf(12) },
+        { event: 'pull_request' }))).json()).toMatchObject({ ignored: 'event' })
+      expect(h.receive).not.toHaveBeenCalled()
+    } finally { await webhook.close(); h.store.close() }
+  })
+  it('frees the port when its deployment stops, so a replacement deployment binds it and a second listener cannot', async () => {
+    const h = host()
+    observe(h)
+    const port = await freePort()
+    const env = { [WEBHOOK_PORT_VARIABLE]: String(port), [WEBHOOK_SECRET_VARIABLE]: SECRET }
+    const lines: string[] = []
+    const first = new GithubWebhookSupervisor(h, { env, log: line => lines.push(line) })
+    await first.sync()
+    try {
+      expect(first.port).toBe(port)
+      const second = new GithubWebhookSupervisor(h, { env, log: line => lines.push(line) })
+      await second.sync()
+      expect(second.port).toBeUndefined()
+      expect(lines.join('\n')).toContain('EADDRINUSE')
+      await first.close()
+      await second.sync()
+      expect(second.port).toBe(port)
+      await second.close()
+    } finally { await first.close(); h.store.close() }
+  })
+  it('reads the deployment-provided port and secret, and refuses an incomplete or invalid pair', () => {
+    expect(webhookSettings({})).toBeUndefined()
+    expect(webhookSettings({ PATH: '/bin' })).toBeUndefined()
+    expect(webhookSettings({ [WEBHOOK_PORT_VARIABLE]: '8123', [WEBHOOK_SECRET_VARIABLE]: 'shared-secret' })).toEqual({ port: 8123, secret: 'shared-secret' })
+    expect(() => webhookSettings({ [WEBHOOK_PORT_VARIABLE]: '8123' })).toThrow(WEBHOOK_SECRET_VARIABLE)
+    expect(() => webhookSettings({ [WEBHOOK_PORT_VARIABLE]: 'not-a-port', [WEBHOOK_SECRET_VARIABLE]: 's' })).toThrow(WEBHOOK_PORT_VARIABLE)
+    expect(() => webhookSettings({ [WEBHOOK_PORT_VARIABLE]: '65536', [WEBHOOK_SECRET_VARIABLE]: 's' })).toThrow(WEBHOOK_PORT_VARIABLE)
+  })
+})
+
+describe('independent GitHub repository polls', () => {
+  it('lets one repository finish rounds while another repository\'s first round never returns', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const board = new HealthBoard()
+      const settings = SettingsSchema.parse({ sources: { github: { enabled: true, config: { repository: 'acme/widgets', cli: 'gh',
+        additionalRepositories: [{ repository: 'acme/gadgets' }], pollSeconds: 60 } } } })
+      const sources = new SourceRegistry(() => settings, board)
+      healthOf.set(sources, board)
+      const value = host({ sources })
+      Object.assign(value.deployment, { repositories: ['acme/widgets', 'acme/gadgets'] })
+      const rounds: Record<string, number> = { 'acme/widgets': 0, 'acme/gadgets': 0 }
+      let release = (): void => {}
+      const hung = new Promise<string>((_, reject) => { release = () => reject(new Error('stopped')) })
+      const run = vi.spyOn(Commands.prototype, 'run').mockImplementation(async (_program, args) => {
+        const repository = /^repos\/([^/]+\/[^/]+)\//.exec(args[1] ?? '')?.[1] ?? ''
+        rounds[repository] = (rounds[repository] ?? 0) + 1
+        if (repository === 'acme/widgets') return hung
+        return 'HTTP/2.0 200 OK\r\nX-Poll-Interval: 60\r\n\r\n[]'
+      })
+      const disposers: (() => unknown)[] = []
+      applyGithub({ orchestrator: value, effect: (effect: () => () => unknown) => { disposers.push(effect()) } } as never)
+      try {
+        await vi.waitFor(() => expect(rounds['acme/gadgets']).toBe(1))
+        expect(rounds['acme/widgets']).toBe(1)
+        // One polling interval later the second repository has polled again while the first is still in its first round.
+        await vi.advanceTimersByTimeAsync(60_000)
+        await vi.waitFor(() => expect(rounds['acme/gadgets']).toBeGreaterThanOrEqual(2))
+        expect(rounds['acme/widgets']).toBe(1)
+      } finally {
+        const stopping = Promise.all(disposers.map(dispose => dispose()))
+        release()
+        await stopping
+        run.mockRestore()
+        value.store.close()
+      }
+    } finally { vi.useRealTimers() }
   })
 })

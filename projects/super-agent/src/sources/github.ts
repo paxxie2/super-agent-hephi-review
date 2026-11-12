@@ -8,6 +8,7 @@ import { CliError, validItems, type Tally } from '../infra/commands.ts'
 import { ciCounts, ciFact, ciFailures, ciSummary, githubThreadContext, pullChecks } from './github-read.ts'
 import { branchCiTrigger, ciTrigger, commentTrigger, CommentSchema, githubAddress, issueTrigger, IssueSchema, mentions, pullTrigger, SOURCE }
   from './github-trigger.ts'
+import { startGithubWebhook, webhookSettings, type GithubWebhook, type WebhookSettings } from './github-webhook.ts'
 import { githubLink, sendGithub } from './github-channel.ts'
 import type { GithubComment, PullRef } from './github-trigger.ts'
 import { observePull, pullsOf, readPull, type Pull } from './github-pull.ts'
@@ -122,8 +123,9 @@ export function apply(ctx: Context): void {
   ctx.effect(() => {
     const source = sourceContext(ctx.orchestrator, githubKind)
     const controller = new AbortController()
+    const log = (line: string): void => { ctx.logger?.info('%s', line) }
     // Unhandled rejections terminate the DSH process, so a failure escaping the polling loop is reported as source health instead.
-    const running = watch(source, controller.signal)
+    const running = watch(source, controller.signal, log)
       .catch((error: unknown) => { source.report('github', { state: 'error', detail: String(error) }) })
     return async () => { controller.abort(); await running }
   })
@@ -132,33 +134,90 @@ export function apply(ctx: Context): void {
 export function pollFailure(failures: number, threshold: number, error: unknown): Health | undefined {
   return failures >= threshold ? health('error', 'pollFailures', { count: String(failures), error: String(error) }) : undefined
 }
-async function watch(ctx: SourceContext, signal: AbortSignal): Promise<void> {
-  let interval = 60
-  let failures = 0
+/** How often the webhook listener is reconciled with the GitHub Source's enabled state and the deployment's webhook variables. */
+const WEBHOOK_SYNC_MS = 5_000
+/**
+ * Keeps the loopback webhook listener in step with the GitHub Source: it starts once the Source is enabled and the
+ * deployment supplies a port and secret, and closes when either goes away, as when the Source is switched off or the
+ * plugin is disposed. A port held by a stopping deployment is retried on the next reconciliation.
+ */
+export class GithubWebhookSupervisor {
+  private running: (GithubWebhook & { secret: string }) | undefined
+  private problem: string | undefined
+  private readonly log: (line: string) => void
+  private readonly env: NodeJS.ProcessEnv | undefined
+  constructor(private readonly ctx: SourceContext, options: { log?: (line: string) => void; env?: NodeJS.ProcessEnv } = {}) {
+    this.log = options.log ?? (() => {})
+    this.env = options.env
+  }
+  get port(): number | undefined { return this.running?.port }
+  /** Starts, restarts or closes the listener so it matches the current Source settings and deployment variables. */
+  async sync(): Promise<void> {
+    let settings: WebhookSettings | undefined
+    try { settings = webhookSettings(this.env) }
+    catch (error) { this.report(String(error)); await this.close(); return }
+    const config = this.ctx.config<GithubConfig>(SOURCE)
+    if (!settings || !config) { this.problem = undefined; await this.close(); return }
+    const running = this.running
+    if (running && running.port === settings.port && running.secret === settings.secret) { this.problem = undefined; return }
+    await this.close()
+    try {
+      const server = await startGithubWebhook({ context: this.ctx, port: settings.port, secret: settings.secret, log: this.log })
+      this.running = { ...server, secret: settings.secret }
+      this.problem = undefined
+      this.log(`github webhook listening on 127.0.0.1:${server.port}`)
+    } catch (error) { this.report(`github webhook failed to listen on 127.0.0.1:${settings.port}: ${String(error)}`) }
+  }
+  async close(): Promise<void> {
+    const running = this.running
+    this.running = undefined
+    if (running) await running.close()
+  }
+  private report(problem: string): void {
+    if (problem === this.problem) return
+    this.problem = problem
+    this.log(problem)
+  }
+}
+async function watch(ctx: SourceContext, signal: AbortSignal, log?: (line: string) => void): Promise<void> {
   await ctx.ready
   // Setup restarts dsh-superagent once it resolves the accounts; until then nothing is polled.
   if (!ctx.configured()) { ctx.report('github', health('paused', 'setupPending')); return }
-  while (!signal.aborted) {
-    const config = ctx.config<GithubConfig>(SOURCE)
-    try {
-      if (config) {
-        const errors: string[] = []
-        interval = 60
-        for (const repository of ctx.deployment.repositories ?? [ctx.deployment.repository]) {
-          try { interval = Math.max(interval, await pollRound(githubContext(ctx, repository), signal)) }
-          catch (error) { errors.push(`${repository}: ${String(error)}`) }
-        }
-        if (errors.length) throw new Error(errors.join('; '))
-        if ((ctx.deployment.repositories?.length ?? 0) > 1) ctx.report('github', { state: 'ready', detail: `Watching ${ctx.deployment.repositories!.join(', ')}; next poll ≥ ${interval}s`, at: new Date().toISOString() })
-      }
-      else ctx.report('github', health('paused', 'sourceOff'))
-      failures = 0
-    } catch (error) {
-      failures += 1
-      const failed = pollFailure(failures, config?.failuresBeforeError ?? 1, error)
-      if (!signal.aborted && failed) ctx.report('github', failed)
+  const repositories = ctx.deployment.repositories ?? [ctx.deployment.repository]
+  const statuses = new Map<string, Health>()
+  const supervisor = new GithubWebhookSupervisor(ctx, { log })
+  const webhook = (async () => {
+    while (!signal.aborted) {
+      await supervisor.sync()
+      if (!signal.aborted) await pause(WEBHOOK_SYNC_MS, signal)
     }
-    await pause(Math.max(interval, ctx.config<GithubConfig>(SOURCE)?.pollSeconds ?? 60) * 1000, signal)
+  })()
+  try {
+    await Promise.all([...repositories.map(async repository => {
+      // Each repository polls on its own schedule: a slow or failing round neither delays nor fails another repository's next round.
+      const scoped = githubContext(ctx, repository)
+      const report = (_source: string, status: Health) => {
+        statuses.set(repository, status)
+        ctx.report('github', [...statuses.values()].find(value => value.state === 'error') ?? status)
+      }
+      const source = { ...scoped, report }
+      let failures = 0
+      let interval = 60
+      while (!signal.aborted) {
+        const config = source.config<GithubConfig>(SOURCE)
+        try {
+          if (config) interval = await pollRound(source, signal)
+          else report(SOURCE, health('paused', 'sourceOff'))
+          failures = 0
+        } catch (error) {
+          const failed = pollFailure(++failures, config?.failuresBeforeError ?? 1, error)
+          if (!signal.aborted && failed) report(SOURCE, failed)
+        }
+        if (!signal.aborted) await pause(Math.max(60, interval, source.config<GithubConfig>(SOURCE)?.pollSeconds ?? 60) * 1000, signal)
+      }
+    }), webhook])
+  } finally {
+    await supervisor.close()
   }
 }
 interface Round {
