@@ -345,3 +345,31 @@ Teammate subagent 模型路由失败，Lead 直接执行全部 5 条加固。com
 | 486fbca | B3/D-8 准备材料 |
 
 经验层 exp-064~085（89 行），validate-log OK。
+
+## 2026-11-12 用户四项决定执行结果
+
+### ① SA eval 超时诊断（commit c281e5e）
+- **根因定位**：evalTimeoutMs=120s × (REQUEUES=2+1) = 360s 理论上限；实测 7min41s（差值 ~100s 为 LLM 排队延迟）
+- **耗时阶段**：master session `orchestrator_eval_decide` LLM 调用未在 120s 内完成，重试 2 次后 unavailable/timeout
+- **可能原因**：master session prompt 过长（24 ticket + >100KB tools）、deepseek-flash API 延迟、重启后冷启动
+- **建议**：增加 timeoutSeconds 或压缩 master session 上下文
+- **状态**：已登记，待 DSH 团队修复
+
+### ② 3085 稳定性只读检查
+- 插件链接能解析到实际目录 ✅
+- symlink 间歇失效与 SA eval 超时是**独立问题**（分别核验）
+- 未改部署结构（按用户决定）
+
+### ③ Dubbo 正向 prepare 验证通过（commit cb782f4）
+- 父任务：c41d01bba0（Fix JavaBeanSerializeUtil null key），baseSha 7ca3e29f
+- Issue：paxxie2/dubbo#67（[native] + hephi/delivery label）
+- prepare exit 0，activation.json 冻结 5 项检查
+- **负向 + 正向验证均通过** → Dubbo 检查配置可落地
+
+### ④ T02 口径更正（commit a34f07d）
+- 62,787 = input+output；含 cache read 同口径 = 1,980,867
+- 明确"T02 未完整通过"，仅完成用量提取
+- 不能据此认定 50 元足够
+
+### T10 维持 blocked
+等宿主能力 A+B 交付 + SA eval bug 修复后从新 Issue 重跑。
