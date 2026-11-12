@@ -43,6 +43,7 @@
 - `asset.modified`（allow，仅记录）：C1 清单外的已有测试被修改（受旧 `protect` 清单约束的文件）——只记录、不拦截；清单外删除仍按旧规则拒绝。
 - `asset.unauthorized-modify` / `asset.unauthorized-delete`（deny）：C1 受保护验收资产在缺少“同一验收项 + 精确文件 + 对应操作”授权时被修改/删除（write/edit 当场拒绝；shell/git 绕过由 ready 的最终 diff 复核拒绝）。`version` 与字段不变，仅新增规则编号。
 - `ready.snapshot-tampered`（deny）：H6=C 检测层——绑定生效（`binding.effective`）时，被采信检查记录缺少封存、封存不可用，或 ready 重读的 Session 日志与封存前缀不一致（前缀摘要变化、帧流外追加、撕裂尾帧重试后仍不完整）即拒绝；`reason` 以 `ready.snapshot-tampered:` 开头并附 checkId 与具体原因。这是**检测**而非防护（同 UID Worker 仍可改写），不改变 A1/A2 判定与绑定开关默认值。`version` 与字段不变，仅新增规则编号。
+- `ready.binding-record`（deny）：B2 四元绑定记录消费——强绑定生效（`binding.effective`）时，ready 必须能读到宿主产出的 Ticket↔Session↔执行结果↔finalCommit 四元记录并逐项一致（`ticket.id` = 合同 ticketId；`session.id` = 当前 Worker Session 头 id；`execution` 与被采信检查 run 的 kind/exitCode 或 jobId/toolCallId 一致；`finalCommit.sha` = 被验证候选 HEAD、`finalCommit.baseSha` = 合同 `baseSha`）。记录缺失、不可读、格式不符或任一元不一致即拒绝；`reason` 以 `ready.binding-record:` 开头并写明查过的路径或具体哪一元不符。**绑定生效即强制，不存在环境/配置跳过通道**：`DSH_BINDING_RECORD` 与 `bindingRecordPath` 只用于定位记录路径（与 TB-01/TB-03「环境不是启用通道」一致）；记录中的未知额外字段只记警告、不拒绝。**部署约束**：binding on 要求宿主同时交付 B1（结构化 `tool/result.message.value`）与 B2（四元记录）；只交付 B1 的部署不能开启强绑定（v5.4 附录 A 部署约束）。binding off 时不读取记录、不产生该规则。`version` 与既有字段不变，仅新增规则编号。
 - `ready.awaiting-approval`（deny，等待审批）：C3 人工审批——合同 v5+ 冻结了非空 `verification.approvers` 时，PR 评审必须满足：名单内每人只取最新一条 review；名单内任一人最新为 `CHANGES_REQUESTED` 即拒绝；至少一名名单内 approver 对当前 PR HEAD（`commitId === headSha`）`APPROVED` 才放行。没有有效批准返回该规则并在 `reason` 说明是等待审批（**不是检查失败，不计入 C4.5 重试计数**）。`version` 与字段不变，仅新增规则编号。
 
 ## 写入约束

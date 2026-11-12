@@ -14,6 +14,7 @@ import { checkDiscipline } from './discipline.js'
 import { pluginCommit } from '../version.js'
 import { logDecision } from './decision-log.js'
 import { planWidthOf, readPlan } from './plan-store.js'
+import { bindingRecordProblem, readBindingRecord, validateBindingRecord } from './binding-record.js'
 import type { SnapshotSealVerifier } from './snapshot-seal.js'
 
 const exec = promisify(execFile)
@@ -389,6 +390,43 @@ export async function snapshotSealProblem(record: CheckRunRecord, input: {
   return undefined
 }
 
+/**
+ * B2 (DSH host task order §3.2.2): consume the host's four-way delivery binding record.
+ * Runs only while the Session binding is effective; a missing/unreadable record or any
+ * four-way mismatch is a `ready.binding-record` denial. Unknown record fields are warnings
+ * on the validation result (never raised here), so a future host adding fields cannot cause
+ * a false denial. `DSH_BINDING_RECORD`/`bindingRecordPath` only locate the file — there is
+ * no environment or configuration channel that skips this gate.
+ */
+async function bindingRecordDenial(input: {
+  stateDir: string
+  bindingRecordPath?: string
+  ticketId: string
+  sessionId: string
+  headSha: string | undefined
+  baseSha: string
+  usedRuns: readonly CheckRunRecord[]
+}): Promise<string | undefined> {
+  const lookup = await readBindingRecord({
+    stateDir: input.stateDir,
+    ticketId: input.ticketId,
+    configuredPath: input.bindingRecordPath,
+  })
+  if (!lookup.found) {
+    return `ready.binding-record: binding is on but no binding record is available: ${lookup.path} (${lookup.problem})`
+  }
+  const validation = validateBindingRecord(lookup.value)
+  if (!validation.ok) return `ready.binding-record: ${lookup.path}: ${validation.problem}`
+  const problem = bindingRecordProblem(validation.record, {
+    ticketId: input.ticketId,
+    sessionId: input.sessionId,
+    headSha: input.headSha,
+    baseSha: input.baseSha,
+    usedRuns: input.usedRuns,
+  })
+  return problem === undefined ? undefined : `ready.binding-record: ${lookup.path}: ${problem}`
+}
+
 export function createEvidenceVerifier(options: {
   stateDir: string
   pullRequest?: (repo: string, n: number) => Promise<PullRequestInfo>
@@ -418,6 +456,14 @@ export function createEvidenceVerifier(options: {
    * then not written by the runner either, so ready keeps its previous behavior.
    */
   sealSnapshotVerifier?: SnapshotSealVerifier
+  /**
+   * B2 (DSH host task order §3.2): host-config path of the four-way delivery binding record.
+   * When unset, `DSH_BINDING_RECORD` is consulted and then `<stateDir>/binding/<ticketId>.json`.
+   * The environment only LOCATES the record; it is never an enable/skip channel (same trust
+   * boundary as the A3 resolution switch). The gate itself is bound to `binding.effective`,
+   * so a binding-off deployment never reads the record and adds no rule.
+   */
+  bindingRecordPath?: string
 }): ReadyVerifier {
   if (options.requireSessionBinding && !options.readSession) throw new Error('Session binding requires a Session reader')
   const verify = async (contract: ActivationContract, execution: Parameters<ReadyVerifier>[1]): ReturnType<ReadyVerifier> => {
@@ -534,6 +580,19 @@ export function createEvidenceVerifier(options: {
           if (evidence.output === undefined) throw new Error(`authoritative check output is unavailable: ${r.checkId}: no native output${notes}`)
           if (sha256(evidence.output) !== r.outputHash) throw new Error(`authoritative check output differs from the record: ${r.checkId}${notes}`)
         }
+        // B2: binding effective means the host must also deliver the four-way delivery binding
+        // record (Ticket ↔ Session ↔ accepted execution ↔ final commit). Absence or a mismatch
+        // is fail-closed; a binding-off deployment never reaches this branch and reads nothing.
+        const bindingProblem = await bindingRecordDenial({
+          stateDir: options.stateDir,
+          bindingRecordPath: options.bindingRecordPath,
+          ticketId: contract.ticketId,
+          sessionId,
+          headSha: before.headCommit,
+          baseSha: contract.baseSha,
+          usedRuns: used,
+        })
+        if (bindingProblem) throw new Error(bindingProblem)
       }
       // C3: approvals are verified against the PR reviews; the same PR must be open and
       // point at the local HEAD. A contract with approvers therefore needs a PR number
@@ -633,6 +692,7 @@ export function readyRule(reason: string): string {
   if (/rate limit|API rate limit exceeded/i.test(reason)) return 'ready.github-unavailable'
   // C3: waiting for a human approval is its own denial class (a wait state, not a failed check).
   if (reason.includes('ready.snapshot-tampered')) return 'ready.snapshot-tampered'
+  if (reason.includes('ready.binding-record')) return 'ready.binding-record'
   if (reason.includes('ready.awaiting-approval')) return 'ready.awaiting-approval'
   // A1-BIND/A1-OUT: an unreadable Job terminal state or unverifiable output is not a
   // generic binding mismatch; keep them distinguishable for P3 aggregation.

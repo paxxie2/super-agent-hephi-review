@@ -161,14 +161,55 @@ export type VerifyOptions = {
   allowOperatorResolutions?: boolean
 }
 
+/** Checks the contract actually consumes at ready (required checks + acceptance items). */
+function neededCheckIds(c: ActivationContract): Set<string> {
+  const needed = new Set(c.verification.checks.filter(check => check.required).map(check => check.id))
+  for (const item of c.task?.acceptance ?? []) needed.add(item.check)
+  return needed
+}
+
+/**
+ * B2 (DSH host task order §3.2): a binding-effective ready report now also requires the
+ * host's four-way delivery binding record. The red-team suite models an honest deployment
+ * (B1 + B2 delivered), so a matching record is written before each binding-on verification;
+ * the attack cases still deny earlier in the chain. The consumer gate itself (missing /
+ * mismatched record, binding-off zero regression) is covered by
+ * tests/control/binding-record.test.ts.
+ */
+async function writeBindingRecordFixture(stateDir: string, contract: ActivationContract): Promise<void> {
+  const needed = neededCheckIds(contract)
+  const records = await readRuns(stateDir, contract.ticketId)
+  const record = [...records].reverse().find(item => needed.has(item.checkId)
+    && item.contractHash === contract.contractHash && item.status === 'passed' && item.exitCode === 0)
+  if (record === undefined || record.before.headCommit === undefined) return
+  const execution = record.jobId === undefined
+    ? { kind: 'foreground' as const, exitCode: record.exitCode!, toolCallId: record.innerCallId }
+    : { kind: 'background' as const, jobId: record.jobId, toolCallId: record.innerCallId }
+  await mkdir(join(stateDir, 'binding'), { recursive: true })
+  await writeFile(join(stateDir, 'binding', `${contract.ticketId}.json`), JSON.stringify({
+    version: 1,
+    producedAt: '2026-11-12T07:00:00Z',
+    producer: 'redteam-fixture',
+    ticket: { id: contract.ticketId },
+    session: { id: SESSION },
+    execution,
+    finalCommit: { sha: record.before.headCommit, baseSha: contract.baseSha },
+  }))
+}
+
 export function verifier(f: { stateDir: string }, options: VerifyOptions = {}) {
-  return createEvidenceVerifier({
+  const verify = createEvidenceVerifier({
     stateDir: f.stateDir,
     readSession: options.readSession,
     requireSessionBinding: options.binding === true,
     jobs: options.jobs,
     allowOperatorResolutions: options.allowOperatorResolutions,
   })
+  if (options.binding !== true) return verify
+  return async (contract: ActivationContract, execution: ToolExecution) => {
+    await writeBindingRecordFixture(f.stateDir, contract)
+    return verify(contract, execution)
+  }
 }
 
 // ---- 合成 Session 快照：路径 A（结构化 tool/call + tool/result.value） ----------------

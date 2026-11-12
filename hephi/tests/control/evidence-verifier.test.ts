@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -157,6 +157,35 @@ function nativeEvents(records: CheckRunRecord[], contract: ActivationContract,
 }
 function bindingVerifier(stateDir: string, snapshot: SessionSnapshot, jobs?: NativeJobs) {
   return createEvidenceVerifier({ stateDir, readSession: async () => snapshot, requireSessionBinding: true, jobs })
+}
+
+/**
+ * B2: a binding-effective ready report now also requires the host's four-way binding
+ * record. These fixtures write the matching record so the historical A1-BIND/A1-OUT cases
+ * keep their original expectation; the gate itself (missing/mismatched record, binding-off
+ * zero regression) is covered by tests/control/binding-record.test.ts.
+ */
+async function writeBindingRecord(stateDir: string, contract: ActivationContract, over: {
+  execution?: { kind: 'foreground'; exitCode: number; toolCallId: string }
+    | { kind: 'background' | 'promoted'; jobId: string; toolCallId: string }
+} = {}): Promise<void> {
+  const records = await readRuns(stateDir, contract.ticketId)
+  const record = over.execution === undefined
+    ? [...records].reverse().find(item => item.status === 'passed' && item.exitCode === 0 && item.jobId === undefined)
+    : records.find(item => item.innerCallId === over.execution!.toolCallId)
+  if (record === undefined) throw new Error('binding-record fixture: no accepted run to reference')
+  const execution = over.execution ?? { kind: 'foreground' as const, exitCode: 0, toolCallId: record.innerCallId }
+  if (record.before.headCommit === undefined) throw new Error('binding-record fixture: the run has no HEAD commit')
+  await mkdir(join(stateDir, 'binding'), { recursive: true })
+  await writeFile(join(stateDir, 'binding', `${contract.ticketId}.json`), JSON.stringify({
+    version: 1,
+    producedAt: '2026-11-12T07:00:00Z',
+    producer: 'evidence-verifier-fixture',
+    ticket: { id: contract.ticketId },
+    session: { id: 'worker-session' },
+    execution,
+    finalCommit: { sha: record.before.headCommit, baseSha: contract.baseSha },
+  }))
 }
 function fakeJobs(over: { views?: Record<string, NativeJobView>; reads?: Record<string, JobRead>; getThrows?: boolean } = {}): NativeJobs {
   return {
@@ -415,7 +444,8 @@ describe('synchronous evidence MVP (fixture integration)', () => {
     const empty: SessionSnapshot = { session: { id: 'worker-session' }, inheritedEventCount: 0, events: [] }
     expect(await createEvidenceVerifier({ stateDir: x.stateDir, readSession: async () => empty })(contract, ready(x.r.dir, undefined, 'worker-session')))
       .toMatchObject({ ok: false, reason: expect.stringContaining('expected one native call') })
-    // Legal: the native calls exist and the Session ids agree.
+    // Legal: the native calls exist and the Session ids agree. B2 is part of a binding-on deployment.
+    await writeBindingRecord(x.stateDir, contract)
     const verify = createEvidenceVerifier({ stateDir: x.stateDir, readSession: async () => boundSnapshot('worker-session', records, contract.baseSha) })
     expect(await verify(contract, ready(x.r.dir, undefined, 'worker-session'))).toEqual({ ok: true })
   })
@@ -428,7 +458,8 @@ describe('synchronous evidence MVP (fixture integration)', () => {
     // host on + no native call -> refused (host tightened the contract)
     expect(await createEvidenceVerifier({ stateDir: x.stateDir, readSession: async () => empty, requireSessionBinding: true })(relaxed, ready(x.r.dir, undefined, 'worker-session')))
       .toMatchObject({ ok: false })
-    // host on + native calls -> allowed
+    // host on + native calls -> allowed (B2 binding record included)
+    await writeBindingRecord(x.stateDir, relaxed)
     expect(await createEvidenceVerifier({ stateDir: x.stateDir, readSession: async () => boundSnapshot('worker-session', records, relaxed.baseSha), requireSessionBinding: true })(relaxed, ready(x.r.dir, undefined, 'worker-session')))
       .toEqual({ ok: true })
     // contract on + host off is still refused (host cannot relax the contract)
@@ -457,7 +488,8 @@ describe('synchronous evidence MVP (fixture integration)', () => {
     const records = await readRuns(x.stateDir, x.c.ticketId)
     // Binding off: the matching record sessionId is the only requirement.
     expect(await createEvidenceVerifier({ stateDir: x.stateDir })(x.c, ready(x.r.dir))).toEqual({ ok: true })
-    // Binding on: the native call/result must also be present in that Session.
+    // Binding on: the native call/result and the B2 binding record must also be present.
+    await writeBindingRecord(x.stateDir, x.c)
     const verify = createEvidenceVerifier({ stateDir: x.stateDir, readSession: async id => boundSnapshot(id, records, x.c.baseSha), requireSessionBinding: true })
     expect(await verify(x.c, ready(x.r.dir, undefined, 'worker-session'))).toEqual({ ok: true })
   })
@@ -504,6 +536,7 @@ describe('A1-BIND: the Session must prove the native execution', () => {
   it('U-BIND-F1: a legal foreground execution matching the frozen check passes', async () => {
     const x = await setup(); await x.execute('build'); await x.execute('unit')
     const records = await readRuns(x.stateDir, x.c.ticketId)
+    await writeBindingRecord(x.stateDir, x.c)
     expect(await bindingVerifier(x.stateDir, snapshotOf(nativeEvents(records, x.c)))(x.c, ready(x.r.dir))).toEqual({ ok: true })
   })
 
@@ -551,6 +584,7 @@ describe('A1-BIND: the Session must prove the native execution', () => {
       views: { 'job-1': { status: 'completed', detail: 'exit code: 0; 1.2s' } },
       reads: { 'job-1': { chunks: [{ at: 0, text: jobOutput }], lossy: false } },
     })
+    await writeBindingRecord(x.stateDir, c, { execution: { kind: 'promoted', jobId: 'job-1', toolCallId: record.innerCallId } })
     expect(await bindingVerifier(x.stateDir, snapshotOf(events), jobs)(c, ready(x.r.dir))).toEqual({ ok: true })
   })
 
@@ -561,6 +595,7 @@ describe('A1-BIND: the Session must prove the native execution', () => {
       views: { 'job-1': { status: 'completed', detail: 'exit code: 0' } },
       reads: { 'job-1': { chunks: [{ at: 0, text: jobOutput }], lossy: false } },
     })
+    await writeBindingRecord(x.stateDir, c, { execution: { kind: 'background', jobId: 'job-1', toolCallId: record.innerCallId } })
     expect(await bindingVerifier(x.stateDir, snapshotOf(events), jobs)(c, ready(x.r.dir))).toEqual({ ok: true })
   })
 
@@ -635,6 +670,7 @@ describe('A1-OUT: authoritative output hash', () => {
   it('U-OUT-01: foreground authoritative output matches record.outputHash and output.log', async () => {
     const x = await setup(); await x.execute('build'); await x.execute('unit')
     const records = await readRuns(x.stateDir, x.c.ticketId)
+    await writeBindingRecord(x.stateDir, x.c)
     expect(await bindingVerifier(x.stateDir, snapshotOf(nativeEvents(records, x.c)))(x.c, ready(x.r.dir))).toEqual({ ok: true })
   })
 
@@ -690,6 +726,7 @@ describe('A1-BIND path B: job/registered + job/settled evidence', () => {
       views: { 'job-1': { status: 'completed', detail: 'exit code: 0' } },
       reads: { 'job-1': { chunks: [{ at: 0, text: jobOutput }], lossy: false } },
     })
+    await writeBindingRecord(x.stateDir, c, { execution: { kind: 'background', jobId: 'job-1', toolCallId: record.innerCallId } })
     expect(await bindingVerifier(x.stateDir, snapshotOf(events), jobs)(c, ready(x.r.dir))).toEqual({ ok: true })
   })
 
@@ -700,6 +737,7 @@ describe('A1-BIND path B: job/registered + job/settled evidence', () => {
       views: { 'job-1': { status: 'completed', detail: 'exit code: 0' } },
       reads: { 'job-1': { chunks: [{ at: 0, text: jobOutput }], lossy: false } },
     })
+    await writeBindingRecord(x.stateDir, c, { execution: { kind: 'background', jobId: 'job-1', toolCallId: record.innerCallId } })
     expect(await bindingVerifier(x.stateDir, snapshotOf(events), jobs)(c, ready(x.r.dir))).toEqual({ ok: true })
   })
 

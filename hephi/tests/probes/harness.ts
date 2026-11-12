@@ -5,8 +5,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 import { afterEach } from 'vitest'
-import { prepareActivation } from '../../src/control/activation.js'
+import { prepareActivation, type ActivationContract } from '../../src/control/activation.js'
 import { runCheck } from '../../src/control/check-runner.js'
+import { readRuns } from '../../src/control/check-store.js'
 import { createEvidenceVerifier, type SessionSnapshot } from '../../src/control/evidence-verifier.js'
 
 // Shared probe harness: real Git repositories, real shell commands, the real
@@ -98,8 +99,41 @@ export const readyCall = (cwd: string, id: string | undefined = SESSION): ToolEx
   signal: new AbortController().signal, token: Symbol('ready') as never, agent: { session: { header: { cwd, id } } } as never,
 })
 export const snapshot = (events: SessionSnapshot['events'], id = SESSION, inheritedEventCount = 0): SessionSnapshot => ({ session: { id }, inheritedEventCount, events })
-export const verifier = (p: Project, read?: (id: string) => SessionSnapshot) =>
-  createEvidenceVerifier({ stateDir: p.stateDir, readSession: async id => read ? read(id) : snapshot(p.events, id), requireSessionBinding: true })
+/**
+ * B2 (DSH host task order §3.2): binding-effective ready reports now also require the
+ * host's four-way delivery binding record. The probe harness models an honest deployment
+ * (B1 + B2 delivered), so a matching record is written before verification; deployment-level
+ * failures of the gate itself are covered by tests/control/binding-record.test.ts.
+ */
+async function writeBindingRecordFixture(p: Project, contract: ActivationContract): Promise<void> {
+  const needed = new Set(contract.verification.checks.filter(check => check.required).map(check => check.id))
+  for (const item of contract.task?.acceptance ?? []) needed.add(item.check)
+  const records = await readRuns(p.stateDir, contract.ticketId)
+  const record = [...records].reverse().find(item => needed.has(item.checkId)
+    && item.contractHash === contract.contractHash && item.status === 'passed' && item.exitCode === 0)
+  if (record === undefined || record.before.headCommit === undefined) return
+  const execution = record.jobId === undefined
+    ? { kind: 'foreground' as const, exitCode: record.exitCode!, toolCallId: record.innerCallId }
+    : { kind: 'background' as const, jobId: record.jobId, toolCallId: record.innerCallId }
+  await mkdir(join(p.stateDir, 'binding'), { recursive: true })
+  await writeFile(join(p.stateDir, 'binding', `${contract.ticketId}.json`), JSON.stringify({
+    version: 1,
+    producedAt: '2026-11-12T07:00:00Z',
+    producer: 'probe-harness',
+    ticket: { id: contract.ticketId },
+    session: { id: SESSION },
+    execution,
+    finalCommit: { sha: record.before.headCommit, baseSha: contract.baseSha },
+  }))
+}
+
+export const verifier = (p: Project, read?: (id: string) => SessionSnapshot) => {
+  const verify = createEvidenceVerifier({ stateDir: p.stateDir, readSession: async id => read ? read(id) : snapshot(p.events, id), requireSessionBinding: true })
+  return async (contract: ActivationContract, execution: ToolExecution) => {
+    await writeBindingRecordFixture(p, contract)
+    return verify(contract, execution)
+  }
+}
 export const check = async (p: Project, id: string) => {
   try { return (await runCheck({ stateDir: p.stateDir, contract: p.contract, checkId: id, outer: outer(id), tools: p.tools as never })).status }
   catch (error) { return `refused: ${error instanceof Error ? error.message : String(error)}` }
