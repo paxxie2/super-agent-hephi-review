@@ -245,6 +245,9 @@ export async function readBindingRecord(options: {
   }
 }
 
+/** Native Session execution shapes the ready gate can distinguish (B1 structured value). */
+export type NativeExecutionKind = 'foreground' | 'background' | 'promoted'
+
 export type BindingRecordExpectation = {
   /** Frozen contract ticket id. */
   ticketId: string
@@ -256,6 +259,18 @@ export type BindingRecordExpectation = {
   baseSha: string
   /** Check records already accepted as passing evidence for this ready report. */
   usedRuns: readonly CheckRunRecord[]
+  /**
+   * Native Session evidence for each accepted run, keyed by the inner bash call id.
+   *
+   * Only the inner call id is native evidence: the outer `hephi_check` call id never appears
+   * in the Session's native `tool/call` + `tool/result` pair, so a record naming it is not
+   * bound to an execution (Kimi execution review B-1).
+   *
+   * `kind` is undefined when the Session encoding cannot prove foreground/background/promoted
+   * (historical path B `job/registered` + `job/settled` only). The gate then fails closed
+   * instead of merging background and promoted (Kimi execution review B-2).
+   */
+  nativeExecutions: ReadonlyArray<{ innerCallId: string; kind?: NativeExecutionKind }>
 }
 
 function describeRun(record: CheckRunRecord): string {
@@ -268,6 +283,11 @@ function describeRun(record: CheckRunRecord): string {
  * The four-way consistency check (host task order §3.2.2 steps 2–5):
  * ticket / session / execution-vs-accepted-run / final commit SHA.
  * Returns the first mismatch as a human-readable problem, or undefined when consistent.
+ *
+ * B-1: `execution.toolCallId` must be the accepted run's **inner** bash call id AND that call
+ * must carry confirmed native Session evidence; the outer `hephi_check` call id is rejected.
+ * B-2: `execution.kind` must equal the native Session result kind (never inferred from
+ * `jobId` alone); an unavailable native kind is fail-closed.
  */
 export function bindingRecordProblem(record: BindingRecord, expected: BindingRecordExpectation): string | undefined {
   if (record.ticket.id !== expected.ticketId) {
@@ -286,19 +306,35 @@ export function bindingRecordProblem(record: BindingRecord, expected: BindingRec
     return `finalCommit.baseSha "${record.finalCommit.baseSha}" does not match the contract baseSha "${expected.baseSha}"`
   }
   const execution = record.execution
-  const candidates = expected.usedRuns.filter(run =>
-    run.innerCallId === execution.toolCallId || run.callId === execution.toolCallId)
+  // B-1: exact native inner id only. The outer hephi_check call id is not native evidence.
+  const candidates = expected.usedRuns.filter(run => run.innerCallId === execution.toolCallId)
   if (candidates.length === 0) {
-    return `execution.toolCallId "${execution.toolCallId}" does not name any accepted check run`
+    return `execution.toolCallId "${execution.toolCallId}" does not name an accepted native bash execution (only the inner bash call id counts; the outer hephi_check call id is not native evidence)`
   }
-  const matched = candidates.find(run => execution.kind === 'foreground'
-    ? run.jobId === undefined && run.exitCode === execution.exitCode
-    : run.jobId !== undefined && run.jobId === execution.jobId)
-  if (matched === undefined) {
-    const wanted = execution.kind === 'foreground'
-      ? `foreground exit ${String(execution.exitCode)}`
-      : `${execution.kind} Job ${execution.jobId}`
-    return `execution (${wanted}) disagrees with the accepted check run (${describeRun(candidates[0]!)})`
+  const candidate = candidates[0]!
+  const native = expected.nativeExecutions.find(entry => entry.innerCallId === execution.toolCallId)
+  if (native === undefined) {
+    return `execution.toolCallId "${execution.toolCallId}" has no confirmed native Session tool/call + tool/result evidence`
   }
-  return undefined
+  // B-2: the native kind is authoritative. Without it the gate refuses to guess.
+  if (native.kind === undefined) {
+    return `the native Session result kind for "${execution.toolCallId}" is unavailable; refusing to guess between background and promoted`
+  }
+  if (native.kind !== execution.kind) {
+    return `execution kind "${execution.kind}" disagrees with the native Session result kind "${native.kind}"`
+  }
+  if (execution.kind === 'foreground') {
+    if (candidate.jobId !== undefined) {
+      return `execution is foreground but the accepted check run names Job ${candidate.jobId}`
+    }
+    return candidate.exitCode === execution.exitCode
+      ? undefined
+      : `execution (foreground exit ${String(execution.exitCode)}) disagrees with the accepted check run (${describeRun(candidate)})`
+  }
+  if (candidate.jobId === undefined) {
+    return `execution is ${execution.kind} but the accepted check run names no Job`
+  }
+  return candidate.jobId === execution.jobId
+    ? undefined
+    : `execution (${execution.kind} Job ${execution.jobId}) disagrees with the accepted check run (${describeRun(candidate)})`
 }

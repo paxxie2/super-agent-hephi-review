@@ -14,7 +14,7 @@ import { checkDiscipline } from './discipline.js'
 import { pluginCommit } from '../version.js'
 import { logDecision } from './decision-log.js'
 import { planWidthOf, readPlan } from './plan-store.js'
-import { bindingRecordProblem, readBindingRecord, validateBindingRecord } from './binding-record.js'
+import { bindingRecordProblem, readBindingRecord, validateBindingRecord, type NativeExecutionKind } from './binding-record.js'
 import type { SnapshotSealVerifier } from './snapshot-seal.js'
 
 const exec = promisify(execFile)
@@ -103,6 +103,12 @@ type NativeEvidence = {
   output?: string
   /** Non-fatal facts about the matched evidence (for example `workdir: absent` on path B). */
   notes?: string[]
+  /**
+   * B-2: the native Session result kind. Only the structured `message.value.kind` is
+   * authoritative; the historical path B job events cannot distinguish background from
+   * promoted, so this stays undefined there and the B2 binding gate fails closed.
+   */
+  nativeKind?: NativeExecutionKind
 }
 
 const truncated = (part: { truncated?: boolean } | undefined): boolean => part?.truncated === true
@@ -153,7 +159,7 @@ function structuredEvidence(value: NativeResultValue, record: CheckRunRecord, se
     if (value.exitCode !== 0) return { bindingProblem: `${record.checkId}: foreground Session result exit code ${String(value.exitCode)} does not confirm a successful check` }
     if (truncated(value.stdout) || truncated(value.stderr)) return { outputProblem: `${record.checkId}: foreground Session output was truncated` }
     // The runner persisted `${stdout.text}\n${stderr.text}`; mirror that form exactly.
-    return { output: `${value.stdout?.text ?? ''}\n${value.stderr?.text ?? ''}` }
+    return { output: `${value.stdout?.text ?? ''}\n${value.stderr?.text ?? ''}`, nativeKind: 'foreground' }
   }
   if (value.kind === 'promoted' || value.kind === 'background') {
     if (typeof record.jobId !== 'string' || record.jobId === '') {
@@ -162,7 +168,8 @@ function structuredEvidence(value: NativeResultValue, record: CheckRunRecord, se
     if (value.jobId !== record.jobId) {
       return { bindingProblem: `${record.checkId}: Session result Job ${String(value.jobId)} differs from the recorded Job ${record.jobId}` }
     }
-    return jobTerminalEvidence(record.jobId, sessionId, record, jobs)
+    // B-2: `value.kind` is the only authoritative promoted-vs-background source.
+    return { ...jobTerminalEvidence(record.jobId, sessionId, record, jobs), nativeKind: value.kind }
   }
   return { bindingProblem: `${record.checkId}: unsupported Session result kind ${value.kind}` }
 }
@@ -406,6 +413,7 @@ async function bindingRecordDenial(input: {
   headSha: string | undefined
   baseSha: string
   usedRuns: readonly CheckRunRecord[]
+  nativeExecutions: ReadonlyArray<{ innerCallId: string; kind?: NativeExecutionKind }>
 }): Promise<string | undefined> {
   const lookup = await readBindingRecord({
     stateDir: input.stateDir,
@@ -423,6 +431,7 @@ async function bindingRecordDenial(input: {
     headSha: input.headSha,
     baseSha: input.baseSha,
     usedRuns: input.usedRuns,
+    nativeExecutions: input.nativeExecutions,
   })
   return problem === undefined ? undefined : `ready.binding-record: ${lookup.path}: ${problem}`
 }
@@ -560,6 +569,9 @@ export function createEvidenceVerifier(options: {
         // The Session snapshot carries the native call/result evidence; reading it after
         // the ownership check keeps a missing sessionQuery from masking a foreign record.
         const snapshot = await options.readSession(sessionId)
+        // B-1/B-2: the native evidence gathered for each accepted run (Session tool/call +
+        // tool/result kind), reused by the B2 binding-record gate instead of re-reading.
+        const nativeExecutions: Array<{ innerCallId: string; kind?: NativeExecutionKind }> = []
         for (const r of used) {
           // H6=C: the persisted log prefix sealed at check completion must still match.
           const sealProblem = await snapshotSealProblem(r, {
@@ -579,6 +591,10 @@ export function createEvidenceVerifier(options: {
           if (evidence.outputProblem) throw new Error(`authoritative check output is unavailable: ${evidence.outputProblem}${notes}`)
           if (evidence.output === undefined) throw new Error(`authoritative check output is unavailable: ${r.checkId}: no native output${notes}`)
           if (sha256(evidence.output) !== r.outputHash) throw new Error(`authoritative check output differs from the record: ${r.checkId}${notes}`)
+          nativeExecutions.push({
+            innerCallId: r.innerCallId,
+            ...(evidence.nativeKind === undefined ? {} : { kind: evidence.nativeKind }),
+          })
         }
         // B2: binding effective means the host must also deliver the four-way delivery binding
         // record (Ticket ↔ Session ↔ accepted execution ↔ final commit). Absence or a mismatch
@@ -591,6 +607,7 @@ export function createEvidenceVerifier(options: {
           headSha: before.headCommit,
           baseSha: contract.baseSha,
           usedRuns: used,
+          nativeExecutions,
         })
         if (bindingProblem) throw new Error(bindingProblem)
       }

@@ -58,6 +58,9 @@ const expectation = (over: Partial<Parameters<typeof bindingRecordProblem>[1]> =
   headSha: HEAD_SHA,
   baseSha: BASE_SHA,
   usedRuns: [runValue()],
+  // B-1/B-2: only the native inner call id counts, and the native Session result kind is
+  // authoritative (undefined = unavailable → fail-closed).
+  nativeExecutions: [{ innerCallId: 'inner-1', kind: 'foreground' as const }],
   ...over,
 })
 
@@ -277,14 +280,64 @@ describe('B2 binding record: four-way consistency', () => {
     expect(bindingRecordProblem(parsed(), expectation())).toBeUndefined()
   })
 
-  it('accepts a background execution that matches the accepted run Job id', () => {
+  it('accepts a background execution that matches the accepted run Job id and native kind', () => {
     const record = parsed({ execution: { kind: 'background', jobId: 'job-1', toolCallId: 'inner-1' } })
-    expect(bindingRecordProblem(record, expectation({ usedRuns: [runValue({ jobId: 'job-1' })] }))).toBeUndefined()
+    expect(bindingRecordProblem(record, expectation({
+      usedRuns: [runValue({ jobId: 'job-1' })],
+      nativeExecutions: [{ innerCallId: 'inner-1', kind: 'background' }],
+    }))).toBeUndefined()
   })
 
-  it('matches the accepted run by either the inner tool call or the outer call id', () => {
+  it('accepts a promoted execution that matches the accepted run Job id and native kind', () => {
+    const record = parsed({ execution: { kind: 'promoted', jobId: 'job-1', toolCallId: 'inner-1' } })
+    expect(bindingRecordProblem(record, expectation({
+      usedRuns: [runValue({ jobId: 'job-1' })],
+      nativeExecutions: [{ innerCallId: 'inner-1', kind: 'promoted' }],
+    }))).toBeUndefined()
+  })
+
+  it('B-1: rejects the outer hephi_check call id (only the native inner bash id counts)', () => {
     const record = parsed({ execution: { kind: 'foreground', exitCode: 0, toolCallId: 'outer-call-1' } })
-    expect(bindingRecordProblem(record, expectation())).toBeUndefined()
+    expect(bindingRecordProblem(record, expectation())).toContain('does not name an accepted native bash execution')
+    expect(bindingRecordProblem(record, expectation())).toContain('outer hephi_check call id')
+  })
+
+  it('B-1: rejects an inner call id with no confirmed native Session evidence', () => {
+    const record = parsed({ execution: { kind: 'foreground', exitCode: 0, toolCallId: 'inner-1' } })
+    expect(bindingRecordProblem(record, expectation({ nativeExecutions: [] })))
+      .toContain('no confirmed native Session tool/call + tool/result evidence')
+  })
+
+  it('B-2: rejects a background record when the native Session result was promoted', () => {
+    const record = parsed({ execution: { kind: 'background', jobId: 'job-1', toolCallId: 'inner-1' } })
+    expect(bindingRecordProblem(record, expectation({
+      usedRuns: [runValue({ jobId: 'job-1' })],
+      nativeExecutions: [{ innerCallId: 'inner-1', kind: 'promoted' }],
+    }))).toContain('disagrees with the native Session result kind')
+  })
+
+  it('B-2: rejects a promoted record when the native Session result was background', () => {
+    const record = parsed({ execution: { kind: 'promoted', jobId: 'job-1', toolCallId: 'inner-1' } })
+    expect(bindingRecordProblem(record, expectation({
+      usedRuns: [runValue({ jobId: 'job-1' })],
+      nativeExecutions: [{ innerCallId: 'inner-1', kind: 'background' }],
+    }))).toContain('disagrees with the native Session result kind')
+  })
+
+  it('B-2: fails closed when the native Session result kind is unavailable', () => {
+    const record = parsed({ execution: { kind: 'background', jobId: 'job-1', toolCallId: 'inner-1' } })
+    const problem = bindingRecordProblem(record, expectation({
+      usedRuns: [runValue({ jobId: 'job-1' })],
+      nativeExecutions: [{ innerCallId: 'inner-1' }],
+    }))
+    expect(problem).toContain('native Session result kind')
+    expect(problem).toContain('refusing to guess')
+  })
+
+  it('B-2: rejects a foreground record when the native Session result was a Job kind', () => {
+    const record = parsed({ execution: { kind: 'foreground', exitCode: 0, toolCallId: 'inner-1' } })
+    expect(bindingRecordProblem(record, expectation({ nativeExecutions: [{ innerCallId: 'inner-1', kind: 'background' }] })))
+      .toContain('disagrees with the native Session result kind')
   })
 
   it('rejects a ticket.id that differs from the contract ticket', () => {
@@ -299,7 +352,7 @@ describe('B2 binding record: four-way consistency', () => {
 
   it('rejects an execution whose toolCallId names no accepted run', () => {
     const record = parsed({ execution: { kind: 'foreground', exitCode: 0, toolCallId: 'inner-unknown' } })
-    expect(bindingRecordProblem(record, expectation())).toContain('does not name any accepted check run')
+    expect(bindingRecordProblem(record, expectation())).toContain('does not name an accepted native bash execution')
   })
 
   it('rejects a foreground exit code that differs from the accepted run', () => {
@@ -309,14 +362,18 @@ describe('B2 binding record: four-way consistency', () => {
 
   it('rejects a foreground execution for a run recorded as a Job', () => {
     const record = parsed({ execution: { kind: 'foreground', exitCode: 0, toolCallId: 'inner-1' } })
-    expect(bindingRecordProblem(record, expectation({ usedRuns: [runValue({ jobId: 'job-1' })] })))
-      .toContain('disagrees with the accepted check run')
+    expect(bindingRecordProblem(record, expectation({
+      usedRuns: [runValue({ jobId: 'job-1' })],
+      nativeExecutions: [{ innerCallId: 'inner-1', kind: 'foreground' }],
+    }))).toContain('execution is foreground but the accepted check run names Job')
   })
 
   it('rejects a background Job id that differs from the accepted run', () => {
     const record = parsed({ execution: { kind: 'background', jobId: 'job-other', toolCallId: 'inner-1' } })
-    expect(bindingRecordProblem(record, expectation({ usedRuns: [runValue({ jobId: 'job-1' })] })))
-      .toContain('disagrees with the accepted check run')
+    expect(bindingRecordProblem(record, expectation({
+      usedRuns: [runValue({ jobId: 'job-1' })],
+      nativeExecutions: [{ innerCallId: 'inner-1', kind: 'background' }],
+    }))).toContain('disagrees with the accepted check run')
   })
 
   it('rejects a finalCommit.sha that differs from the verified candidate HEAD', () => {

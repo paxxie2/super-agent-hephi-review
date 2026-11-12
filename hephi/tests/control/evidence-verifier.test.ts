@@ -9,7 +9,7 @@ import type { ActivationContract } from '../../src/control/activation.js'
 import type { VerificationCheck } from '../../src/contracts/checks.js'
 import { checkCommand, runCheck, type NativeJobView, type NativeJobs } from '../../src/control/check-runner.js'
 import { sha256 } from '../../src/verification/fingerprint.js'
-import { createEvidenceVerifier, type SessionSnapshot } from '../../src/control/evidence-verifier.js'
+import { createEvidenceVerifier, sessionBindingProblem, type SessionSnapshot } from '../../src/control/evidence-verifier.js'
 import { appendResolution, checkRunDir, readRuns, type CheckRunRecord } from '../../src/control/check-store.js'
 import { allowedPath } from '../../src/control/repository.js'
 import { pluginCommit } from '../../src/version.js'
@@ -170,12 +170,9 @@ async function writeBindingRecord(stateDir: string, contract: ActivationContract
     | { kind: 'background' | 'promoted'; jobId: string; toolCallId: string }
 } = {}): Promise<void> {
   const records = await readRuns(stateDir, contract.ticketId)
-  const record = over.execution === undefined
-    ? [...records].reverse().find(item => item.status === 'passed' && item.exitCode === 0 && item.jobId === undefined)
-    : records.find(item => item.innerCallId === over.execution!.toolCallId)
-  if (record === undefined) throw new Error('binding-record fixture: no accepted run to reference')
+  const record = [...records].reverse().find(item => item.status === 'passed' && item.exitCode === 0)
+  if (record === undefined || record.before.headCommit === undefined) throw new Error('binding-record fixture: no accepted run with a HEAD commit')
   const execution = over.execution ?? { kind: 'foreground' as const, exitCode: 0, toolCallId: record.innerCallId }
-  if (record.before.headCommit === undefined) throw new Error('binding-record fixture: the run has no HEAD commit')
   await mkdir(join(stateDir, 'binding'), { recursive: true })
   await writeFile(join(stateDir, 'binding', `${contract.ticketId}.json`), JSON.stringify({
     version: 1,
@@ -713,6 +710,61 @@ describe('A1-OUT: authoritative output hash', () => {
 })
 
 // ---------------------------------------------------------------------------------------
+// B2 four-way record strictness (Kimi execution review B-1/B-2). The record must name the
+// native **inner** bash call (the outer hephi_check call id is not native evidence), and its
+// execution kind must equal the Session's native result kind; background and promoted are
+// never merged (an unavailable native kind is fail-closed).
+// ---------------------------------------------------------------------------------------
+describe('B2 binding record: B-1/B-2 strictness (fixture integration)', () => {
+  it('B-1: a record naming the outer hephi_check call id is denied', async () => {
+    const x = await setup(); await x.execute('build'); await x.execute('unit')
+    const records = await readRuns(x.stateDir, x.c.ticketId)
+    await writeBindingRecord(x.stateDir, x.c, { execution: { kind: 'foreground', exitCode: 0, toolCallId: records[0]!.callId } })
+    const result = await bindingVerifier(x.stateDir, snapshotOf(nativeEvents(records, x.c)))(x.c, ready(x.r.dir))
+    expect(result).toMatchObject({ ok: false, reason: expect.stringContaining('outer hephi_check call id') })
+    expect((await lastDecision(x.stateDir, x.c.ticketId)).rule).toBe('ready.binding-record')
+  })
+
+  it('B-1: a record whose inner call id has no native Session tool/call is denied', async () => {
+    // setup() runs both frozen checks; the Session below keeps only the build execution.
+    const x = await setup(); await x.execute('build'); await x.execute('unit')
+    const records = await readRuns(x.stateDir, x.c.ticketId)
+    const build = records.find(record => record.checkId === 'build')!
+    await writeBindingRecord(x.stateDir, x.c, { execution: { kind: 'foreground', exitCode: 0, toolCallId: build.innerCallId } })
+    const result = await bindingVerifier(x.stateDir, snapshotOf(nativeEvents([build], x.c)))(x.c, ready(x.r.dir))
+    // A1-BIND refuses the missing native call before the B2 gate can be reached; still a deny.
+    expect(result.ok).toBe(false)
+    expect((result as { reason: string }).reason).toContain('no native evidence')
+  })
+
+  it('B-2: a promoted record against a background native result is denied', async () => {
+    const { x, c, record, jobOutput } = await backgroundFixture()
+    const events = [callEvent(record, c, 0), resultEvent(record, 1, backgroundValue())]
+    const jobs = fakeJobs({
+      views: { 'job-1': { status: 'completed', detail: 'exit code: 0' } },
+      reads: { 'job-1': { chunks: [{ at: 0, text: jobOutput }], lossy: false } },
+    })
+    await writeBindingRecord(x.stateDir, c, { execution: { kind: 'promoted', jobId: 'job-1', toolCallId: record.innerCallId } })
+    const result = await bindingVerifier(x.stateDir, snapshotOf(events), jobs)(c, ready(x.r.dir))
+    expect(result).toMatchObject({ ok: false, reason: expect.stringContaining('disagrees with the native Session result kind') })
+    expect((await lastDecision(x.stateDir, c.ticketId)).rule).toBe('ready.binding-record')
+  })
+
+  it('B-2: a background record against a promoted native result is denied', async () => {
+    const { x, c, record, jobOutput } = await backgroundFixture()
+    const events = [callEvent(record, c, 0), resultEvent(record, 1, { kind: 'promoted', jobId: 'job-1' })]
+    const jobs = fakeJobs({
+      views: { 'job-1': { status: 'completed', detail: 'exit code: 0' } },
+      reads: { 'job-1': { chunks: [{ at: 0, text: jobOutput }], lossy: false } },
+    })
+    await writeBindingRecord(x.stateDir, c, { execution: { kind: 'background', jobId: 'job-1', toolCallId: record.innerCallId } })
+    const result = await bindingVerifier(x.stateDir, snapshotOf(events), jobs)(c, ready(x.r.dir))
+    expect(result).toMatchObject({ ok: false, reason: expect.stringContaining('disagrees with the native Session result kind') })
+    expect((await lastDecision(x.stateDir, c.ticketId)).rule).toBe('ready.binding-record')
+  })
+})
+
+// ---------------------------------------------------------------------------------------
 // Path B: the historical real-host shape (A2 Round 2 observations). The internal dispatch
 // leaves job/registered (toolCall.callId=innerCallId, rootCallId=outer) and job/settled
 // (textual `exit code: N`) but no tool/call, tool/result or structured message.value.
@@ -726,8 +778,14 @@ describe('A1-BIND path B: job/registered + job/settled evidence', () => {
       views: { 'job-1': { status: 'completed', detail: 'exit code: 0' } },
       reads: { 'job-1': { chunks: [{ at: 0, text: jobOutput }], lossy: false } },
     })
+    const snapshot = snapshotOf(events)
+    // A1-BIND still binds the real-host path-B execution.
+    expect(await sessionBindingProblem(snapshot, 'worker-session', c, record, { stateDir: x.stateDir, workspace: x.r.dir, jobs })).toBeUndefined()
     await writeBindingRecord(x.stateDir, c, { execution: { kind: 'background', jobId: 'job-1', toolCallId: record.innerCallId } })
-    expect(await bindingVerifier(x.stateDir, snapshotOf(events), jobs)(c, ready(x.r.dir))).toEqual({ ok: true })
+    // B2 (Kimi B-2): path-B job events cannot prove background vs promoted, so a binding-on
+    // ready report is fail-closed instead of merging the two kinds.
+    expect(await bindingVerifier(x.stateDir, snapshot, jobs)(c, ready(x.r.dir)))
+      .toMatchObject({ ok: false, reason: expect.stringContaining('native Session result kind') })
   })
 
   it('U-BIND-J2: a Job whose raw arguments carry a matching workdir also binds', async () => {
@@ -737,8 +795,11 @@ describe('A1-BIND path B: job/registered + job/settled evidence', () => {
       views: { 'job-1': { status: 'completed', detail: 'exit code: 0' } },
       reads: { 'job-1': { chunks: [{ at: 0, text: jobOutput }], lossy: false } },
     })
+    const snapshot = snapshotOf(events)
+    expect(await sessionBindingProblem(snapshot, 'worker-session', c, record, { stateDir: x.stateDir, workspace: x.r.dir, jobs })).toBeUndefined()
     await writeBindingRecord(x.stateDir, c, { execution: { kind: 'background', jobId: 'job-1', toolCallId: record.innerCallId } })
-    expect(await bindingVerifier(x.stateDir, snapshotOf(events), jobs)(c, ready(x.r.dir))).toEqual({ ok: true })
+    expect(await bindingVerifier(x.stateDir, snapshot, jobs)(c, ready(x.r.dir)))
+      .toMatchObject({ ok: false, reason: expect.stringContaining('native Session result kind') })
   })
 
   it('U-BIND-J3: a Job id in the Session events that differs from the record is rejected', async () => {
