@@ -293,3 +293,28 @@ Teammate subagent 模型路由失败，Lead 直接执行全部 5 条加固。com
 | **23c3d67** | **GPT 5 条加固** |
 
 经验层 exp-064~080，validate-log OK 83 行。
+
+## 2026-11-12 B 线推进（用户授权额度不限）
+
+### Dubbo 检查配置落地（task-48, e92a82e）
+- `hephi/docs/project-config/dubbo-checks.json`：5 项检查，2 required（compile-core + unit-core，实测通过），3 pending（static/full-compile/full-regression，required=false，command=PENDING_OWNER_APPROVAL）
+- `hephi/docs/project-config.md`：追加 Dubbo 段
+- 负向验证：fail-closed exit 1 ✅
+- 未做：正向 prepare、依赖预热、base commit 指定
+
+### B0/T02 单次真实计量（task-47, ecb022f）
+- 数据来源：Issue #23 / ticket b17434f7 / PR #24（T10 重跑交付）
+- **62,787 tokens**（input 45,175 + output 17,612）+ 1,918,080 cache read
+- 墙钟：**2 分 31 秒**
+- 终态：ready.pass → PR #24 OPEN
+- Decisions 链：13 条（含 4 条真实 deny）
+
+### ⚠️ SA 新进程 bug（已登记）
+3085 重启后（pid 76945/88527），新 Issue（#25/#26/g1-at81#6）均无法被 SA 接单：
+- trigger 表有记录，但 disposition/ticket 未生成
+- thread subscriptions=[]
+- 旧进程（pid 33924）下创建的 Issue 正常处理
+- **影响**：T02 只能用已有交付数据；后续 T10 重跑需先修复此 bug
+
+### B3 预算建议
+基于 T02 实测：单父任务 62.8K tokens / 2.5 min。B3 探查（12 任务）建议暂定 50 元（与 D-6 一致）。
