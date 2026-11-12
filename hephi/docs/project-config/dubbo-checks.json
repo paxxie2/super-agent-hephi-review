@@ -6,7 +6,15 @@
       "kind": "build",
       "purpose": "dubbo-common scope offline compile (verified P10)",
       "command": "mvn",
-      "args": ["-o", "-B", "-pl", "dubbo-common", "-am", "-DskipTests", "compile"],
+      "args": [
+        "-o",
+        "-B",
+        "-pl",
+        "dubbo-common",
+        "-am",
+        "-DskipTests",
+        "compile"
+      ],
       "cwd": ".",
       "required": true,
       "timeoutMs": 60000
@@ -14,9 +22,16 @@
     {
       "id": "dubbo-unit-core",
       "kind": "test",
-      "purpose": "dubbo-common unit tests (verified P10: 37 tests/0 failures)",
+      "purpose": "dubbo-common unit tests including JavaBeanSerializeUtil null-key fix",
       "command": "mvn",
-      "args": ["-o", "-B", "-pl", "dubbo-common", "-Dtest=StringUtilsTest", "test"],
+      "args": [
+        "-o",
+        "-B",
+        "-pl",
+        "dubbo-common",
+        "-Dtest=JavaBeanSerializeUtilTest,StringUtilsTest",
+        "test"
+      ],
       "cwd": ".",
       "required": true,
       "timeoutMs": 120000

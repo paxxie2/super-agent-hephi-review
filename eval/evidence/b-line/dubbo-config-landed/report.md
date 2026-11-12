@@ -53,3 +53,42 @@ $ echo $?
 - P10 实测：`eval/B7-data.md:21`
 - fail-closed 语义：`hephi/scripts/prepare-dubbo.sh:34-35`
 - checks schema：`hephi/src/contracts/checks.ts:12-25`
+
+## 7. 正向 prepare 验证（2026-11-12 补充）
+
+### 选定父任务
+- commit: `c41d01bba05d93321cc55662da2cc1140d9e6783`（Fix JavaBeanSerializeUtil serialization of maps with null keys）
+- baseSha: `7ca3e29f4b48544b24fdfff6ccb9bc1b81132d44`
+- 模块: dubbo-common
+- diff: 2 files, +25/-1
+- Issue: paxxie2/dubbo#67（[native] 标记 + hephi/delivery label）
+
+### 运行命令
+```bash
+HEPHI_GH_CLI=/Users/zm/.local/bin/gh-agent \
+HEPHI_SOURCE_REPO=/Users/zm/workspace/app/dubbo \
+HEPHI_ALLOWED_PATHS='["dubbo-common/**"]' \
+HEPHI_VERIFICATION_FILE=hephi/docs/project-config/dubbo-checks.json \
+DSH_SUPERAGENT_GITHUB_REPOSITORY=paxxie2/dubbo \
+DSH_SUPERAGENT_NAME=dubbo-null-key-fix \
+HEPHI_STATE_DIR=/tmp/hephi-prepare-test \
+DSH_SUPERAGENT_GITHUB_NUMBER=67 \
+DSH_SUPERAGENT_DIR=/tmp/dubbo-prepare-workspace \
+DSH_SUPERAGENT_TICKET=dubbo-null-key-fix-67 \
+bash hephi/scripts/prepare-dubbo.sh
+```
+
+### 结果
+- exit 0 ✅
+- activation.json 写入 `/tmp/hephi-prepare-test/hephi/dubbo-null-key-fix-67/activation.json`
+- pluginCommit: ab5f527（与 3085 实载一致）
+- baseSha: 7ca3e29f4b48（正确）
+- 5 项检查全部冻结进合同（dubbo-compile-core build required、dubbo-unit-core test required、3 optional）
+
+### 结论
+Dubbo 检查配置**正向 prepare 验证通过**。配置文件可被 prepare-dubbo.sh 正确读取、解析并冻结进合同。fail-closed 负向验证（§4）+ 正向验证均通过。
+
+### 未做
+- Worker 实际执行检查（需 SA 接单 + Dubbo 仓写权限）
+- ~/.m2 依赖预热（全仓构建前置）
+- B3 正式探查运行
