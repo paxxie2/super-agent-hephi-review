@@ -265,3 +265,31 @@ hephi 消费器与 PR#5 的 B2 schema 已对齐：最小必填 = 四元核心（
 
 ### 经验层
 exp-064~076（含勘误），validate-log OK 78 行。
+
+## 2026-11-12 GPT 非阻断建议加固（task-44/45/46，Lead 直接执行）
+
+Teammate subagent 模型路由失败，Lead 直接执行全部 5 条加固。commit `23c3d67`（5 files +99/-37）。
+
+| 建议 | 修复 | 验证 |
+|---|---|---|
+| ① planWidthOf 异常无隔离 | evidence-verifier.ts 加 try/catch 包裹 plan.width 记录 | 全量 708 green |
+| ② binding off 未证明零读取 | vi.spyOn(readBindingRecord) 断言调用次数=0；三路径放坏记录 | 新测试 pass |
+| ③ warnings 被丢弃 | bindingRecordDenial 返回 warnings → decisions.jsonl binding-record.warnings allow 行 | DecisionLogInput 新增 warnings 字段 |
+| ④ readyRule rate-limit 误分类 | 结构化前缀匹配提到 rate-limit 之前 | reason 含 "rate limit" 路径仍返回 ready.binding-record |
+| ⑤ fixture kind 统一推断 background | harness.ts/fixtures.ts 新增 overrideKind 参数 | 支持 promoted/background 精确指定 |
+
+**全量回归**：干净 worktree @23c3d67 → **708 passed / 1 skipped**（基线 706→708，+2 新测试）。
+
+### hephi 侧能力批次最终状态
+
+| 提交 | 内容 |
+|---|---|
+| f901a74 | h2Ring 全量统计 |
+| bfbc5e7 | 增量 diff + 计划宽度 |
+| 89ee7aa | 四元绑定消费器 |
+| e1c730d | T10 新代码复现 |
+| 7bc88f6 | GPT-B3 exitCode null |
+| 5c216a9 | Kimi/GPT B-1/B-2 innerCallId+kind |
+| **23c3d67** | **GPT 5 条加固** |
+
+经验层 exp-064~080，validate-log OK 83 行。
