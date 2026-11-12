@@ -14,7 +14,7 @@
 | Cache read tokens | 1,918,080 |
 | Cache write tokens | 0 |
 | **Total tokens (input+output)** | **62,787** |
-| **Total tokens (含 cache read)** | **1,980,867** |
+| **Total tokens (含 cache read，历史统计同口径)** | **1,980,867** |
 | 墙钟时间 | 2 分 31 秒（22:20:05Z → 22:22:36Z） |
 | 终态 | ready.pass → PR #24 OPEN |
 | Decisions 链 | plan.recorded → scope.allowed(write) → asset.unauthorized-modify(deny×2) → scope.allowed(write×2) → check.blocked(red) → scope.allowed(edit×2) → scope.outside-task(deny) → check.pass(×2) → ready.pass |
@@ -56,3 +56,14 @@
 - 审查/人工时间：本次为 0，复杂任务需补采
 - 实付金额：需 LLM provider 账单 API（未接入）
 - 多轮重投成本：本次无重投
+
+## 6. 口径更正与状态声明（2026-11-12 负责人核对后补充）
+
+**T02 状态：真实交付的用量已提取，但 T02 未完整通过。**
+
+- 62,787 是 input + output tokens；按历史统计同一口径（计入 cache read），本次交付总消耗为 **1,980,867 tokens**。
+- 数据来自旧进程（pid 33924）上的真实交付 Issue #23，直接解析单个 Session 的 usage 字段。
+- **尚无采集器对账**：未用独立采集器按父任务汇总并与原始 usage 交叉验证。
+- **无实付账单**：未接入 LLM provider 计费 API，无法确认实际费用。
+- 因此不能据此认定"T02 完整通过"或"50 元足够"。本报告的定位是**单次真实交付的用量提取记录**，为 B3 预算估算提供参照点，不是 T02 验收证据。
+- T02 完整通过需要：采集器离线验证 → 一次获预算的真实运行 → 采集器 vs 原始 usage 对账 → 实付金额核对。当前仅完成第一步的数据提取。
