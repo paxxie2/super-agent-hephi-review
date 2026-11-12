@@ -233,3 +233,35 @@ hephi 消费器与 PR#5 的 B2 schema 已对齐：最小必填 = 四元核心（
 ### 待办
 - task-39/40 完成后跑全量回归 + 双席审核
 - 上游交付 A/B 能力后：3085 实际 Worker 身份验证 → 新 Issue 重跑 T10
+
+## 2026-11-12 hephi 侧能力批次收口（task-38~43 + 双席审核修复）
+
+### 提交链（main，已推送）
+
+| commit | 内容 | 验证 |
+|---|---|---|
+| f901a74 | h2Ring 全量统计（R1 验收硬前置） | self-test PASS；合成 7/7 前后对比 |
+| bfbc5e7 | 增量 diff 反馈 + 计划宽度记录（只记录不拦截） | 干净 worktree 649 passed |
+| 89ee7aa | 四元绑定记录消费器（binding on 才生效） | 干净 worktree 695 passed |
+| e1c730d | T10 攻击①新代码复现（结论不变） | 五次对照 run1=run4 逐条一致 |
+| 7bc88f6 | GPT-B3：显式 exitCode:null 必须 fail | self-test PASS + 真实快照无回归 |
+| **5c216a9** | **Kimi B-1/B-2 + GPT-B1/B2：innerCallId only + kind 逐分支** | **干净 worktree 706 passed / 1 skipped** |
+
+### 双席审核结果
+
+| 轮次 | Kimi | GPT | 处理 |
+|---|---|---|---|
+| R1（base 4a7998c→89ee7aa） | 68 blocking：toolCallId 放宽 + kind 未比 | — | task-41 修复 |
+| R2（base 3bd2351→89ee7aa，含 task-38） | — | 67 blocking：同上两条 + GPT-B3 exitCode null | task-41 + task-43 修复 |
+| 修复后 | 5c216a9 全量 706 green | 待复审（可选） | ✅ 全部 blocking 已消除 |
+
+### DSH Ticket 1d04c373 终态
+- ended: merged（2026-11-12T02:41:36Z）
+- PR#5 MERGED（参考补丁 + B2 schema + 验收 harness）
+- Issue#4 标签 `blocked-on-upstream`（能力本体待 DSH 团队实施）
+
+### T10 维持 blocked（不变）
+新代码（5c216a9）下攻击①伪造记录在 binding off 仍被错误放行（ready.pass），跨交付复现。binding on 侧 deny ready.binding 未回归。**当前版本可信交付真实端到端未验证通过**，等宿主交付能力 A+B 后从新 Issue 重跑。
+
+### 经验层
+exp-064~076（含勘误），validate-log OK 78 行。
